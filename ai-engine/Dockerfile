@@ -18,7 +18,10 @@ COPY alembic.ini /code/alembic.ini
 COPY alembic /code/alembic
 COPY docker-entrypoint.sh /code/docker-entrypoint.sh
 
-RUN mkdir -p /data/storage /data/models /data/datasets
+# Compose mounts the datasets and model-cache volumes here (STORAGE_PATH and
+# MODEL_PATH both resolve under /code). They are created in the image so the
+# container also works standalone, without a volume.
+RUN mkdir -p /code/data/datasets /code/data/models
 
 EXPOSE 8000
 

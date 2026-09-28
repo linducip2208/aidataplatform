@@ -1,10 +1,15 @@
-# Docker build context exclusions for the laravel service.
-# docker-compose.yml builds the laravel image with `context: ./application`,
-# so Docker reads THIS file, not the root .dockerignore. Keep both in sync.
+# Exclusions for a build whose context is this directory.
+#
+# NOTE: docker-compose.yml and .github/workflows/docker.yml both build the
+# laravel image with the REPO ROOT as context, because
+# infrastructure/docker/laravel.Dockerfile COPYs `application/...`. Docker
+# therefore reads the ROOT .dockerignore, not this file. It is kept for anyone
+# building with `docker build .` from inside application/; the root file must
+# carry the application/ entries too.
 #
 # The Laravel image installs its own dependencies (composer install in
 # infrastructure/docker/laravel.Dockerfile), so host copies of vendor/ and
-# node_modules/ must stay out of the context.
+# node_modules/ must stay out of the context either way.
 .git/
 .gitignore
 .github/

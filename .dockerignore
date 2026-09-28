@@ -1,11 +1,10 @@
 # Docker build context exclusions for the ROOT context.
 #
-# Only builds whose context is the repository root use this file
-# (.github/workflows/docker.yml builds the Laravel image with `context: .`).
-# Services built with a narrower context use their own .dockerignore:
-#   - laravel         context ./application  -> application/.dockerignore
-#   - fastapi/celery  context ./ai-engine    -> ai-engine/.dockerignore
-# Keep the vendor/node_modules entries below in sync with those files.
+# The laravel image is built with the repository root as context, because
+# infrastructure/docker/laravel.Dockerfile COPYs `application/...`; the
+# application/ entries below are what that build actually needs excluded.
+# fastapi/celery are built with the narrower `./ai-engine` context and use
+# ai-engine/.dockerignore instead.
 .git/
 .github/
 docs/
@@ -21,8 +20,9 @@ datasets/
 models/
 data/
 
-# Laravel build (root context only — the application/ mirror lives in
-# application/.dockerignore)
+# Laravel build. The image runs `composer install` and builds its own Vite
+# assets, so host copies of vendor/, node_modules/ and public/build must stay
+# out of the root context.
 application/vendor/
 application/node_modules/
 application/public/build/
