@@ -1,0 +1,58 @@
+name: Python AI Engine CI
+
+on:
+  push:
+    paths: ["ai-engine/**", ".github/workflows/python.yml"]
+  pull_request:
+    paths: ["ai-engine/**"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ai-engine
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_DB: aidata_test
+          POSTGRES_USER: aidata
+          POSTGRES_PASSWORD: test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd="pg_isready -U aidata -d aidata_test"
+          --health-interval=10s --health-timeout=5s --health-retries=5
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=10s --health-timeout=5s --health-retries=5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: ai-engine/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio ruff || true
+
+      - name: Lint (ruff, non-blocking)
+        run: ruff check app || echo "ruff warnings (non-blocking)"
+
+      - name: Test (pytest)
+        env:
+          DATABASE_URL: postgresql+asyncpg://aidata:test@localhost:5432/aidata_test
+          REDIS_URL: redis://localhost:6379/0
+          CELERY_BROKER_URL: redis://localhost:6379/1
+          SERVICE_API_KEY: ci-test-key
+          LLM_PROVIDER: openrouter
+        run: pytest -q

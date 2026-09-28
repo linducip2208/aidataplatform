@@ -1,0 +1,45 @@
+name: Laravel CI
+
+on:
+  push:
+    paths: ["application/**", ".github/workflows/laravel.yml"]
+  pull_request:
+    paths: ["application/**"]
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        php: ["8.3", "8.4"]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: application
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP ${{ matrix.php }}
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: pdo_pgsql, pgsql, redis, zip, gd, intl, bcmath
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Prepare env (sqlite for CI)
+        run: |
+          cp .env.example .env || cp ../.env.example .env || touch .env
+          php artisan key:generate || true
+          echo "DB_CONNECTION=sqlite" >> .env
+          echo "DB_DATABASE=:memory:" >> .env
+          echo "CACHE_STORE=array" >> .env
+          echo "SESSION_DRIVER=array" >> .env
+          echo "QUEUE_CONNECTION=sync" >> .env
+
+      - name: Migrate (sqlite)
+        run: php artisan migrate --force
+
+      - name: Test (Pest/PHPUnit)
+        run: php artisan test --parallel || ./vendor/bin/phpunit

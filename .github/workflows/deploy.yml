@@ -1,0 +1,34 @@
+name: Manual Deploy (SSH template)
+
+# Manual production deploy over SSH. No hardcoded hosts/secrets — all via GitHub Secrets.
+# Required secrets: SSH_HOST, SSH_USER, SSH_KEY, APP_DIR (e.g. /opt/aidataplatform).
+# Optional: DOMAIN (for TLS hint passthrough).
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to deploy (branch/tag/sha)
+        required: false
+        default: main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script: |
+            set -euo pipefail
+            cd "${{ secrets.APP_DIR }}"
+            git fetch --all
+            git checkout "${{ inputs.ref }}"
+            git pull --ff-only
+            docker compose up -d --build
+            docker compose exec -T laravel php artisan migrate --force
+            bash infrastructure/scripts/healthcheck.sh
+            docker compose ps

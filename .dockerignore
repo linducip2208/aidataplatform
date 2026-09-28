@@ -1,0 +1,31 @@
+# Docker build context exclusions (root + per-service builds)
+.git/
+.github/
+docs/
+tests/
+backups/
+*.md
+.env
+.env.example
+.gitignore
+grafana-data/
+pgdata/
+datasets/
+models/
+data/
+
+# Laravel build
+application/vendor/
+application/node_modules/
+application/storage/logs/*
+application/storage/framework/cache/*
+application/storage/framework/sessions/*
+application/storage/framework/views/*
+
+# Python build
+ai-engine/.venv/
+ai-engine/venv/
+ai-engine/__pycache__/
+ai-engine/.pytest_cache/
+ai-engine/.ruff_cache/
+ai-engine/htmlcov/

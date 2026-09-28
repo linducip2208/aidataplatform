@@ -1,0 +1,78 @@
+{
+  "title": "AIDataPlatform Overview",
+  "uid": "aidata-overview",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "API Request Latency p95 (fastapi)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"fastapi\"}[5m])) by (le, route))",
+          "legendFormat": "{{route}}"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 }
+    },
+    {
+      "id": 2,
+      "title": "Celery Queue Depth (imports/quality/ml/agent/rag)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "celery_queue_length{queue=~\"imports|quality|ml|agent|rag|default\"}",
+          "legendFormat": "{{queue}}"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 }
+    },
+    {
+      "id": 3,
+      "title": "Import Jobs by Status (5m rate)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum by (status) (rate(import_jobs_total{job=\"fastapi\"}[5m]))",
+          "legendFormat": "{{status}}"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 }
+    },
+    {
+      "id": 4,
+      "title": "ML Training Jobs by Status (5m rate)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum by (status) (rate(ml_jobs_total{job=\"fastapi\"}[5m]))",
+          "legendFormat": "{{status}}"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 }
+    },
+    {
+      "id": 5,
+      "title": "Quality Score Avg (warehouse)",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "targets": [{ "expr": "avg(quality_score{job=\"fastapi\"})" }],
+      "gridPos": { "x": 0, "y": 16, "w": 6, "h": 6 }
+    },
+    {
+      "id": 6,
+      "title": "RAG Queries (5m rate)",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "targets": [{ "expr": "sum(rate(rag_queries_total{job=\"fastapi\"}[5m]))" }],
+      "gridPos": { "x": 6, "y": 16, "w": 6, "h": 6 }
+    }
+  ]
+}

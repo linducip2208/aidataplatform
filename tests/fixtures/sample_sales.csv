@@ -1,0 +1,21 @@
+date,customer,product,qty,amount
+2026-01-05,Acme Corp,Widget A,10,250.00
+2026-01-06,Acme Corp,Widget B,5,175.50
+2026-01-07,Globex Inc,Widget A,7,175.00
+2026-01-08,Initech LLC,Gadget X,3,299.97
+2026-01-09,Umbrella Co,Widget A,12,300.00
+2026-01-12,Acme Corp,Gadget X,2,199.98
+2026-01-13,Globex Inc,Widget B,8,280.80
+2026-01-14,Initech LLC,Widget A,4,100.00
+2026-01-15,Umbrella Co,Gadget X,1,99.99
+2026-01-16,Acme Corp,Widget A,6,150.00
+2026-01-19,Globex Inc,Gadget X,5,499.95
+2026-01-20,Initech LLC,Widget B,9,315.90
+2026-01-21,Umbrella Co,Widget B,2,70.20
+2026-01-22,Acme Corp,Gadget X,4,399.96
+2026-01-23,Globex Inc,Widget A,11,275.00
+2026-01-26,Initech LLC,Gadget X,6,599.94
+2026-01-27,Umbrella Co,Widget A,3,75.00
+2026-01-28,Acme Corp,Widget B,7,245.70
+2026-01-29,Globex Inc,Widget B,4,140.40
+2026-01-30,Initech LLC,Widget A,8,200.00

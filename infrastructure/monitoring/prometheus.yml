@@ -1,0 +1,43 @@
+# AIDataPlatform Prometheus scrape config
+global:
+  scrape_interval: ${PROMETHEUS_SCRAPE_INTERVAL:-15s}
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: fastapi
+    static_configs:
+      - targets: ["fastapi:8000"]
+    metrics_path: /metrics
+    scrape_interval: 15s
+
+  - job_name: laravel
+    static_configs:
+      - targets: ["laravel:8000"]
+    metrics_path: /metrics
+    scrape_interval: 30s
+    # Laravel exposes /metrics only if promphp/prometheus_client_php (or equivalent)
+    # is installed in application/. If absent, this target will show DOWN — expected
+    # until the exporter route is added. See docs/monitoring.md.
+
+  - job_name: redis
+    static_configs:
+      - targets: ["redis-exporter:9121"]
+    scrape_interval: 15s
+    # redis-exporter is OPTIONAL (not in base compose). Enable via:
+    #   docker run -d --network aidata-appnet --name redis-exporter \
+    #     -e REDIS_ADDR=redis://redis:6379 oliver006/redis_exporter
+    # Until then this target is DOWN — safe to ignore. See docs/monitoring.md.
+
+  - job_name: postgres
+    static_configs:
+      - targets: ["postgres-exporter:9187"]
+    scrape_interval: 30s
+    # postgres-exporter is OPTIONAL (not in base compose). Enable via:
+    #   docker run -d --network aidata-appnet --name postgres-exporter \
+    #     -e DATA_SOURCE_NAME="postgresql://aidata:${POSTGRES_PASSWORD}@postgres:5432/aidata?sslmode=disable" \
+    #     prometheuscommunity/postgres-exporter
+    # Until then this target is DOWN — safe to ignore.
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
