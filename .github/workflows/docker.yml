@@ -36,10 +36,10 @@ jobs:
     timeout-minutes: 40
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       # context: . (repo root) is required, not a stylistic choice.
       # infrastructure/docker/laravel.Dockerfile COPYs "application/composer.json"
@@ -48,7 +48,7 @@ jobs:
       # for application/application/composer.json and fail. The root .dockerignore
       # is written for this root context.
       - name: Build Laravel image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./infrastructure/docker/laravel.Dockerfile
@@ -64,7 +64,7 @@ jobs:
       # Every COPY in ai-engine/Dockerfile (app, alembic.ini, alembic,
       # docker-entrypoint.sh) is relative to that context.
       - name: Build FastAPI image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ./ai-engine
           file: ./ai-engine/Dockerfile
@@ -77,13 +77,13 @@ jobs:
       # Lint is advisory on purpose: hadolint rules are not correctness bugs, and
       # a new rule release should not break main. Build failures above are fatal.
       - name: Hadolint (advisory)
-        uses: hadolint/hadolint-action@v3.1.0
+        uses: hadolint/hadolint-action@v3.5.0
         continue-on-error: true
         with:
           dockerfile: infrastructure/docker/laravel.Dockerfile
 
       - name: Hadolint FastAPI Dockerfile (advisory)
-        uses: hadolint/hadolint-action@v3.1.0
+        uses: hadolint/hadolint-action@v3.5.0
         continue-on-error: true
         with:
           dockerfile: ai-engine/Dockerfile
@@ -91,7 +91,7 @@ jobs:
       # Advisory: the vuln DB is fetched at run time, so network flakes here must
       # not masquerade as a broken build. Findings are reported either way.
       - name: Trivy scan Laravel image (advisory)
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@v0.36.0
         continue-on-error: true
         with:
           image-ref: aidata-laravel:${{ github.sha }}
@@ -100,7 +100,7 @@ jobs:
           ignore-unfixed: true
 
       - name: Trivy scan FastAPI image (advisory)
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@v0.36.0
         continue-on-error: true
         with:
           image-ref: aidata-fastapi:${{ github.sha }}
