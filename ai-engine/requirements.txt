@@ -45,7 +45,7 @@ lxml>=5.2
 filetype>=1.2
 
 scikit-learn>=1.4
-xgboost>=2.0
+xgboost>=3.4.1
 lightgbm>=4.3
 joblib>=1.4
 
