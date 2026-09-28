@@ -51,9 +51,23 @@ def profile_dataframe(df: pd.DataFrame, filename: str = "", size_bytes: int = 0)
 
 
 def preview_file(path: str | Path) -> Dict[str, Any]:
+    """Profile a file on disk. Returns the profile dict {filename, size_bytes,
+    row_count, column_count, columns, sample_rows, duplicate_count, warnings,
+    errors}. A missing or unreadable file yields a well-formed profile with the
+    reason in ``errors`` rather than raising out of the request handler."""
     p = Path(path)
-    size = p.stat().st_size if p.exists() else 0
-    df = read_full(p, limit_rows=min(50000, settings.chunk_rows * 3))
+    if not p.exists():
+        return {"filename": p.name, "size_bytes": 0, "row_count": 0, "column_count": 0,
+                "columns": [], "sample_rows": [], "duplicate_count": 0,
+                "warnings": [], "errors": [f"File not found: {p.name}"]}
+    try:
+        size = p.stat().st_size
+        df = read_full(p, limit_rows=min(50000, settings.chunk_rows * 3))
+    except Exception as exc:
+        return {"filename": p.name, "size_bytes": 0, "row_count": 0, "column_count": 0,
+                "columns": [], "sample_rows": [], "duplicate_count": 0,
+                "warnings": [],
+                "errors": [f"Could not read {p.name}: {type(exc).__name__}"]}
     # approximate full row count cheaply for csv
     row_count = len(df)
     if p.suffix.lower() == ".csv":

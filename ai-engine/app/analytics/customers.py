@@ -31,34 +31,51 @@ def _prep(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _quintile_score(s: pd.Series, reverse: bool = False) -> pd.Series:
+    """Return an int Series scored 1..5. NaN inputs collapse to the midpoint so a
+    rank never reaches `.astype(int)` as a float NaN."""
+    s = pd.to_numeric(s, errors="coerce").fillna(0)
     try:
         q = pd.qcut(s.rank(method="first"), 5, labels=[1, 2, 3, 4, 5])
         scores = q.astype(int)
     except Exception:
-        # fallback: rank-based linear scaling
-        r = s.rank(pct=True)
-        scores = (r * 5).clip(1, 5).round().astype(int)
+        # fallback: rank-based linear scaling (also covers <5 distinct values)
+        r = s.rank(pct=True).fillna(0)
+        scores = (r * 5).clip(1, 5).round().fillna(3).astype(int)
     if reverse:
         scores = 6 - scores
     return scores
 
 
 def rfm(df: pd.DataFrame, ref_date=None) -> List[Dict[str, Any]]:
+    """Return a list of {customer, recency_days, frequency, monetary, r_score,
+    f_score, m_score, segment} rows sorted by monetary desc. Empty input yields []."""
     d = _prep(df)
     if d.empty:
         return []
-    ref = pd.to_datetime(ref_date) if ref_date else (
-        d["transaction_date"].max() if "transaction_date" in d.columns else pd.Timestamp.now()
-    )
+    if "transaction_date" in d.columns:
+        # A row with an unparseable date cannot yield a recency; keeping it would
+        # make `int(NaN)` raise and 500 the whole RFM report.
+        d = d.dropna(subset=["transaction_date"]).copy()
+        if d.empty:
+            return []
+    if ref_date is not None:
+        ref = pd.to_datetime(ref_date, errors="coerce")
+        if pd.isna(ref):
+            ref = pd.Timestamp.now()
+    elif "transaction_date" in d.columns:
+        ref = d["transaction_date"].max()
+        if pd.isna(ref):
+            ref = pd.Timestamp.now()
+    else:
+        ref = pd.Timestamp.now()
+    if "transaction_date" not in d.columns:
+        d["transaction_date"] = ref
     g = d.groupby("customer_name").agg(
-        last=("transaction_date", "max") if "transaction_date" in d.columns else ("revenue", "size"),
+        last=("transaction_date", "max"),
         frequency=("revenue", "size"),
         monetary=("revenue", "sum"),
     )
-    if "transaction_date" in d.columns:
-        g["recency_days"] = (ref - g["last"]).dt.days.clip(lower=0)
-    else:
-        g["recency_days"] = 0
+    g["recency_days"] = (ref - g["last"]).dt.days.clip(lower=0).fillna(0).astype(int)
     g["r_score"] = _quintile_score(g["recency_days"], reverse=True)
     g["f_score"] = _quintile_score(g["frequency"])
     g["m_score"] = _quintile_score(g["monetary"])
@@ -86,14 +103,18 @@ def rfm(df: pd.DataFrame, ref_date=None) -> List[Dict[str, Any]]:
 
 
 def clv(df: pd.DataFrame) -> List[Dict[str, Any]]:
+    """Return the rfm() rows with an extra "clv" key. Empty input yields [].
+    CLV is a spend-frequency heuristic, not a discounted cash-flow projection."""
     rows = rfm(df)
     for r in rows:
-        # simple CLV = monetary * (frequency / max(1, recency_months+1))
+        # heuristic CLV: spend scaled up by observed order frequency
         r["clv"] = round(r["monetary"] * (1 + r["frequency"] / 10), 2)
     return rows
 
 
 def cohort_retention(df: pd.DataFrame) -> List[Dict[str, Any]]:
+    """Return a list of {cohort, period_offset, retention_pct, active_customers}
+    rows keyed on each customer's first purchase month. Empty/undated input yields []."""
     d = _prep(df)
     if d.empty or "transaction_date" not in d.columns:
         return []

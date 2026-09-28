@@ -7,6 +7,9 @@ import numpy as np
 import pandas as pd
 
 from app.core.config import settings
+from app.core.logging import get_logger
+
+log = get_logger("ingestion.quality", "quality")
 
 
 def _is_date_col(s: pd.Series) -> bool:
@@ -55,11 +58,20 @@ def run_quality_checks(df: pd.DataFrame, dataset_type: str = "sales") -> Dict[st
                                "sample_rows": num[num < 0].index[:5].tolist(),
                                "message": f"{neg} negative values in {col}"})
         if _is_date_col(s):
-            bad = int(pd.to_datetime(s, errors="coerce").isna().sum() - s.isna().sum())
+            parsed = pd.to_datetime(s, errors="coerce")
+            bad = int(parsed.isna().sum() - s.isna().sum())
             if bad > 0:
                 invalid += bad
                 issues.append({"rule": "invalid_date", "column": str(col), "count": bad,
                                "sample_rows": [], "message": f"{bad} invalid dates in {col}"})
+            elif len(s) and parsed.isna().all():
+                # Already all-null: parsed.isna() equals s.isna(), so the count
+                # above is 0. The column is unusable and the ETL will write NULL
+                # into every fact row, so it has to be reported explicitly.
+                invalid += int(len(s))
+                issues.append({"rule": "unparsable_date", "column": str(col),
+                               "count": int(len(s)), "sample_rows": [],
+                               "message": f"column {col} has no parseable date value"})
         if any(k in ln for k in ("price", "harga", "revenue", "amount", "cost", "total")):
             num = pd.to_numeric(s, errors="coerce")
             bad = int(num.isna().sum() - s.isna().sum())
@@ -109,6 +121,8 @@ def run_quality_checks(df: pd.DataFrame, dataset_type: str = "sales") -> Dict[st
 
 
 def persist_report(db_session, import_job_id: int | None, result: Dict[str, Any]):
+    """Write a quality report to data_quality_reports and return the row, or None
+    when there is no session or the write fails (logged, transaction rolled back)."""
     if db_session is None:
         return None
     try:
@@ -124,9 +138,11 @@ def persist_report(db_session, import_job_id: int | None, result: Dict[str, Any]
         db_session.commit()
         db_session.refresh(rep)
         return rep
-    except Exception:
+    except Exception as exc:
         try:
             db_session.rollback()
         except Exception:
             pass
+        log.error(f"quality report for import_job {import_job_id} not persisted "
+                  f"({type(exc).__name__})")
         return None

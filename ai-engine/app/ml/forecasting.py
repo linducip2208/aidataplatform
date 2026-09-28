@@ -82,7 +82,6 @@ def _gbm_forecast(s: pd.DataFrame, horizon: int) -> tuple[np.ndarray, str]:
         preds = []
         for h in range(1, horizon + 1):
             dt = last_date + pd.Timedelta(days=h)
-            row = {"transaction_date": dt, "revenue": history_y[-1]}
             fdf = sales_timeseries_features(
                 pd.DataFrame({"transaction_date": list(s["ds"]) + [dt],
                               "revenue": list(s["y"]) + [history_y[-1]]})
@@ -105,6 +104,8 @@ class SalesForecaster:
         self.model = None
 
     def fit(self, history: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Absorb ``history`` and estimate the residual spread used for the
+        prediction interval. Returns {"n_obs", "resid_std"}."""
         s = _daily_series(history)
         if len(s) >= 14:
             # in-sample residual estimate via baseline
@@ -117,6 +118,9 @@ class SalesForecaster:
         return {"n_obs": len(s), "resid_std": self.resid_std}
 
     def predict(self, horizon: int | None = None) -> List[Dict[str, Any]]:
+        """Return [{date, yhat, yhat_lower, yhat_upper}] for ``horizon`` days
+        ahead. Requires a prior :meth:`fit` or :meth:`load`; an empty series
+        yields an empty list rather than a run of fabricated zeros."""
         h = horizon or self.horizon
         s = getattr(self, "_series", pd.DataFrame(columns=["ds", "y"]))
         preds, method = _gbm_forecast(s, h)
@@ -132,6 +136,7 @@ class SalesForecaster:
         return out
 
     def save(self, path: str | Path) -> str:
+        """Persist the forecaster state to ``path`` as a joblib artifact."""
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
         joblib.dump({"method": self.method, "resid_std": self.resid_std,
@@ -141,27 +146,72 @@ class SalesForecaster:
 
     @classmethod
     def load(cls, path: str | Path) -> "SalesForecaster":
+        """Restore a forecaster from an artifact written by :meth:`save`.
+
+        Raises ``FileNotFoundError`` when the artifact is absent and
+        ``ValueError`` when it is unreadable or not a forecaster payload. Both
+        messages name the artifact so a caller surfaces a clear failure instead
+        of an opaque joblib/AttributeError traceback. Use :meth:`try_load` when
+        a missing artifact should degrade rather than fail.
+        """
+        p = Path(path)
+        if not p.is_file():
+            raise FileNotFoundError(f"Forecast artifact not found: {p}")
+        try:
+            data = joblib.load(p)
+        except Exception as exc:
+            raise ValueError(f"Forecast artifact is unreadable: {p} ({type(exc).__name__})") from exc
+        if not isinstance(data, dict) or "series" not in data:
+            raise ValueError(
+                f"Forecast artifact is not a SalesForecaster payload: {p}. "
+                "Retrain the model to produce a valid artifact."
+            )
         obj = cls()
-        data = joblib.load(path)
         obj.method = data.get("method", "baseline")
-        obj.resid_std = data.get("resid_std", 0.0)
-        recs = data.get("series", [])
-        s = pd.DataFrame(recs)
+        try:
+            obj.resid_std = float(data.get("resid_std", 0.0))
+        except (TypeError, ValueError):
+            obj.resid_std = 0.0
+        obj.resid_q = data.get("resid_q") or {}
+        recs = data.get("series") or []
+        s = pd.DataFrame(recs) if recs else pd.DataFrame(columns=["ds", "y"])
         if not s.empty and "ds" in s.columns:
-            s["ds"] = pd.to_datetime(s["ds"])
+            s["ds"] = pd.to_datetime(s["ds"], errors="coerce")
+            s = s.dropna(subset=["ds"])
+        if "y" not in s.columns and not s.empty:
+            s["y"] = 0.0
         obj._series = s
         return obj
 
+    @classmethod
+    def try_load(cls, path: str | Path) -> "SalesForecaster | None":
+        """Return the restored forecaster, or None when the artifact is missing
+        or unusable. Callers that must not fail a request should use this."""
+        try:
+            return cls.load(path)
+        except (FileNotFoundError, ValueError):
+            return None
+
 
 def forecast(history: List[Dict[str, Any]], horizon: int = 30) -> Dict[str, Any]:
+    """Forecast ``horizon`` days past the last observation in ``history``.
+
+    Returns ``{"forecast": [{date, yhat, yhat_lower, yhat_upper}, ...],
+    "method": str, "metrics": {...}}``. With no usable history the forecast list
+    is empty and ``method`` is ``"insufficient_data"`` — a zero-valued forecast
+    would be indistinguishable from a real forecast of zero revenue.
+    """
     fc = SalesForecaster(horizon=horizon)
     info = fc.fit(history)
+    s = _daily_series(history)
+    n_obs = int(len(s))
+    if n_obs == 0:
+        return {"forecast": [], "method": "insufficient_data",
+                "metrics": {"mae_baseline": 0.0, "n_obs": 0, "resid_std": 0.0,
+                            "reason": "no usable history points"}}
     preds = fc.predict(horizon)
     # naive metrics: in-sample MAE of baseline
-    s = _daily_series(history)
-    mae = 0.0
-    if len(s):
-        b = _baseline_forecast(s, len(s))
-        mae = float(np.mean(np.abs(s["y"].values - b[: len(s)])))
+    b = _baseline_forecast(s, len(s))
+    mae = float(np.mean(np.abs(s["y"].values - b[: len(s)])))
     return {"forecast": preds, "method": fc.method,
             "metrics": {"mae_baseline": round(mae, 2), **info}}

@@ -1,0 +1,359 @@
+@extends('layouts.app')
+
+@section('title', 'Analitik')
+
+@section('content')
+    @php
+        $branchOptions = collect($branches)->pluck('branch')->filter()->map(fn ($value): string => (string) $value);
+
+        // Keep the active filter selectable even when the engine is down and
+        // returns no branch list, otherwise a reload silently drops it.
+        if (filled($filters['branch'] ?? null)) {
+            $branchOptions = $branchOptions->push((string) $filters['branch']);
+        }
+
+        $branchOptions = $branchOptions->unique()->sort()->values();
+
+        $granularityOptions = [
+            'daily' => 'Harian',
+            'weekly' => 'Mingguan',
+            'monthly' => 'Bulanan',
+        ];
+        $rfmColumns = [
+            'customer' => 'Pelanggan',
+            'recency_days' => 'Recency (hari)',
+            'frequency' => 'Frequency',
+            'monetary' => 'Monetary',
+            'r_score' => 'Skor R',
+            'f_score' => 'Skor F',
+            'm_score' => 'Skor M',
+            'segment' => 'Segmen',
+        ];
+    @endphp
+
+    <div class="mb-6">
+        <h1 class="text-2xl font-semibold text-slate-900">Analitik</h1>
+        <p class="mt-1 text-sm text-slate-500">
+            Perbandingan cabang, segmentasi RFM, klasifikasi ABC, retensi cohort, dan ringkasan keuangan.
+        </p>
+    </div>
+
+    @unless ($engineAvailable)
+        <x-card class="mb-6">
+            <div role="status" class="flex flex-wrap items-center gap-2">
+                <x-badge variant="warning">Mesin AI tidak tersedia</x-badge>
+                <p class="text-sm text-slate-600">
+                    Data analitik belum dapat dihitung. Periksa layanan <code class="rounded bg-slate-100 px-1">fastapi</code>
+                    lalu muat ulang halaman ini.
+                </p>
+            </div>
+        </x-card>
+    @endunless
+
+    <x-card class="mb-6" title="Filter" description="Batasi hasil analitik berdasarkan periode, cabang, dan kategori.">
+        <form method="GET" action="{{ route('analytics.index') }}" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <x-field label="Tanggal mulai" for="date_from">
+                <input
+                    id="date_from"
+                    name="date_from"
+                    type="date"
+                    value="{{ $filters['date_from'] ?? '' }}"
+                    @error('date_from') aria-invalid="true" @enderror
+                    class="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                >
+            </x-field>
+
+            <x-field label="Tanggal akhir" for="date_to">
+                <input
+                    id="date_to"
+                    name="date_to"
+                    type="date"
+                    value="{{ $filters['date_to'] ?? '' }}"
+                    @error('date_to') aria-invalid="true" @enderror
+                    class="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                >
+            </x-field>
+
+            <x-field label="Cabang" for="branch" hint="Kosongkan untuk seluruh cabang.">
+                <select
+                    id="branch"
+                    name="branch"
+                    class="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                >
+                    <option value="">Semua cabang</option>
+                    @foreach ($branchOptions as $branch)
+                        <option value="{{ $branch }}" @selected(($filters['branch'] ?? '') === $branch)>{{ $branch }}</option>
+                    @endforeach
+                </select>
+            </x-field>
+
+            <x-field label="Kategori" for="category" hint="Kosongkan untuk seluruh kategori.">
+                <input
+                    id="category"
+                    name="category"
+                    type="text"
+                    value="{{ $filters['category'] ?? '' }}"
+                    placeholder="mis. Elektronik"
+                    @error('category') aria-invalid="true" @enderror
+                    class="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                >
+            </x-field>
+
+            <x-field label="Granularitas" for="granularity">
+                <select
+                    id="granularity"
+                    name="granularity"
+                    class="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                >
+                    @foreach ($granularityOptions as $value => $label)
+                        <option value="{{ $value }}" @selected(($filters['granularity'] ?? 'daily') === $value)>{{ $label }}</option>
+                    @endforeach
+                </select>
+            </x-field>
+
+            <div class="flex items-end gap-2">
+                <button
+                    type="submit"
+                    class="inline-flex flex-1 items-center justify-center rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                >Terapkan</button>
+                <a
+                    href="{{ route('analytics.index') }}"
+                    class="inline-flex items-center justify-center rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                >Reset</a>
+            </div>
+        </form>
+    </x-card>
+
+    <x-card class="mb-6" title="KPI periode" description="Ringkasan angka penjualan untuk filter yang dipilih.">
+        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <x-stat label="Pendapatan" :value="\Illuminate\Support\Number::currency((float) ($kpi['revenue'] ?? 0), in: 'idr', locale: 'id', precision: 0)" />
+            <x-stat label="Jumlah pesanan" :value="number_format((int) ($kpi['orders'] ?? 0))" />
+            <x-stat label="Unit terjual" :value="number_format((float) ($kpi['units'] ?? 0), 0, ',', '.')" />
+            <x-stat label="Nilai pesanan rata-rata" :value="\Illuminate\Support\Number::currency((float) ($kpi['aov'] ?? 0), in: 'idr', locale: 'id', precision: 0)" />
+            <x-stat
+                label="Pertumbuhan"
+                :value="\Illuminate\Support\Number::percentage((float) ($kpi['growth_pct'] ?? 0), precision: 1, locale: 'id')"
+                :hint="((float) ($kpi['growth_pct'] ?? 0)) >= 0 ? 'Naik dibanding periode sebelumnya' : 'Turun dibanding periode sebelumnya'"
+            />
+            <x-stat
+                label="Margin"
+                :value="\Illuminate\Support\Number::percentage((float) ($kpi['margin_pct'] ?? 0), precision: 1, locale: 'id')"
+                hint="Margin kotor periode berjalan"
+            />
+        </div>
+    </x-card>
+
+    <x-card class="mb-6" title="Tren penjualan" description="Pendapatan, pesanan, dan unit per periode.">
+        @if ($trend === [])
+            <x-empty-state
+                title="Belum ada data tren"
+                description="Tidak ada transaksi pada rentang tanggal yang dipilih. Longgarkan filter atau tambahkan dataset penjualan."
+            />
+        @else
+            <x-table-wrapper label="Tren penjualan">
+                <table class="app-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Periode</th>
+                            <th scope="col" class="text-right">Pendapatan</th>
+                            <th scope="col" class="text-right">Pesanan</th>
+                            <th scope="col" class="text-right">Unit</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach ($trend as $point)
+                            <tr>
+                                <td class="font-medium text-slate-900">{{ $point['period'] ?? 'Tidak diketahui' }}</td>
+                                <td class="text-right tabular-nums">{{ \Illuminate\Support\Number::currency((float) ($point['revenue'] ?? 0), in: 'idr', locale: 'id', precision: 0) }}</td>
+                                <td class="text-right tabular-nums">{{ number_format((int) ($point['orders'] ?? 0)) }}</td>
+                                <td class="text-right tabular-nums">{{ number_format((float) ($point['units'] ?? 0), 0, ',', '.') }}</td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </x-table-wrapper>
+        @endif
+    </x-card>
+
+    <div class="mb-6 grid gap-6 lg:grid-cols-2">
+        <x-card title="Kinerja cabang" description="Peringkat cabang berdasarkan pendapatan.">
+            @if ($branches === [])
+                <x-empty-state title="Belum ada data cabang" description="Data penjualan belum memuat informasi cabang." />
+            @else
+                <x-table-wrapper label="Kinerja cabang">
+                    <table class="app-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Cabang</th>
+                                <th scope="col" class="text-right">Pendapatan</th>
+                                <th scope="col" class="text-right">Pesanan</th>
+                                <th scope="col" class="text-right">Porsi</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach ($branches as $row)
+                                <tr>
+                                    <td class="font-medium text-slate-900">{{ $row['branch'] ?? 'Tidak diketahui' }}</td>
+                                    <td class="text-right tabular-nums">{{ \Illuminate\Support\Number::currency((float) ($row['revenue'] ?? 0), in: 'idr', locale: 'id', precision: 0) }}</td>
+                                    <td class="text-right tabular-nums">{{ number_format((int) ($row['orders'] ?? 0)) }}</td>
+                                    <td class="text-right tabular-nums">{{ \Illuminate\Support\Number::percentage((float) ($row['share_pct'] ?? 0), precision: 1, locale: 'id') }}</td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </x-table-wrapper>
+            @endif
+        </x-card>
+
+        <x-card title="Ringkasan keuangan" description="Pendapatan, beban pokok, dan laba bersih.">
+            @if ($finance === [])
+                <x-empty-state title="Belum ada data keuangan" description="Data keuangan belum tersedia dari mesin AI." />
+            @else
+                <dl class="space-y-3 text-sm">
+                    @foreach ($finance as $key => $value)
+                        @php $isMoney = ! in_array($key, ['margin_pct'], true); @endphp
+                        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2 last:border-b-0 last:pb-0">
+                            <dt class="font-medium text-slate-500">{{ \Illuminate\Support\Str::headline((string) $key) }}</dt>
+                            <dd class="tabular-nums text-slate-900">
+                                @if (is_bool($value))
+                                    {{ $value ? 'Ya' : 'Tidak' }}
+                                @elseif ($isMoney)
+                                    {{ \Illuminate\Support\Number::currency((float) $value, in: 'idr', locale: 'id', precision: 0) }}
+                                @else
+                                    {{ \Illuminate\Support\Number::percentage((float) $value, precision: 1, locale: 'id') }}
+                                @endif
+                            </dd>
+                        </div>
+                    @endforeach
+                </dl>
+            @endif
+        </x-card>
+    </div>
+
+    <x-card class="mb-6" title="Segmentasi RFM" description="Pelanggan berdasarkan recency, frequency, dan monetary.">
+        @if ($rfm === [])
+            <x-empty-state title="Belum ada data RFM" description="Segmentasi membutuhkan data transaksi pelanggan." />
+        @else
+            <x-table-wrapper label="Segmentasi RFM">
+                <table class="app-table">
+                    <thead>
+                        <tr>
+                            @foreach ($rfmColumns as $label)
+                                <th scope="col" @if (! in_array($label, ['Pelanggan', 'Segmen'], true)) class="text-right" @endif>{{ $label }}</th>
+                            @endforeach
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach ($rfm as $row)
+                            <tr>
+                                @foreach ($rfmColumns as $key => $label)
+                                    @php $value = $row[$key] ?? null; @endphp
+                                    <td @if (! in_array($label, ['Pelanggan', 'Segmen'], true)) class="text-right tabular-nums" @endif>
+                                        @if ($value === null || $value === '')
+                                            <span class="text-slate-400">—</span>
+                                        @elseif ($key === 'monetary')
+                                            {{ \Illuminate\Support\Number::currency((float) $value, in: 'idr', locale: 'id', precision: 0) }}
+                                        @else
+                                            {{ \Illuminate\Support\Str::limit((string) $value, 40) }}
+                                        @endif
+                                    </td>
+                                @endforeach
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </x-table-wrapper>
+        @endif
+    </x-card>
+
+    <x-card class="mb-6" title="Klasifikasi ABC" description="Kontribusi pendapatan per produk dengan akumulasi porsi.">
+        @if ($abc === [])
+            <x-empty-state title="Belum ada klasifikasi ABC" description="Data produk belum tersedia untuk diklasifikasikan." />
+        @else
+            <x-table-wrapper label="Klasifikasi ABC produk">
+                <table class="app-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Produk</th>
+                            <th scope="col" class="text-right">Pendapatan</th>
+                            <th scope="col" class="text-right">Porsi</th>
+                            <th scope="col" class="text-right">Kumulatif</th>
+                            <th scope="col">Grade</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach ($abc as $row)
+                            @php $grade = strtoupper((string) ($row['grade'] ?? 'C')); @endphp
+                            <tr>
+                                <td class="font-medium text-slate-900">{{ $row['product'] ?? 'Tidak diketahui' }}</td>
+                                <td class="text-right tabular-nums">{{ \Illuminate\Support\Number::currency((float) ($row['revenue'] ?? 0), in: 'idr', locale: 'id', precision: 0) }}</td>
+                                <td class="text-right tabular-nums">{{ \Illuminate\Support\Number::percentage((float) ($row['share_pct'] ?? 0), precision: 1, locale: 'id') }}</td>
+                                <td class="text-right tabular-nums">{{ \Illuminate\Support\Number::percentage((float) ($row['cumulative_pct'] ?? 0), precision: 1, locale: 'id') }}</td>
+                                <td>
+                                    <x-badge variant="{{ $grade === 'A' ? 'success' : ($grade === 'B' ? 'info' : 'neutral') }}">
+                                        Grade {{ $grade }}
+                                    </x-badge>
+                                </td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </x-table-wrapper>
+        @endif
+    </x-card>
+
+    <x-card title="Retensi cohort" description="Persentase pelanggan aktif pada setiap periode setelah cohort pertama.">
+        @php
+            $cohortPeriods = collect($cohort)->pluck('period_offset')->filter(fn ($value): bool => is_numeric($value))->map(fn ($value): int => (int) $value)->unique()->sort()->values();
+            $cohortNames = collect($cohort)->pluck('cohort')->filter()->unique()->values();
+        @endphp
+
+        @if ($cohort === [])
+            <x-empty-state title="Belum ada data cohort" description="Analisis cohort membutuhkan data pelanggan yang berulang." />
+        @else
+            <x-table-wrapper label="Retensi cohort">
+                <table class="app-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Cohort</th>
+                            @foreach ($cohortPeriods as $offset)
+                                <th scope="col" class="text-right">
+                                    {{ $offset === 0 ? 'Awal' : '+'.$offset }}
+                                </th>
+                            @endforeach
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach ($cohortNames as $name)
+                            <tr>
+                                <th scope="row" class="border-b border-slate-100 px-4 py-3 text-left align-middle text-sm font-medium text-slate-900">
+                                    {{ $name }}
+                                </th>
+                                @foreach ($cohortPeriods as $offset)
+                                    @php
+                                        $cell = collect($cohort)->first(
+                                            fn ($row): bool => ($row['cohort'] ?? null) === $name
+                                                && (int) ($row['period_offset'] ?? -1) === $offset
+                                        );
+                                    @endphp
+                                    <td class="text-right tabular-nums">
+                                        @if ($cell === null)
+                                            <span class="text-slate-400">—</span>
+                                        @else
+                                            <span class="font-medium text-slate-900">
+                                                {{ \Illuminate\Support\Number::percentage((float) ($cell['retention_pct'] ?? 0), precision: 1, locale: 'id') }}
+                                            </span>
+                                            <span class="mt-1 block text-xs text-slate-500">
+                                                {{ number_format((int) ($cell['active_customers'] ?? 0)) }} pelanggan
+                                            </span>
+                                        @endif
+                                    </td>
+                                @endforeach
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </x-table-wrapper>
+        @endif
+    </x-card>
+@endsection

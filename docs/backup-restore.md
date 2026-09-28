@@ -1,82 +1,169 @@
 # Backup & Restore
 
-Covers Postgres (all schemas) + pointers for file volumes. Test restores quarterly.
+Covers the PostgreSQL database, which holds every table both services own, plus the volumes
+that a dump cannot capture. Test restores quarterly — a backup never restored is assumed
+broken. See `deployment.md` for the production cron and `security.md` for at-rest encryption.
 
-## 1. Backup
+## 1. What a backup actually covers
+
+| Data | In the `pg_dump`? | Notes |
+|---|---|---|
+| Engine tables (`raw_uploads`, `import_jobs`, `fact_*`, `dim_*`, `ml_*`, `rag_*`, `ai_*`, `data_quality_reports`) | yes | `alembic`/`public` schema |
+| Laravel tables (`users`, `datasets`, `chat_*`, `audit_logs`, `sessions`, `cache`, `jobs`, `personal_access_tokens`) | yes | same database |
+| Uploaded files Laravel stored | **no** | `datasets-data` / `laravel-storage` volume |
+| The engine's own copy of each upload (`raw_uploads.stored_path`) | **no** | under the engine's `STORAGE_PATH` |
+| ML artifacts (`.joblib`) | **no** | under the engine's `MODEL_PATH` |
+
+`datasets.checksum_sha256` is in the dump, so a restore can be checked against the original
+files — but the files themselves need a volume snapshot (§5). The engine's
+`model_versions.artifact_path` points at files that also need snapshotting; without them the
+registry rows survive but every model becomes unloadable and churn inference answers
+`no production churn model`.
+
+## 2. Backup
 
 ```bash
 make backup
 # or: bash infrastructure/scripts/backup.sh
-# -> backups/aidata_YYYYmmdd_HHMMSS.sql.gz + .manifest.txt
 ```
 
-What it does: `pg_dump --clean --if-exists` via `postgres` container → gzip;
-manifest records `datasets-data` + `models-cache` sizes and container states.
-Retention: `BACKUP_RETENTION_DAYS=14` auto-prunes. Optional S3: set `BACKUP_S3_BUCKET`
-(+ `BACKUP_S3_PREFIX`, AWS keys) — script `aws s3 cp`s each dump. Cron in prod
-(02:00 daily, installed by `deploy-ubuntu24.sh`).
+Output, in `BACKUP_DIR` (default `./backups`):
 
-Volumes note: dumps cover the DB; `datasets-data` (original uploads) and
-`models-cache` (ML artifacts) are file data — snapshot them at host level
-(`docker run --volumes-from ... tar czf`) or rely on S3 copies of uploads.
+```
+backups/aidata_20260928_020000.sql.gz
+backups/aidata_20260928_020000.manifest.txt
+```
 
-## 2. Restore
+What the script does:
+
+1. Sources the root `.env` for `POSTGRES_USER` / `POSTGRES_DB` (only those two).
+2. `docker compose exec -T postgres pg_dump -U <user> -d <db> --clean --if-exists`, piped
+   through `gzip`. The dump includes the `CREATE EXTENSION` statements and the empty
+   `raw`/`staging`/`warehouse`/`analytics`/`ml`/`ai` schemas, so a restore into a fresh
+   database reproduces the full extension and schema state.
+3. Writes a manifest with the timestamp, `du -sh` of the Laravel datasets directory and the
+   engine models directory, and the state of every container.
+4. If `BACKUP_S3_BUCKET` is set, `aws s3 cp` the dump; a failure warns and continues, leaving
+   the local copy.
+5. Prunes local dumps and manifests older than `BACKUP_RETENTION_DAYS` (default 14).
+
+`deploy-ubuntu24.sh` installs the cron entry: `0 2 * * *` as the `aidata` user, writing to
+`$APP_DIR/backups/cron.log`, rotated by logrotate.
+
+Verify a backup immediately — the script does not:
 
 ```bash
-make restore FILE=backups/aidata_20260101_020000.sql.gz
-# or: bash infrastructure/scripts/restore.sh <file>
+ls -lh backups/
+gzip -t backups/aidata_20260928_020000.sql.gz && echo "gzip ok"
+zcat backups/aidata_20260928_020000.sql.gz | grep -c 'CREATE TABLE'
 ```
 
-Prompts for confirmation (overwrites `POSTGRES_DB`), pipes gunzip → `psql
--v ON_ERROR_STOP=1`, then reminds to run `healthcheck.sh` + `migrate --force`
-(restore may predate latest migration).
+## 3. Restore
 
-## 3. Disaster scenarios
+```bash
+make restore FILE=backups/aidata_20260928_020000.sql.gz
+# or: bash infrastructure/scripts/restore.sh backups/aidata_20260928_020000.sql.gz
+```
+
+The script resolves the path, checks it exists, sources `.env` for the database name, asks for
+confirmation (`y`), then pipes `gunzip -c` into
+`docker compose exec -T postgres psql -U <user> -d <db> -v ON_ERROR_STOP=1` in the live
+container. It restores over the running database — the `pg_dump --clean --if-exists` output
+drops and recreates the tables it knows about, so unrelated objects in the same database are
+left alone. `ON_ERROR_STOP=1` aborts on the first error, which means a partial restore is
+possible: check the psql output, not just the exit status.
+
+Afterwards, always re-run the migrations. A dump taken before a schema change will not have
+the new columns:
+
+```bash
+make migrate                              # artisan migrate --force + alembic upgrade head
+bash infrastructure/scripts/healthcheck.sh
+docker compose exec laravel php artisan platform:doctor
+bash tests/run.sh
+```
+
+Order matters for one table: `audit_logs` is declared by both migration systems, and Alembic
+skips a table that already exists (`data-dictionary.md` §7). If a restore leaves Laravel's
+`audit_logs` in place, the Laravel columns are already correct — verify rather than assume:
+
+```sql
+SELECT column_name FROM information_schema.columns
+WHERE table_name = 'audit_logs' ORDER BY ordinal_position;
+```
+
+`user_id`, `resource_id` and `ip` must be present, or `App\Models\AuditLog` writes will fail.
+
+## 4. Disaster scenarios
 
 | Loss | Recovery |
 |---|---|
-| Accidental table drop | restore dump to staging DB, `pg_dump -t <table>` → replay |
-| Full DB loss | `docker compose up -d postgres` → restore latest dump → migrate → healthcheck |
-| Uploads volume loss | re-upload sources (manifest lists sizes); warehouse rebuilds via re-ingest |
-| Model artifacts loss | retrain from `ml.experiments` params (registry rows survive in DB dump) |
+| One table dropped or corrupted | Restore the dump into a scratch database, then copy the table out: `pg_dump -t <table>` and replay it into production |
+| Whole database lost | `docker compose up -d postgres` → `restore.sh` with the newest dump → `make migrate` → `healthcheck.sh` → `tests/run.sh` |
+| `datasets-data` volume lost | The rows and checksums are in the dump, the files are not. Re-upload the sources: the ETL is idempotent per `import_job_id`, so re-committing an existing job id replaces its own fact rows instead of duplicating them |
+| Engine upload copies lost | Same as above; `raw_uploads.stored_path` will point at files that no longer exist, so re-upload rather than re-commit |
+| ML artifacts lost | Registry rows survive in the dump, artifacts do not. Retrain. `MODEL_PATH` defaults to `./models` inside the container, so confirm the files were on a mounted volume before assuming they are recoverable |
+| Password changed and `pgdata` still has the old one | The first-boot password is baked into the volume. `docker compose exec postgres psql -c "ALTER USER aidata PASSWORD 'new';"` and update `.env`. `docker compose down -v` does fix it and destroys all data — never in production |
 
-## 4. Checks
+## 5. Volume snapshots
 
-- After backup: `ls -lh backups/` non-empty + `gzip -t` passes.
-- After restore: `healthcheck.sh` all OK; spot-check row counts
-  (`SELECT count(*) FROM warehouse.fact_sales` etc.); run `tests/run.sh`.
-- Keep one off-host copy (S3 or scp) — a backup on the same disk is not a backup.
-
-## 5. S3 setup (optional off-host)
+`datasets-data` and `models-cache` hold the files a dump cannot. Snapshot them on the same
+schedule as the database, and before any upgrade:
 
 ```bash
-# .env
+docker run --rm --volumes-from aidata-laravel -v $(pwd)/backups:/bk alpine \
+  tar czf /bk/files_$(date +%Y%m%d).tgz /var/www/html/storage/app/datasets
+
+docker run --rm --volumes-from aidata-fastapi -v $(pwd)/backups:/bk alpine \
+  tar czf /bk/models_$(date +%Y%m%d).tgz /app/data/models
+```
+
+Restore by reversing the tar into a fresh volume before `up -d`. Prune on the same
+`BACKUP_RETENTION_DAYS` schedule as the dumps, and keep the file snapshots off-host alongside
+the database dump — two copies on the same disk are one failure domain.
+
+Volume paths are worth confirming before you trust a snapshot. The Laravel datasets volume is
+mounted at `/var/www/html/storage/app/datasets`, which is where the upload service writes. The
+engine's `STORAGE_PATH` and `MODEL_PATH` default to `./datasets` and `./models` relative to
+its `/code` working directory, which is *not* `/app/data/...` where compose mounts
+`datasets-data` and `models-cache`. Set those two variables to the mounted paths if the
+engine's files need to survive a container rebuild; otherwise they live in the container's
+ephemeral layer and no snapshot will ever see them.
+
+## 6. Off-host copy
+
+```bash
+# root .env
 BACKUP_S3_BUCKET=aidata-backups
 BACKUP_S3_PREFIX=prod/
 AWS_ACCESS_KEY_ID=...  AWS_SECRET_ACCESS_KEY=...  AWS_DEFAULT_REGION=ap-southeast-1
 ```
 
-The script `aws s3 cp`s each dump after local write; failures warn but don't fail the
-job (local copy remains). Enable bucket versioning + SSE-S3/SSE-KMS; lifecycle rule to
-Glacier after 90 days. Verify with `aws s3 ls s3://aidata-backups/prod/`.
+The script uploads each dump to
+`s3://$BACKUP_S3_BUCKET/$BACKUP_S3_PREFIX/` after writing it locally, and warns rather than
+fails if the upload does not work. Enable bucket versioning and SSE-KMS, add a lifecycle rule
+to Glacier after 90 days, and confirm with `aws s3 ls s3://aidata-backups/prod/`. The volume
+tarballs from §5 are not uploaded by the script — copy them yourself.
 
-## 6. Volume snapshots (datasets/models)
+## 7. Restore drill (quarterly)
 
-DB dumps don't include `datasets-data` / `models-cache` file contents. Monthly (or
-pre-upgrade), snapshot them at host level:
+1. `make backup` on production. Copy the dump to a staging host.
+2. Bring up a scratch stack there (or a second database in the existing one) and
+   `restore.sh` the dump.
+3. `make migrate`, then `platform:doctor` — the 27 engine tables and 12 Laravel tables must all
+   be present, and `audit_logs` must have the Laravel columns.
+4. `bash infrastructure/scripts/healthcheck.sh` and `bash tests/run.sh`, and log in as
+   `admin@example.com` to confirm the UI renders.
+5. Spot-check the data:
 
-```bash
-docker run --rm --volumes-from aidata-laravel -v $(pwd)/backups:/bk alpine \
-  tar czf /bk/files_$(date +%Y%m%d).tgz /var/www/html/storage/app/datasets
-docker run --rm --volumes-from aidata-fastapi -v $(pwd)/backups:/bk alpine \
-  tar czf /bk/models_$(date +%Y%m%d).tgz /app/data/models
+```sql
+SELECT count(*) FROM users;         -- 3 demo accounts
+SELECT count(*) FROM datasets;
+SELECT count(*) FROM import_jobs;
+SELECT status, count(*) FROM datasets GROUP BY status;
+SELECT count(*) FROM fact_sales;
 ```
 
-Restore by reversing the tar into a fresh volume before `up`. Record snapshot names in
-the change log; prune with the same 14-day (or longer) retention policy.
-
-## 7. Restore drill (quarterly, required)
-
-1. `make backup` on prod. 2. Copy dump to staging host. 3. `restore.sh` there.
-4. `migrate --force` + `healthcheck.sh` + `tests/run.sh`. 5. Log result (pass/fail +
-   duration) in admin notes. A backup never restored is assumed broken.
+6. Record the result and the duration in the admin notes. Also verify the dataset files are
+   present in the restored volumes; a green `platform:doctor` proves the database restored, not
+   that the files did.

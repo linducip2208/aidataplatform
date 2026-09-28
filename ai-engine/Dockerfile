@@ -16,9 +16,11 @@ RUN pip install --upgrade pip && pip install -r /code/requirements.txt
 COPY app /code/app
 COPY alembic.ini /code/alembic.ini
 COPY alembic /code/alembic
+COPY docker-entrypoint.sh /code/docker-entrypoint.sh
 
 RUN mkdir -p /data/storage /data/models /data/datasets
 
 EXPOSE 8000
 
+ENTRYPOINT ["sh", "/code/docker-entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]

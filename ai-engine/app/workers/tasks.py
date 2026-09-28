@@ -1,30 +1,82 @@
-"""Celery tasks: import/validate/transform/train/forecast/features/anomaly/report/embeddings/sync."""
+"""Celery tasks: import/validate/transform/train/forecast/features/anomaly/report/embeddings/sync.
+
+Secrets rule: no task logs a credential, and any exception text that is persisted
+to a job row or the result backend is redacted first.
+"""
 from __future__ import annotations
 
+import re
 from typing import Any, Dict
 
 from app.workers.celery_app import celery_app
 
+# "scheme://user:password@host" -> "scheme://user:***@host"
+_URL_CREDENTIALS_RE = re.compile(r"(://[^:/@\s]+:)([^@/\s]+)(@)")
+# "api_key=sk-live-...", "password: hunter2", "token=abc"
+_SECRET_ASSIGNMENT_RE = re.compile(
+    r"(?i)\b(api[_-]?key|secret|password|passwd|token|authorization)\b(\s*[=:]\s*)(\S+)"
+)
 
-def _db():
+
+def _safe_error(exc: BaseException) -> str:
+    """Render an exception without leaking credentials from DSNs or messages."""
+    text = f"{type(exc).__name__}: {exc}"
+    text = _URL_CREDENTIALS_RE.sub(r"\1***\3", text)
+    return _SECRET_ASSIGNMENT_RE.sub(r"\1\2***", text)
+
+
+def _db() -> Any:
     from app.database.connection import SessionLocal
 
     return SessionLocal()
 
 
+def _close(db: Any) -> None:
+    """Always end the transaction before returning the connection to the pool."""
+    try:
+        db.rollback()
+    except Exception:
+        pass
+    try:
+        db.close()
+    except Exception:
+        pass
+
+
 def _set_job(job_id: int, **fields: Any) -> None:
+    if not job_id:
+        return
+    db = None
     try:
         from app.database.models import ImportJob
 
         db = _db()
-        try:
-            job = db.query(ImportJob).filter_by(id=job_id).first()
-            if job:
-                for k, v in fields.items():
-                    setattr(job, k, v)
-                db.commit()
-        finally:
-            db.close()
+        job = db.query(ImportJob).filter_by(id=job_id).first()
+        if job:
+            for k, v in fields.items():
+                setattr(job, k, v)
+            db.commit()
+        else:
+            db.rollback()
+    except Exception:
+        if db is not None:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+    finally:
+        if db is not None:
+            _close(db)
+
+
+def _progress(self: Any, progress: float, msg: str = "") -> None:
+    if not hasattr(self, "update_state"):
+        return
+    try:
+        meta: Dict[str, Any] = {"progress": float(progress)}
+        if msg:
+            meta["msg"] = msg
+        self.update_state(state="PROGRESS", meta=meta)
     except Exception:
         pass
 
@@ -32,35 +84,31 @@ def _set_job(job_id: int, **fields: Any) -> None:
 @celery_app.task(bind=True, name="app.workers.tasks.import_file", max_retries=3)
 def import_file(self: Any, file_path: str, dataset_type: str = "sales",
                 mappings: Dict[str, Any] | None = None, import_job_id: int | None = None) -> Dict[str, Any]:
+    db = None
     try:
-        if hasattr(self, "update_state"):
-            try:
-                self.update_state(state="PROGRESS", meta={"progress": 0.1})
-            except Exception:
-                pass
+        _progress(self, 0.1)
         from app.ingestion.etl import run_etl
 
         db = _db()
-        try:
-            def cb(p: float, msg: str):
-                _set_job(import_job_id or 0, progress=float(p))
-                try:
-                    if hasattr(self, "update_state"):
-                        self.update_state(state="PROGRESS", meta={"progress": float(p), "msg": msg})
-                except Exception:
-                    pass
 
-            res = run_etl(file_path, dataset_type, mappings or {}, import_job_id, db, progress=cb)
-            return res
-        finally:
-            db.close()
+        def cb(p: float, msg: str) -> None:
+            if import_job_id:
+                _set_job(import_job_id, progress=float(p))
+            _progress(self, p, msg)
+
+        res = run_etl(file_path, dataset_type, mappings or {}, import_job_id, db, progress=cb)
+        return res
     except Exception as exc:
         if import_job_id:
-            _set_job(import_job_id, status="failed", error_log=[{"error": str(exc)}])
-        try:
-            raise self.retry(exc=exc)
-        except Exception:
-            return {"error": str(exc)}
+            _set_job(import_job_id, status="failed", error_log=[{"error": _safe_error(exc)}])
+        # self.retry() raises Retry when a retry is scheduled and re-raises the
+        # original error once the budget is spent. Both MUST propagate: swallowing
+        # them here would report the task as successful and silently drop retries.
+        self.retry(exc=exc)
+        raise
+    finally:
+        if db is not None:
+            _close(db)
 
 
 @celery_app.task(name="app.workers.tasks.validate_dataset")
@@ -119,7 +167,7 @@ def generate_ai_report(period: str = "weekly") -> Dict[str, Any]:
     try:
         return executive_summary(db, period)
     finally:
-        db.close()
+        _close(db)
 
 
 @celery_app.task(name="app.workers.tasks.generate_embeddings")
@@ -130,7 +178,7 @@ def generate_embeddings(title: str, content: str, source: str = "api") -> Dict[s
     try:
         return ingest_text(title, content, source, db_session=db)
     finally:
-        db.close()
+        _close(db)
 
 
 @celery_app.task(name="app.workers.tasks.scheduled_data_sync")

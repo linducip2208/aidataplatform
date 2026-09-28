@@ -6,6 +6,11 @@ import json
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from app.core.config import settings
+from app.core.logging import get_logger
+
+log = get_logger("ingestion.mapper", "mapping")
+
 # Canonical target fields per dataset
 CANONICAL_FIELDS: Dict[str, List[str]] = {
     "sales": ["transaction_date", "customer_code", "customer_name", "product_code",
@@ -61,39 +66,56 @@ def _norm(s: str) -> str:
     return " ".join(str(s or "").strip().lower().replace("_", " ").split())
 
 
+def _date_field(canonical: List[str]) -> Optional[str]:
+    """The date column this dataset actually has, if any: purchase_date for
+    purchases, snapshot_date for inventory, expense_date for expenses."""
+    return next((c for c in canonical if c.endswith("_date")), None)
+
+
 def suggest_mapping(columns: List[str], dataset_type: str = "sales") -> List[Dict]:
+    """Suggest {source: target} column mappings for ``dataset_type``.
+
+    Returns one {source_column, target_field, confidence, method} row per input
+    column, with ``method`` in {exact, fuzzy, semantic, none} and a target of
+    None when nothing confident was found. A target is only ever returned when
+    it is one of CANONICAL_FIELDS[dataset_type] — an alias shared across
+    datasets ("tanggal" means transaction_date for sales but purchase_date for
+    purchases) must not resolve to a field that dataset's loader never reads.
+    """
     canonical = CANONICAL_FIELDS.get(dataset_type, CANONICAL_FIELDS["sales"])
     canon_norm = {_norm(c): c for c in canonical}
+    canon_set = set(canonical)
+    choices = list(ALIAS_MAP.keys()) + list(canon_norm)
     suggestions = []
     for col in columns:
         n = _norm(col)
         target: Optional[str] = None
         method = "none"
         conf = 0.0
-        if n in ALIAS_MAP:
-            target = ALIAS_MAP[n]
-            method, conf = "exact", 1.0
+        # Shared alias first, but only when this dataset owns the target field.
+        alias = ALIAS_MAP.get(n)
+        if alias in canon_set:
+            target, method, conf = alias, "exact", 1.0
         elif n in canon_norm:
-            target = canon_norm[n]
-            method, conf = "exact", 1.0
+            target, method, conf = canon_norm[n], "exact", 1.0
         else:
-            # fuzzy over alias keys + canonical
-            choices = list(ALIAS_MAP.keys()) + [_norm(c) for c in canonical]
             best = difflib.get_close_matches(n, choices, n=1, cutoff=0.78)
             if best:
                 b = best[0]
-                target = ALIAS_MAP.get(b, canon_norm.get(b))
-                method, conf = "fuzzy", round(difflib.SequenceMatcher(None, n, b).ratio(), 2)
-            else:
-                # type/semantic hint: date-like names
+                fuzzy = ALIAS_MAP.get(b, canon_norm.get(b))
+                if fuzzy in canon_set:
+                    target, method = fuzzy, "fuzzy"
+                    conf = round(difflib.SequenceMatcher(None, n, b).ratio(), 2)
+            if target is None:
+                # semantic hint: date-like names -> this dataset's own date column
                 if any(k in n for k in ("tgl", "tanggal", "date")):
-                    target = canonical[0]
-                    method, conf = "semantic", 0.55
+                    hinted = _date_field(canonical)
+                    if hinted:
+                        target, method, conf = hinted, "semantic", 0.55
                 elif any(k in n for k in ("qty", "jml", "jumlah")):
                     for c in canonical:
                         if "quantity" in c or "stock" in c:
-                            target = c
-                            method, conf = "semantic", 0.55
+                            target, method, conf = c, "semantic", 0.55
                             break
         suggestions.append(
             {"source_column": col, "target_field": target, "confidence": conf, "method": method}
@@ -102,24 +124,43 @@ def suggest_mapping(columns: List[str], dataset_type: str = "sales") -> List[Dic
 
 
 def apply_mapping(df, mappings: Dict[str, str]):
-    """Rename columns per mappings {source: target}. Unmapped columns kept as-is."""
-    import pandas as pd  # noqa: F401
+    """Rename columns per mappings {source: target}. Unmapped columns kept as-is.
 
-    rename = {s: t for s, t in mappings.items() if s in df.columns and t}
-    return df.rename(columns=rename)
+    When two source columns resolve to the same target only the first wins and
+    the loser is dropped: duplicated column names make every later
+    ``df["target"]`` return a DataFrame instead of a Series, which breaks the
+    ETL and the quality checks with an obscure downstream error.
+    """
+    taken: set = set()
+    rename: Dict[str, str] = {}
+    dropped: set = set()
+    for source, target in (mappings or {}).items():
+        if source not in df.columns or not target:
+            continue
+        if target in taken:
+            dropped.add(source)
+            continue
+        taken.add(target)
+        rename[source] = target
+    if dropped:
+        df = df.drop(columns=[c for c in dropped if c in df.columns])
+    return df.rename(columns=rename) if rename else df
 
 
-_TEMPLATE_DIR = Path("./datasets/mapping_templates")
+_TEMPLATE_DIR = Path(settings.storage_path) / "mapping_templates"
 
 
 def save_template(name: str, dataset_type: str, mapping: Dict[str, str], db_session=None) -> Dict:
+    """Persist a mapping template to disk and, when a session is supplied, to
+    mapping_templates. Returns the stored payload {name, dataset_type, mapping}.
+    A failed disk write is logged and does not prevent the database write."""
     _TEMPLATE_DIR.mkdir(parents=True, exist_ok=True)
     payload = {"name": name, "dataset_type": dataset_type, "mapping": mapping}
     try:
         with open(_TEMPLATE_DIR / f"{name}.json", "w", encoding="utf-8") as fh:
             json.dump(payload, fh, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
+    except Exception as exc:
+        log.error(f"mapping template {name!r}: disk write failed ({type(exc).__name__})")
     if db_session is not None:
         try:
             from app.database.models import MappingTemplate
@@ -131,15 +172,19 @@ def save_template(name: str, dataset_type: str, mapping: Dict[str, str], db_sess
             else:
                 db_session.add(MappingTemplate(name=name, dataset_type=dataset_type, mapping=mapping))
             db_session.commit()
-        except Exception:
+        except Exception as exc:
             try:
                 db_session.rollback()
             except Exception:
                 pass
+            log.error(f"mapping template {name!r}: database write failed ({type(exc).__name__})")
     return payload
 
 
 def load_template(name: str, db_session=None) -> Optional[Dict]:
+    """Return the mapping template {name, dataset_type, mapping} for ``name``,
+    preferring the database row and falling back to the on-disk JSON. Returns
+    None when neither source has it."""
     if db_session is not None:
         try:
             from app.database.models import MappingTemplate
@@ -147,12 +192,13 @@ def load_template(name: str, db_session=None) -> Optional[Dict]:
             row = db_session.query(MappingTemplate).filter_by(name=name).first()
             if row:
                 return {"name": row.name, "dataset_type": row.dataset_type, "mapping": row.mapping}
-        except Exception:
-            pass
+        except Exception as exc:
+            log.error(f"mapping template {name!r}: database read failed ({type(exc).__name__})")
     fp = _TEMPLATE_DIR / f"{name}.json"
     if fp.exists():
         try:
             return json.loads(fp.read_text(encoding="utf-8"))
-        except Exception:
+        except Exception as exc:
+            log.error(f"mapping template {name!r}: file unreadable ({type(exc).__name__})")
             return None
     return None

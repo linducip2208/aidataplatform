@@ -7,6 +7,10 @@ import pandas as pd
 
 
 def branch_kpi(df: pd.DataFrame) -> List[Dict[str, Any]]:
+    """Return a list of {branch, revenue, orders, share_pct} rows sorted by
+    revenue desc. A frame with no recognisable branch column yields []."""
+    if df is None or df.empty:
+        return []
     d = df.copy()
     bcol = next((c for c in d.columns if str(c).lower() in ("branch_name", "nm cabang", "nama cabang", "cabang", "branch")), None)
     if bcol is None:

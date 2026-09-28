@@ -1,17 +1,40 @@
 name: Python AI Engine CI
 
+# Pytest suite for the FastAPI/Celery engine in ai-engine/.
+# Path-filtered: a Laravel- or docs-only change does not burn Python CI minutes.
 on:
   push:
-    paths: ["ai-engine/**", ".github/workflows/python.yml"]
+    paths:
+      - "ai-engine/**"
+      - ".github/workflows/python.yml"
   pull_request:
-    paths: ["ai-engine/**"]
+    paths:
+      - "ai-engine/**"
+      - ".github/workflows/python.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push to the same ref cancels the in-flight run.
+concurrency:
+  group: python-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
+    name: pytest
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     defaults:
       run:
         working-directory: ai-engine
+    # ai-engine/tests/__init__.py makes pytest prepend ai-engine/ to sys.path, so
+    # `app` resolves today. Setting PYTHONPATH explicitly keeps that true if the
+    # tests package layout ever changes.
+    env:
+      PYTHONPATH: ${{ github.workspace }}/ai-engine
+      PYTHONDONTWRITEBYTECODE: "1"
     services:
       postgres:
         image: pgvector/pgvector:pg18
@@ -19,38 +42,69 @@ jobs:
           POSTGRES_DB: aidata_test
           POSTGRES_USER: aidata
           POSTGRES_PASSWORD: test
-        ports: ["5432:5432"]
+        ports:
+          - 5432:5432
         options: >-
           --health-cmd="pg_isready -U aidata -d aidata_test"
           --health-interval=10s --health-timeout=5s --health-retries=5
       redis:
         image: redis:7-alpine
-        ports: ["6379:6379"]
+        ports:
+          - 6379:6379
         options: >-
           --health-cmd="redis-cli ping"
           --health-interval=10s --health-timeout=5s --health-retries=5
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Setup Python 3.13
         uses: actions/setup-python@v5
         with:
+          # Matches the FROM python:3.13-slim in ai-engine/Dockerfile.
           python-version: "3.13"
           cache: pip
           cache-dependency-path: ai-engine/requirements.txt
 
       - name: Install dependencies
+        # pytest>=8.0 and pytest-asyncio>=0.23 are already in requirements.txt
+        # (ai-engine/pytest.ini sets asyncio_mode = auto), so no second install.
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-asyncio ruff || true
 
-      - name: Lint (ruff, non-blocking)
-        run: ruff check app || echo "ruff warnings (non-blocking)"
+      - name: Enable Postgres extensions
+        # The service container has no init.sql mount, so `vector` and `pg_trgm`
+        # are not created for us. tests/test_etl.py calls
+        # Base.metadata.create_all(engine) and app/database/models.py declares
+        # `embedding = mapped_column(Vector(1536))`, which fails without `vector`.
+        # Driven through psycopg2 (in requirements.txt) so no extra tooling.
+        run: |
+          python - <<'PY'
+          import psycopg2
+
+          conn = psycopg2.connect(
+              host="localhost", port=5432, dbname="aidata_test",
+              user="aidata", password="test",
+          )
+          conn.autocommit = True
+          with conn.cursor() as cur:
+              cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
+              cur.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+          conn.close()
+          print("vector + pg_trgm enabled")
+          PY
 
       - name: Test (pytest)
         env:
-          DATABASE_URL: postgresql+asyncpg://aidata:test@localhost:5432/aidata_test
+          # psycopg2, not asyncpg: ai-engine/app/database/connection.py builds the
+          # SQLAlchemy engine straight from DATABASE_URL, and requirements.txt
+          # ships psycopg2-binary but no asyncpg. An asyncpg:// URL makes
+          # create_engine() resolve an uninstalled driver at connect time.
+          DATABASE_URL: postgresql+psycopg2://aidata:test@localhost:5432/aidata_test
+          # app/database/connection.py and alembic/env.py read this first; leaving
+          # it unset would make them fall back to the value above.
+          SYNC_DATABASE_URL: postgresql+psycopg2://aidata:test@localhost:5432/aidata_test
           REDIS_URL: redis://localhost:6379/0
           CELERY_BROKER_URL: redis://localhost:6379/1
           SERVICE_API_KEY: ci-test-key

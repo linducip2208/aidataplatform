@@ -30,6 +30,8 @@ def _prep(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def abc_analysis(df: pd.DataFrame) -> List[Dict[str, Any]]:
+    """Return a list of {product, revenue, share_pct, cumulative_pct, grade}
+    rows ordered by revenue desc. Empty input yields []."""
     d = _prep(df)
     if d.empty:
         return []
@@ -47,4 +49,6 @@ def abc_analysis(df: pd.DataFrame) -> List[Dict[str, Any]]:
 
 
 def top_products(df: pd.DataFrame, k: int = 10) -> List[Dict[str, Any]]:
-    return abc_analysis(df)[:k]
+    """Return the first k rows of abc_analysis() in the same shape. Empty input
+    yields []."""
+    return abc_analysis(df)[: max(0, int(k))]

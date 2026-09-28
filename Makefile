@@ -37,7 +37,9 @@ seed: ## Seed demo data (Laravel seeders)
 	$(LARAVEL) php artisan db:seed --force
 
 fresh: ## Fresh migrate + seed (DANGER: wipes DB)
+	$(FASTAPI) alembic downgrade base || echo "[fastapi] alembic downgrade skipped"
 	$(LARAVEL) php artisan migrate:fresh --seed --force
+	$(FASTAPI) alembic upgrade head || echo "[fastapi] alembic upgrade skipped"
 
 test: test-laravel test-ai ## Run all test suites
 

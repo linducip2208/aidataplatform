@@ -1,8 +1,16 @@
 name: aidataplatform
 
-x-common-env: &common-env
-  TZ: ${TZ:-Asia/Jakarta}
-  APP_ENV: ${APP_ENV:-production}
+# Build contexts:
+#   laravel  context "."  -> the root .dockerignore applies
+#   fastapi  context "./ai-engine" -> ai-engine/.dockerignore applies
+#
+# infrastructure/docker/laravel.Dockerfile COPYs `application/...` and
+# `infrastructure/...`, so its context has to be the repository root. A context
+# of ./application with `dockerfile: ../infrastructure/...` is a legal Compose
+# combination (build.dockerfile is resolved relative to build.context, and the
+# Dockerfile may sit outside the context), but the COPY paths would then resolve
+# to application/application/... and the build would fail. Root context is also
+# what .github/workflows/docker.yml uses.
 
 services:
   postgres:
@@ -32,15 +40,35 @@ services:
     image: redis:7-alpine
     container_name: aidata-redis
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-}"]
-    # NOTE: if REDIS_PASSWORD is empty, override command via REDIS_CMD env in production.
-    # Simpler alternative: remove --requirepass when no password is set. See docs/deployment.md.
+    environment:
+      # Only used by the `command:` below and by the healthcheck, so that an
+      # empty value really means "no password" instead of "--requirepass ''".
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    command:
+      - sh
+      - -c
+      - >-
+        if [ -n "$$REDIS_PASSWORD" ]; then
+          exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD";
+        else
+          exec redis-server --appendonly yes;
+        fi
     volumes:
       - redis-data:/data
     ports:
       - "${REDIS_PORT:-6379}:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      # `redis-cli ping` without credentials is rejected once a password is set,
+      # which would leave this service permanently unhealthy and block laravel and
+      # celery-worker (both use condition: service_healthy).
+      test:
+        - CMD-SHELL
+        - >-
+          if [ -n "$$REDIS_PASSWORD" ]; then
+            redis-cli -a "$$REDIS_PASSWORD" --no-auth-warning ping | grep -q PONG;
+          else
+            redis-cli ping | grep -q PONG;
+          fi
       interval: 10s
       timeout: 5s
       retries: 5
@@ -50,8 +78,8 @@ services:
 
   laravel:
     build:
-      context: ./application
-      dockerfile: ../infrastructure/docker/laravel.Dockerfile
+      context: .
+      dockerfile: infrastructure/docker/laravel.Dockerfile
     container_name: aidata-laravel
     restart: unless-stopped
     depends_on:
@@ -73,7 +101,10 @@ services:
       DB_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      # "null" is the literal Laravel's env() maps to PHP null. An empty string
+      # is not null, and config/database.php would then call Redis AUTH('') against
+      # a passwordless server and fail every cache/session/queue operation.
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-null}
       CACHE_STORE: redis
       SESSION_DRIVER: redis
       QUEUE_CONNECTION: redis
@@ -82,7 +113,16 @@ services:
       FILESYSTEM_DISK: ${FILESYSTEM_DISK:-local}
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-500}
       QUALITY_THRESHOLD: ${QUALITY_THRESHOLD:-0.75}
+      # php artisan serve forks PHP_CLI_SERVER_WORKERS children only when the
+      # value is in the process environment. laravel-entrypoint.sh exports it.
+      PHP_CLI_SERVER_WORKERS: ${PHP_CLI_SERVER_WORKERS:-4}
+      # Read by laravel-entrypoint.sh; mirrors the ai-engine/.env.example contract.
+      AUTO_MIGRATE: ${AUTO_MIGRATE:-true}
+      AUTO_MIGRATE_STRICT: ${AUTO_MIGRATE_STRICT:-false}
     volumes:
+      # The bind mount hides everything the image put in /var/www/html, including
+      # the Vite build; the assets stage therefore writes to /opt/aidata/vite and
+      # the entrypoint installs it into public/build on every start.
       - ./application:/var/www/html
       - laravel-storage:/var/www/html/storage
       - datasets-data:/var/www/html/storage/app/datasets
@@ -90,13 +130,25 @@ services:
     expose:
       - "8000"
     ports:
+      # Published for tests/run.sh (BASE_LARAVEL). This path bypasses nginx, so
+      # it is not covered by the /ai-api prefix handling.
       - "${LARAVEL_PORT:-8080}:8000"
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/up || curl -fsS http://localhost:8000/health || exit 1"]
+      # /up only proves the framework booted, so the Vite manifest and the
+      # migration marker are checked too. The entrypoint writes the marker when
+      # `artisan migrate --force` fails, which keeps a broken schema from
+      # reporting healthy.
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS -o /dev/null http://localhost:8000/up
+          && test -f /var/www/html/public/build/manifest.json
+          && test ! -f /var/www/html/storage/framework/migrate_failed
+          || exit 1
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 30s
+      start_period: 60s
     networks:
       - appnet
 
@@ -129,13 +181,26 @@ services:
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-anthropic/claude-3.5-sonnet}
       QUALITY_THRESHOLD: ${QUALITY_THRESHOLD:-0.75}
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-500}
+      # ai-engine/Dockerfile works in /code and docker-entrypoint.sh defaults
+      # APP_DIR to /code, so the bind mount and the writable data directories have
+      # to live under /code. The previous /app paths mounted nothing: the engine
+      # wrote uploads and model artefacts into the container layer, where they were
+      # lost on recreate and invisible to laravel.
+      APP_DIR: /code
+      STORAGE_PATH: /code/data/datasets
+      MODEL_PATH: /code/data/models
+      AUTO_MIGRATE: ${AUTO_MIGRATE:-true}
+      AUTO_MIGRATE_STRICT: ${AUTO_MIGRATE_STRICT:-false}
+      PGHOST_FOR_MIGRATION: postgres
+      PGPORT_FOR_MIGRATION: 5432
     volumes:
-      - ./ai-engine:/app
-      - datasets-data:/app/data/datasets
-      - models-cache:/app/data/models
+      - ./ai-engine:/code
+      - datasets-data:/code/data/datasets
+      - models-cache:/code/data/models
     expose:
       - "8000"
     ports:
+      # Published for tests/run.sh (BASE_AI). Not intended for a public host.
       - "${FASTAPI_PORT:-8001}:8000"
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/v1/health', timeout=5).status==200 else 1)\""]
@@ -161,6 +226,7 @@ services:
         condition: service_healthy
     command: celery -A app.celery_app.celery_app worker --loglevel=info --concurrency=${CELERY_CONCURRENCY:-4} -Q ${CELERY_QUEUES:-default,imports,quality,ml,agent,rag}
     environment:
+      APP_DIR: /code
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-aidata}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-aidata}
       SYNC_DATABASE_URL: postgresql://${POSTGRES_USER:-aidata}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-aidata}
       REDIS_URL: redis://:${REDIS_PASSWORD:-}@redis:6379/${REDIS_DB:-0}
@@ -170,10 +236,13 @@ services:
       LLM_PROVIDER: ${LLM_PROVIDER:-openrouter}
       LLM_API_KEY: ${LLM_API_KEY:-}
       QUALITY_THRESHOLD: ${QUALITY_THRESHOLD:-0.75}
+      STORAGE_PATH: /code/data/datasets
+      MODEL_PATH: /code/data/models
+      AUTO_MIGRATE: ${AUTO_MIGRATE:-false}
     volumes:
-      - ./ai-engine:/app
-      - datasets-data:/app/data/datasets
-      - models-cache:/app/data/models
+      - ./ai-engine:/code
+      - datasets-data:/code/data/datasets
+      - models-cache:/code/data/models
     networks:
       - appnet
 
@@ -190,12 +259,15 @@ services:
         condition: service_healthy
     command: celery -A app.celery_app.celery_app beat --loglevel=info --scheduler ${CELERY_BEAT_SCHEDULER:-redbeat.RedBeatScheduler} --pidfile=/tmp/celerybeat.pid
     environment:
+      APP_DIR: /code
       REDIS_URL: redis://:${REDIS_PASSWORD:-}@redis:6379/${REDIS_DB:-0}
       CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-}@redis:6379/${CELERY_BROKER_DB:-1}
       CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-}@redis:6379/${CELERY_RESULT_DB:-2}
       SERVICE_API_KEY: ${SERVICE_API_KEY:-}
+      # Beat only schedules; it must not run migrations.
+      AUTO_MIGRATE: "false"
     volumes:
-      - ./ai-engine:/app
+      - ./ai-engine:/code
     networks:
       - appnet
 
@@ -213,6 +285,9 @@ services:
       - "${NGINX_HTTPS_PORT:-443}:443"
     volumes:
       - ./infrastructure/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      # infrastructure/nginx/ssl/ ships empty; default.conf references no
+      # certificate, so nginx starts. Add real certs before enabling the :443
+      # server block.
       - ./infrastructure/nginx/ssl:/etc/nginx/ssl:ro
       - nginx-logs:/var/log/nginx
     healthcheck:
@@ -249,6 +324,16 @@ services:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
       GF_USERS_ALLOW_SIGN_UP: "false"
+    # Grafana only auto-loads dashboards from the provisioning directory when a
+    # provider YAML is present, and the dashboard needs a datasource named
+    # "Prometheus". Both are supplied inline (needs Docker Compose >= 2.23.1 for
+    # `configs.content`); the dashboard JSON itself stays a normal bind mount so
+    # it can be edited without touching this file.
+    configs:
+      - source: grafana_datasource
+        target: /etc/grafana/provisioning/datasources/aidata-prometheus.yaml
+      - source: grafana_dashboard_provider
+        target: /etc/grafana/provisioning/dashboards/aidata-provider.yaml
     volumes:
       - grafana-data:/var/lib/grafana
       - ./infrastructure/monitoring/grafana-dashboard.json:/etc/grafana/provisioning/dashboards/aidata-dashboard.json:ro
@@ -279,3 +364,29 @@ volumes:
     name: ${VOLUME_PREFIX:-aidata}-grafana
   nginx-logs:
     name: ${VOLUME_PREFIX:-aidata}-nginx-logs
+
+configs:
+  grafana_datasource:
+    content: |
+      apiVersion: 1
+      datasources:
+        - name: Prometheus
+          type: prometheus
+          access: proxy
+          url: http://prometheus:9090
+          isDefault: true
+          editable: false
+  grafana_dashboard_provider:
+    content: |
+      apiVersion: 1
+      providers:
+        - name: aidata
+          orgId: 1
+          folder: AIDataPlatform
+          type: file
+          disableDeletion: false
+          updateIntervalSeconds: 30
+          allowUiUpdates: true
+          options:
+            path: /etc/grafana/provisioning/dashboards
+            foldersFromFilesStructure: false

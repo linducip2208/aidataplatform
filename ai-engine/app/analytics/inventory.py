@@ -6,7 +6,42 @@ from typing import Any, Dict, List
 import pandas as pd
 
 
+def _avg_daily_sales(sales_df: pd.DataFrame) -> Dict[str, float]:
+    """Return {product_name: units per day}. Uses the trailing 30 days of the
+    supplied history when a date column is present; otherwise falls back to
+    total-units/30 and says so by returning a flat rate."""
+    d = sales_df.copy()
+    for c in list(d.columns):
+        if str(c).lower() in ("nm brg", "nama barang", "nama produk", "product name"):
+            d = d.rename(columns={c: "product_name"})
+            break
+    if "product_name" not in d.columns:
+        return {}
+    qcol = next((c for c in d.columns if str(c).lower() in ("quantity", "qty", "jml", "jumlah")), None)
+    if not qcol:
+        return {}
+    d[qcol] = pd.to_numeric(d[qcol], errors="coerce").fillna(0)
+    dcol = next((c for c in d.columns if "date" in str(c).lower()), None)
+    if dcol:
+        ts = pd.to_datetime(d[dcol], errors="coerce")
+        d = d[ts.notna()].copy()
+        if d.empty:
+            return {}
+        d[dcol] = ts[ts.notna()]
+        cutoff = d[dcol].max() - pd.Timedelta(days=30)
+        windowed = d[d[dcol] > cutoff]
+        # Fewer than 30 days of history: use everything rather than a partial window.
+        if len(windowed) > 0:
+            d = windowed
+    return (d.groupby("product_name")[qcol].sum() / 30.0).to_dict()
+
+
 def inventory_health(stock_df: pd.DataFrame, sales_df=None) -> List[Dict[str, Any]]:
+    """Return a list of {product, stock_qty, avg_daily_sales, days_of_stock,
+    turnover, stockout_risk, reorder_point, dead_stock} rows sorted by
+    days_of_stock asc. Empty stock input yields []."""
+    if stock_df is None or stock_df.empty:
+        return []
     s = stock_df.copy()
     ren = {}
     for c in list(s.columns):
@@ -19,23 +54,13 @@ def inventory_health(stock_df: pd.DataFrame, sales_df=None) -> List[Dict[str, An
     if "product_name" not in s.columns:
         s["product_name"] = s.get("product_code", "UNKNOWN").astype(str) if "product_code" in s.columns else "UNKNOWN"
     if "stock_qty" not in s.columns:
-        s["stock_qty"] = 0
-    s["stock_qty"] = pd.to_numeric(s["stock_qty"], errors="coerce").fillna(0)
+        s["stock_qty"] = 0.0
+    else:
+        s["stock_qty"] = pd.to_numeric(s["stock_qty"], errors="coerce").fillna(0)
 
     avg_sales: Dict[str, float] = {}
     if sales_df is not None and not sales_df.empty:
-        d = sales_df.copy()
-        for c in list(d.columns):
-            lc = str(c).lower()
-            if lc in ("nm brg", "nama barang", "nama produk", "product name"):
-                d = d.rename(columns={c: "product_name"})
-                break
-        if "product_name" in d.columns:
-            qcol = next((c for c in d.columns if str(c).lower() in ("quantity", "qty", "jml", "jumlah")), None)
-            if qcol:
-                d[qcol] = pd.to_numeric(d[qcol], errors="coerce").fillna(0)
-                # assume 30-day window for daily avg
-                avg_sales = (d.groupby("product_name")[qcol].sum() / 30).to_dict()
+        avg_sales = _avg_daily_sales(sales_df)
 
     out = []
     for prod, grp in s.groupby("product_name"):

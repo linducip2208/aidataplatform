@@ -7,6 +7,9 @@ import pandas as pd
 
 
 def finance_summary(sales_df=None, purchases_df=None, expenses_df=None) -> Dict[str, Any]:
+    """Return {total_revenue, total_cogs, total_expenses, gross_profit,
+    net_profit, margin_pct}. Any argument may be None or empty, in which case
+    that component contributes 0.0; the envelope is always fully populated."""
     revenue = 0.0
     if sales_df is not None and not sales_df.empty:
         d = sales_df.copy()

@@ -1,54 +1,112 @@
 name: Docker Build
 
+# Builds the Laravel and FastAPI images.
+# Path-filtered: fires when either image's sources, the infra Dockerfiles or the
+# compose file change. Docs-only changes do not rebuild images.
 on:
   push:
     branches: [main]
-    paths: ["application/**", "ai-engine/**", "infrastructure/docker/**", "docker-compose.yml"]
+    paths:
+      - "application/**"
+      - "ai-engine/**"
+      - "infrastructure/**"
+      - "docker-compose.yml"
+      - ".github/workflows/docker.yml"
   pull_request:
-    paths: ["application/**", "ai-engine/**", "infrastructure/docker/**", "docker-compose.yml"]
+    paths:
+      - "application/**"
+      - "ai-engine/**"
+      - "infrastructure/**"
+      - "docker-compose.yml"
+      - ".github/workflows/docker.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push to the same ref cancels the in-flight build.
+concurrency:
+  group: docker-build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
+    name: Build images
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # context: . (repo root) is required, not a stylistic choice.
+      # infrastructure/docker/laravel.Dockerfile COPYs "application/composer.json"
+      # and "application/", i.e. paths relative to the REPO ROOT. Building it with
+      # context ./application (as docker-compose.yml currently declares) would look
+      # for application/application/composer.json and fail. The root .dockerignore
+      # is written for this root context.
       - name: Build Laravel image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./infrastructure/docker/laravel.Dockerfile
           push: false
+          # Without load:true the image only ever lands in the build cache, so the
+          # Trivy steps below have no image to inspect.
+          load: true
           tags: aidata-laravel:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # Matches docker-compose.yml: context ./ai-engine, Dockerfile at its root.
+      # Every COPY in ai-engine/Dockerfile (app, alembic.ini, alembic,
+      # docker-entrypoint.sh) is relative to that context.
       - name: Build FastAPI image
         uses: docker/build-push-action@v6
         with:
           context: ./ai-engine
           file: ./ai-engine/Dockerfile
           push: false
+          load: true
           tags: aidata-fastapi:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Hadolint (allow failure)
+      # Lint is advisory on purpose: hadolint rules are not correctness bugs, and
+      # a new rule release should not break main. Build failures above are fatal.
+      - name: Hadolint (advisory)
         uses: hadolint/hadolint-action@v3.1.0
         continue-on-error: true
         with:
           dockerfile: infrastructure/docker/laravel.Dockerfile
 
-      - name: Trivy scan (allow failure)
+      - name: Hadolint FastAPI Dockerfile (advisory)
+        uses: hadolint/hadolint-action@v3.1.0
+        continue-on-error: true
+        with:
+          dockerfile: ai-engine/Dockerfile
+
+      # Advisory: the vuln DB is fetched at run time, so network flakes here must
+      # not masquerade as a broken build. Findings are reported either way.
+      - name: Trivy scan Laravel image (advisory)
+        uses: aquasecurity/trivy-action@0.24.0
+        continue-on-error: true
+        with:
+          image-ref: aidata-laravel:${{ github.sha }}
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+
+      - name: Trivy scan FastAPI image (advisory)
         uses: aquasecurity/trivy-action@0.24.0
         continue-on-error: true
         with:
           image-ref: aidata-fastapi:${{ github.sha }}
           format: table
           severity: HIGH,CRITICAL
+          ignore-unfixed: true
 
       # Push template (enable by setting secrets + uncommenting):
       # - name: Login to registry

@@ -1,0 +1,105 @@
+@import 'tailwindcss';
+
+@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
+@source '../../storage/framework/views/*.php';
+@source "../**/*.blade.php";
+@source "../**/*.js";
+@source "../**/*.vue";
+
+@theme {
+    --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
+        'Segoe UI Symbol', 'Noto Color Emoji';
+
+    /* Primary */
+    --color-brand-50: oklch(0.962 0.018 272.314);
+    --color-brand-100: oklch(0.93 0.034 272.788);
+    --color-brand-200: oklch(0.87 0.065 274.039);
+    --color-brand-300: oklch(0.785 0.115 274.713);
+    --color-brand-400: oklch(0.673 0.182 276.935);
+    --color-brand-500: oklch(0.585 0.233 277.117);
+    --color-brand-600: oklch(0.511 0.262 276.966);
+    --color-brand-700: oklch(0.457 0.24 277.023);
+    --color-brand-800: oklch(0.398 0.195 265.638);
+    --color-brand-900: oklch(0.359 0.144 278.697);
+
+    /* Accent */
+    --color-accent-50: oklch(0.984 0.014 180.72);
+    --color-accent-100: oklch(0.953 0.051 180.801);
+    --color-accent-200: oklch(0.91 0.096 181.071);
+    --color-accent-300: oklch(0.855 0.138 181.912);
+    --color-accent-400: oklch(0.777 0.152 182.503);
+    --color-accent-500: oklch(0.704 0.14 182.503);
+    --color-accent-600: oklch(0.6 0.118 184.704);
+    --color-accent-700: oklch(0.511 0.096 186.391);
+    --color-accent-800: oklch(0.437 0.078 188.216);
+    --color-accent-900: oklch(0.386 0.063 188.416);
+}
+
+@layer base {
+    [x-cloak] {
+        display: none !important;
+    }
+
+    body {
+        line-height: 1.5;
+    }
+}
+
+@layer components {
+    .app-card {
+        @apply rounded-lg border border-slate-200 bg-white shadow-sm;
+    }
+
+    .app-card-header {
+        @apply flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 px-4 py-3 sm:px-6;
+    }
+
+    .app-card-body {
+        @apply px-4 py-4 sm:px-6;
+    }
+
+    .app-table {
+        @apply min-w-full text-sm;
+    }
+
+    .app-table thead th {
+        @apply border-b border-slate-200 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500;
+    }
+
+    .app-table tbody td {
+        @apply border-b border-slate-100 px-4 py-3 align-middle text-slate-700;
+    }
+
+    .app-table tbody tr:last-child td {
+        @apply border-b-0;
+    }
+
+    .badge,
+    .badge-success,
+    .badge-danger,
+    .badge-warning,
+    .badge-info,
+    .badge-neutral {
+        @apply inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-1 text-xs font-semibold;
+    }
+
+    .badge-success {
+        @apply border-emerald-600/30 bg-emerald-50 text-emerald-800;
+    }
+
+    .badge-danger {
+        @apply border-rose-600/30 bg-rose-50 text-rose-800;
+    }
+
+    .badge-warning {
+        @apply border-amber-600/30 bg-amber-50 text-amber-900;
+    }
+
+    .badge-info {
+        @apply border-sky-600/30 bg-sky-50 text-sky-800;
+    }
+
+    .badge-neutral {
+        @apply border-slate-500/30 bg-slate-100 text-slate-700;
+    }
+}

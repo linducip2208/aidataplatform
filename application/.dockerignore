@@ -1,0 +1,50 @@
+# Docker build context exclusions for the laravel service.
+# docker-compose.yml builds the laravel image with `context: ./application`,
+# so Docker reads THIS file, not the root .dockerignore. Keep both in sync.
+#
+# The Laravel image installs its own dependencies (composer install in
+# infrastructure/docker/laravel.Dockerfile), so host copies of vendor/ and
+# node_modules/ must stay out of the context.
+.git/
+.gitignore
+.github/
+.idea/
+.vscode/
+.zed/
+
+# Secrets
+.env
+.env.backup
+.env.production
+auth.json
+Homestead.json
+Homestead.yaml
+
+# Dependencies (installed inside the image)
+vendor/
+node_modules/
+
+# Vite build output (rebuilt by the image)
+public/build/
+public/hot
+public/storage
+
+# Runtime state
+storage/*.key
+storage/pail
+storage/logs/*
+storage/framework/cache/*
+storage/framework/sessions/*
+storage/framework/views/*
+bootstrap/cache/*.php
+
+# Test and tool caches
+.phpunit.cache/
+.phpunit.result.cache
+.pint.cache
+npm-debug.log
+yarn-error.log
+
+# Local database files
+database/*.sqlite
+database/*.sqlite-journal

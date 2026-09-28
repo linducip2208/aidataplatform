@@ -21,6 +21,22 @@ def client():
         yield c
 
 
+@pytest.fixture(scope="session")
+def service_headers() -> dict:
+    """Auth headers for guarded endpoints.
+
+    The header name is the one the engine actually resolves (SERVICE_API_KEY_HEADER
+    with a default of X-Service-Key), not a literal, so a deployment that renames it
+    does not silently invalidate every request in this suite. The value is the
+    configured key, so a placeholder/blank key makes these tests fail loudly instead
+    of passing on a bypass.
+    """
+    from app.core.config import settings
+    from app.core.security import SERVICE_KEY_HEADER
+
+    return {SERVICE_KEY_HEADER: settings.service_api_key}
+
+
 @pytest.fixture()
 def tmp_dir(tmp_path: Path) -> Path:
     return tmp_path

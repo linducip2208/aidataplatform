@@ -1,0 +1,38 @@
+# Normalize line endings. Shell scripts MUST stay LF or bash on a Windows
+# checkout fails with "\r: command not found".
+* text=auto
+
+*.sh text eol=lf
+*.bash text eol=lf
+*.py text eol=lf
+*.php text eol=lf
+*.blade.php text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.jsonc text eol=lf
+*.css text eol=lf
+*.js text eol=lf
+*.ts text eol=lf
+*.conf text eol=lf
+*.ini text eol=lf
+*.sql text eol=lf
+Makefile text eol=lf
+Dockerfile text eol=lf
+*.Dockerfile text eol=lf
+.gitattributes text eol=lf
+.gitignore text eol=lf
+
+# Binary assets are never touched.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.zip binary
+*.gz binary
+*.pdf binary
+*.sqlite binary

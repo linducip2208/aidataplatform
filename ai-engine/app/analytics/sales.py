@@ -34,12 +34,26 @@ def _norm_sales(df: pd.DataFrame) -> pd.DataFrame:
     return d
 
 
+def _bound(value, side: str):
+    """Parse a date filter bound. Returns None when unparseable so a bad
+    string never silently empties the result set."""
+    ts = pd.to_datetime(value, errors="coerce")
+    if pd.isna(ts):
+        return None
+    return ts if side == "from" else ts + pd.Timedelta(days=1) - pd.Timedelta(nanoseconds=1)
+
+
 def apply_filters(df: pd.DataFrame, date_from=None, date_to=None, branch=None, category=None) -> pd.DataFrame:
+    """Filter a sales frame. Returns the filtered DataFrame; unparseable date
+    bounds are ignored rather than raising or dropping every row."""
     d = _norm_sales(df)
-    if date_from and "transaction_date" in d.columns:
-        d = d[d["transaction_date"] >= pd.to_datetime(date_from)]
-    if date_to and "transaction_date" in d.columns:
-        d = d[d["transaction_date"] <= pd.to_datetime(date_to)]
+    if "transaction_date" in d.columns:
+        lo = _bound(date_from, "from") if date_from else None
+        hi = _bound(date_to, "to") if date_to else None
+        if lo is not None:
+            d = d[d["transaction_date"] >= lo]
+        if hi is not None:
+            d = d[d["transaction_date"] <= hi]
     if branch and "branch_name" in d.columns:
         d = d[d["branch_name"].astype(str) == str(branch)]
     if category and "category" in d.columns:
@@ -48,6 +62,8 @@ def apply_filters(df: pd.DataFrame, date_from=None, date_to=None, branch=None, c
 
 
 def sales_kpi(df: pd.DataFrame) -> Dict[str, Any]:
+    """Return the KPI envelope {revenue, orders, units, aov, growth_pct, margin_pct}.
+    An empty frame yields all-zero values, never None."""
     d = _norm_sales(df)
     revenue = float(d["revenue"].sum()) if "revenue" in d.columns else 0.0
     orders = int(len(d))
@@ -66,12 +82,14 @@ def sales_kpi(df: pd.DataFrame) -> Dict[str, Any]:
 
 
 def sales_trend(df: pd.DataFrame, granularity: str = "daily") -> List[Dict[str, Any]]:
+    """Return a list of {period, revenue, orders, units} rows bucketed by
+    granularity ("daily"|"weekly"|"monthly"). Empty input yields []."""
     d = _norm_sales(df)
     if "transaction_date" not in d.columns or d.empty:
         return []
     d = d.dropna(subset=["transaction_date"]).copy()
-    freq = {"daily": "D", "weekly": "W", "monthly": "ME"}.get(granularity, "D")
-    d["period"] = d["transaction_date"].dt.to_period("D" if freq == "D" else ("W" if freq == "W" else "M"))
+    period_freq = {"daily": "D", "weekly": "W", "monthly": "M"}.get(granularity, "D")
+    d["period"] = d["transaction_date"].dt.to_period(period_freq)
     g = d.groupby("period").agg(revenue=("revenue", "sum"),
                                 orders=("revenue", "size"),
                                 units=("quantity", "sum") if "quantity" in d.columns else ("revenue", "size"))

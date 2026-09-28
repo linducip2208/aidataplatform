@@ -1,43 +1,46 @@
-# AIDataPlatform Prometheus scrape config
+# AIDataPlatform Prometheus scrape config.
+#
+# Prometheus performs no shell-style variable substitution in this file: a
+# "${VAR:-default}" string is not a valid model.Duration and the process refuses
+# to start, so the intervals below are literals. Change them here, or supply a
+# different file via --config.file.
+
 global:
-  scrape_interval: ${PROMETHEUS_SCRAPE_INTERVAL:-15s}
+  scrape_interval: 15s
   evaluation_interval: 15s
 
 scrape_configs:
+  # The engine exposes /metrics from app/main.py and registers the route without
+  # an auth dependency, so it needs no credentials. That is safe only while the
+  # engine stays on the private compose network (docker-compose.yml publishes no
+  # host port for it).
   - job_name: fastapi
+    metrics_path: /metrics
+    scrape_interval: 15s
     static_configs:
       - targets: ["fastapi:8000"]
-    metrics_path: /metrics
-    scrape_interval: 15s
 
-  - job_name: laravel
-    static_configs:
-      - targets: ["laravel:8000"]
-    metrics_path: /metrics
-    scrape_interval: 30s
-    # Laravel exposes /metrics only if promphp/prometheus_client_php (or equivalent)
-    # is installed in application/. If absent, this target will show DOWN — expected
-    # until the exporter route is added. See docs/monitoring.md.
+  # Laravel is NOT scraped: the application registers no /metrics route
+  # (bootstrap/app.php only registers the /up health probe), so this target
+  # would sit permanently DOWN. Add promphp/prometheus_client_php and a
+  # /metrics route before re-enabling it.
 
-  - job_name: redis
-    static_configs:
-      - targets: ["redis-exporter:9121"]
-    scrape_interval: 15s
-    # redis-exporter is OPTIONAL (not in base compose). Enable via:
-    #   docker run -d --network aidata-appnet --name redis-exporter \
-    #     -e REDIS_ADDR=redis://redis:6379 oliver006/redis_exporter
-    # Until then this target is DOWN — safe to ignore. See docs/monitoring.md.
-
-  - job_name: postgres
-    static_configs:
-      - targets: ["postgres-exporter:9187"]
-    scrape_interval: 30s
-    # postgres-exporter is OPTIONAL (not in base compose). Enable via:
-    #   docker run -d --network aidata-appnet --name postgres-exporter \
-    #     -e DATA_SOURCE_NAME="postgresql://aidata:${POSTGRES_PASSWORD}@postgres:5432/aidata?sslmode=disable" \
-    #     prometheuscommunity/postgres-exporter
-    # Until then this target is DOWN — safe to ignore.
+  # Redis and Postgres exporters are not part of the base compose stack. To add
+  # them, run the exporters on the appnet network and uncomment the jobs:
+  #
+  #   - job_name: redis
+  #     metrics_path: /metrics
+  #     scrape_interval: 15s
+  #     static_configs:
+  #       - targets: ["redis-exporter:9121"]
+  #
+  #   - job_name: postgres
+  #     metrics_path: /metrics
+  #     scrape_interval: 30s
+  #     static_configs:
+  #       - targets: ["postgres-exporter:9187"]
 
   - job_name: prometheus
+    scrape_interval: 15s
     static_configs:
       - targets: ["localhost:9090"]

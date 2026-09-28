@@ -1,0 +1,24 @@
+version: 2
+
+updates:
+  # Pinned GitHub Actions used by .github/workflows/*.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+  # Python dependencies, installed by ai-engine CI and ai-engine/Dockerfile.
+  - package-ecosystem: "pip"
+    directory: "/ai-engine"
+    schedule:
+      interval: "weekly"
+
+  # PHP dependencies, installed by application/composer.json.
+  - package-ecosystem: "composer"
+    directory: "/application"
+    schedule:
+      interval: "weekly"

@@ -1,45 +1,107 @@
 name: Laravel CI
 
+# Test suite + style gate for the Laravel 12 app in application/.
+# Path-filtered: a docs-only or ai-engine-only change does not burn PHP CI minutes.
 on:
   push:
-    paths: ["application/**", ".github/workflows/laravel.yml"]
+    paths:
+      - "application/**"
+      - ".github/workflows/laravel.yml"
   pull_request:
-    paths: ["application/**"]
+    paths:
+      - "application/**"
+      - ".github/workflows/laravel.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push to the same ref cancels the in-flight run.
+concurrency:
+  group: laravel-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
-    strategy:
-      matrix:
-        php: ["8.3", "8.4"]
+    name: PHP ${{ matrix.php }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # composer.json requires php ^8.2; both are buildable by
+        # infrastructure/docker/laravel.Dockerfile (php:8.3-fpm-alpine).
+        php: ["8.3", "8.4"]
     defaults:
       run:
         working-directory: application
+    # Set as real process env, NOT appended to .env. application/.env.example
+    # ships DB_CONNECTION=pgsql, and Laravel's dotenv loader is immutable, so an
+    # `echo "DB_CONNECTION=sqlite" >> .env` loses to the earlier `pgsql` line and
+    # the suite tries to reach 127.0.0.1:5432. Real env vars win over .env.
+    env:
+      APP_ENV: testing
+      APP_DEBUG: "false"
+      APP_URL: http://localhost
+      BCRYPT_ROUNDS: "4"
+      # Database — in-memory sqlite for the whole matrix.
+      DB_CONNECTION: sqlite
+      DB_DATABASE: ":memory:"
+      DB_FOREIGN_KEYS: "true"
+      # Cache / session / queue must never reach out to the redis in
+      # .env.example, or nothing boots on a bare runner.
+      CACHE_STORE: array
+      SESSION_DRIVER: array
+      QUEUE_CONNECTION: sync
+      # Storage
+      FILESYSTEM_DISK: local
+      # AI engine (config/ai_engine.php). The engine is not running in this
+      # job; these keep AiEngineClient::isConfigured() true so tests that assert
+      # the configured path do not silently take the "not configured" branch.
+      AI_ENGINE_URL: http://fastapi.ci:8000
+      SERVICE_API_KEY: ci-test-service-key
+      SERVICE_API_KEY_HEADER: X-Service-Key
+      QUALITY_THRESHOLD: "0.75"
+      MAX_UPLOAD_MB: "500"
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Setup PHP ${{ matrix.php }}
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
-          extensions: pdo_pgsql, pgsql, redis, zip, gd, intl, bcmath
+          # pdo_sqlite/sqlite3: the whole suite runs on :memory: sqlite.
+          # The rest mirror infrastructure/docker/laravel.Dockerfile so CI
+          # exercises the same extensions production runs with.
+          extensions: pdo_sqlite, sqlite3, mbstring, pdo_pgsql, pgsql, redis, zip, gd, intl, bcmath
           coverage: none
+          tools: composer:v2
 
       - name: Install dependencies
-        run: composer install --no-interaction --prefer-dist
+        run: composer install --no-interaction --prefer-dist --no-progress
 
-      - name: Prepare env (sqlite for CI)
+      - name: Prepare environment
         run: |
-          cp .env.example .env || cp ../.env.example .env || touch .env
-          php artisan key:generate || true
-          echo "DB_CONNECTION=sqlite" >> .env
-          echo "DB_DATABASE=:memory:" >> .env
-          echo "CACHE_STORE=array" >> .env
-          echo "SESSION_DRIVER=array" >> .env
-          echo "QUEUE_CONNECTION=sync" >> .env
+          cp .env.example .env
+          php artisan key:generate --ansi
 
-      - name: Migrate (sqlite)
+      - name: Smoke test routes
+        # Fails fast on a malformed route file, a bad controller reference or a
+        # broken middleware alias — before the slower migrate/test steps.
+        run: php artisan route:list
+
+      - name: Run migrations
+        # On :memory: this is a throwaway DB, so its value is verifying every
+        # migration executes on the CI connection, not persisting state.
         run: php artisan migrate --force
 
-      - name: Test (Pest/PHPUnit)
+      - name: Check code style (Pint)
+        # No application/pint.json exists, so this uses the laravel preset.
+        run: ./vendor/bin/pint --test
+
+      - name: Test
+        # --parallel needs brianium/paratest, which is not in composer.json
+        # require-dev, so it currently falls through to plain phpunit. Both
+        # commands propagate a non-zero exit, so real failures still fail the job.
         run: php artisan test --parallel || ./vendor/bin/phpunit

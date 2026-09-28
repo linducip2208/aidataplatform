@@ -1,27 +1,45 @@
-# AIDataPlatform — Celery worker/beat image (wrapper around ai-engine/Dockerfile)
-# NOTE: docker-compose.yml builds celery-worker/beat directly from ./ai-engine/Dockerfile.
-# This file exists so `docker build -f infrastructure/docker/celery.Dockerfile .` also works
-# (e.g. CI jobs that run from repo root) and to pin worker-specific defaults.
+# AIDataPlatform — Celery worker/beat image.
 #
-# Build from root:  docker build -f infrastructure/docker/celery.Dockerfile -t aidata-celery .
-# Build (preferred): docker compose build celery-worker celery-beat
+# docker-compose.yml does NOT use this file: celery-worker and celery-beat are
+# built from `context: ./ai-engine` + `dockerfile: Dockerfile`, because they
+# share that image with fastapi and only differ by `command:`. This file exists
+# for standalone builds and for pinning worker-specific defaults.
+#
+# Build from the repository root (the COPY paths below are root-relative):
+#   docker build -f infrastructure/docker/celery.Dockerfile -t aidata-celery .
+#
+# The working directory is /code, matching ai-engine/Dockerfile and the
+# APP_DIR default in ai-engine/docker-entrypoint.sh, so the same volume paths
+# used by docker-compose.yml resolve here too.
 
-ARG AI_ENGINE_BASE=aidata-fastapi:latest
+FROM python:3.13-slim
 
-# Stage 1: ensure base exists by rebuilding ai-engine (ignored if base already built)
-FROM python:3.13-slim AS base-builder
-WORKDIR /app
-COPY ai-engine/requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
-
-FROM base-builder AS runtime
-WORKDIR /app
-COPY ai-engine/ ./
-
-ENV PYTHONUNBUFFERED=1 \
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    APP_DIR=/code \
     CELERY_QUEUES=default,imports,quality,ml,agent,rag \
     CELERY_CONCURRENCY=4
 
-# Queues must match compose: default,imports,quality,ml,agent,rag
-# Worker entrypoint overridden by compose `command:`; default below is informational.
+WORKDIR /code
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential libpq-dev libmagic1 curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY ai-engine/requirements.txt ./requirements.txt
+RUN pip install --upgrade pip && pip install -r ./requirements.txt
+
+COPY ai-engine/app ./app
+COPY ai-engine/alembic.ini ./alembic.ini
+COPY ai-engine/alembic ./alembic
+COPY ai-engine/docker-entrypoint.sh ./docker-entrypoint.sh
+
+RUN mkdir -p /code/data/storage /code/data/models /code/data/datasets
+
+EXPOSE 8000
+
+# The queues below must stay identical to CELERY_QUEUES and to the `-Q` flag in
+# the docker-compose command, or tasks are published to queues nobody consumes.
+ENTRYPOINT ["sh", "/code/docker-entrypoint.sh"]
 CMD ["celery", "-A", "app.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=4", "-Q", "default,imports,quality,ml,agent,rag"]

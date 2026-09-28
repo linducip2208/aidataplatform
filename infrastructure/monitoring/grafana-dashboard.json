@@ -1,78 +1,141 @@
 {
-  "title": "AIDataPlatform Overview",
   "uid": "aidata-overview",
+  "id": null,
+  "title": "AIDataPlatform Overview",
+  "tags": ["aidata", "fastapi"],
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
+  "editable": true,
+  "refresh": "30s",
   "time": { "from": "now-6h", "to": "now" },
+  "annotations": { "list": [] },
+  "templating": { "list": [] },
   "panels": [
     {
       "id": 1,
-      "title": "API Request Latency p95 (fastapi)",
       "type": "timeseries",
-      "datasource": "Prometheus",
+      "title": "Engine latency p95 / p99 (all routes)",
+      "description": "http_request_latency_seconds is a Histogram labelled by path; aggregating to le only keeps the series count low.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"fastapi\"}[5m])) by (le, route))",
-          "legendFormat": "{{route}}"
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_latency_seconds_bucket{job=\"fastapi\"}[5m])))",
+          "legendFormat": "p95"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(http_request_latency_seconds_bucket{job=\"fastapi\"}[5m])))",
+          "legendFormat": "p99"
         }
       ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
       "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 }
     },
     {
       "id": 2,
-      "title": "Celery Queue Depth (imports/quality/ml/agent/rag)",
       "type": "timeseries",
-      "datasource": "Prometheus",
+      "title": "Engine request rate by status",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "targets": [
         {
-          "expr": "celery_queue_length{queue=~\"imports|quality|ml|agent|rag|default\"}",
-          "legendFormat": "{{queue}}"
+          "refId": "A",
+          "expr": "sum by (status) (rate(http_requests_total{job=\"fastapi\"}[5m]))",
+          "legendFormat": "{{status}}"
         }
       ],
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
       "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 }
     },
     {
       "id": 3,
-      "title": "Import Jobs by Status (5m rate)",
       "type": "timeseries",
-      "datasource": "Prometheus",
+      "title": "Engine request rate by method and path",
+      "description": "path is the raw request path, so this panel gets busy; use it to spot a single hot endpoint.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "targets": [
         {
-          "expr": "sum by (status) (rate(import_jobs_total{job=\"fastapi\"}[5m]))",
-          "legendFormat": "{{status}}"
+          "refId": "A",
+          "expr": "sum by (method, path) (rate(http_requests_total{job=\"fastapi\"}[5m]))",
+          "legendFormat": "{{method}} {{path}}"
         }
       ],
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
       "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 }
     },
     {
       "id": 4,
-      "title": "ML Training Jobs by Status (5m rate)",
       "type": "timeseries",
-      "datasource": "Prometheus",
+      "title": "Engine latency p95 by path",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "targets": [
         {
-          "expr": "sum by (status) (rate(ml_jobs_total{job=\"fastapi\"}[5m]))",
-          "legendFormat": "{{status}}"
+          "refId": "A",
+          "expr": "topk(10, histogram_quantile(0.95, sum by (le, path) (rate(http_request_latency_seconds_bucket{job=\"fastapi\"}[5m]))))",
+          "legendFormat": "{{path}}"
         }
       ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
       "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 }
     },
     {
       "id": 5,
-      "title": "Quality Score Avg (warehouse)",
       "type": "stat",
-      "datasource": "Prometheus",
-      "targets": [{ "expr": "avg(quality_score{job=\"fastapi\"})" }],
+      "title": "Total request rate",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(http_requests_total{job=\"fastapi\"}[5m]))" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
       "gridPos": { "x": 0, "y": 16, "w": 6, "h": 6 }
     },
     {
       "id": 6,
-      "title": "RAG Queries (5m rate)",
       "type": "stat",
-      "datasource": "Prometheus",
-      "targets": [{ "expr": "sum(rate(rag_queries_total{job=\"fastapi\"}[5m]))" }],
+      "title": "Engine error rate (5xx)",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(http_requests_total{job=\"fastapi\", status=~\"5..\"}[5m]))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.1 },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
       "gridPos": { "x": 6, "y": 16, "w": 6, "h": 6 }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Engine process CPU / RSS",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(process_cpu_seconds_total{job=\"fastapi\"}[5m])",
+          "legendFormat": "cpu cores"
+        },
+        {
+          "refId": "B",
+          "expr": "process_resident_memory_bytes{job=\"fastapi\"}",
+          "legendFormat": "rss"
+        }
+      ],
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 6 }
     }
   ]
 }

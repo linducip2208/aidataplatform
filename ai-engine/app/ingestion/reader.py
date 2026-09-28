@@ -107,19 +107,31 @@ def _read_parquet_chunks(path: Path, chunksize: int) -> Iterator[pd.DataFrame]:
 
 
 def iter_chunks(path: str | Path, chunksize: Optional[int] = None) -> Iterator[pd.DataFrame]:
-    """Yield DataFrame chunks without loading a huge file fully into RAM."""
+    """Yield DataFrame chunks of a CSV/XLSX/JSON/XML/Parquet/ZIP file.
+
+    A ZIP is expanded into a per-call temporary directory that is removed once
+    the inner file has been consumed; previously the extraction was written to a
+    shared ``<upload-dir>/_zip_extract`` and never cleaned up, so every
+    validation and every import left a copy of the uploaded data on disk.
+    """
     p = Path(path)
     cs = chunksize or settings.chunk_rows
     suffix = p.suffix.lower()
     if suffix == ".zip":
+        import shutil
+        import tempfile
         import zipfile
 
         with zipfile.ZipFile(p, "r") as zf:
             names = [n for n in zf.namelist() if n.lower().endswith((".csv", ".xlsx", ".xls", ".json", ".parquet"))]
             if not names:
                 raise ValueError("ZIP contains no supported data file")
-            inner = zf.extract(names[0], path=str(p.parent / "_zip_extract"))
-            yield from iter_chunks(inner, cs)
+            tmpdir = tempfile.mkdtemp(prefix="zip_extract_")
+            try:
+                zf.extract(names[0], path=tmpdir)
+                yield from iter_chunks(Path(tmpdir) / Path(names[0]).name, cs)
+            finally:
+                shutil.rmtree(tmpdir, ignore_errors=True)
             return
     if suffix == ".csv":
         yield from _read_csv_chunks(p, cs)
@@ -145,6 +157,4 @@ def read_full(path: str | Path, limit_rows: int = 200000) -> pd.DataFrame:
             break
     if not frames:
         return pd.DataFrame()
-    import pandas as pd  # noqa: F811
-
     return pd.concat(frames, ignore_index=True).head(limit_rows)
