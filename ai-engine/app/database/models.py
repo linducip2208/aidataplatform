@@ -296,16 +296,6 @@ class AlertEvent(Base, TimestampMixin):
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
-class AuditLog(Base):
-    __tablename__ = "audit_logs"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    actor: Mapped[str] = mapped_column(String(128), default="")
-    action: Mapped[str] = mapped_column(String(128))
-    resource: Mapped[str] = mapped_column(String(128), default="")
-    detail: Mapped[dict] = mapped_column(JSON, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
-
-
 class DataQualityReport(Base, TimestampMixin):
     __tablename__ = "data_quality_reports"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -313,6 +303,3 @@ class DataQualityReport(Base, TimestampMixin):
     score: Mapped[float] = mapped_column(Float, default=0.0)
     breakdown: Mapped[dict] = mapped_column(JSON, default=dict)
     issues: Mapped[list] = mapped_column(JSON, default=list)
-
-
-Index("ix_fact_sales_date", FactSales.transaction_date)

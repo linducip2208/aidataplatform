@@ -108,12 +108,15 @@ history to query.
 
 ## 4. Ops
 
-- Artifacts live on the engine's `MODEL_PATH`, default `./models` relative to its `/code`
-  working directory. `docker-compose.yml` mounts the `models-cache` volume at
-  `/app/data/models`, which is a different path — set `MODEL_PATH=/app/data/models` if
-  artifacts must survive a container rebuild, or they disappear with the container.
-- A model that vanishes from disk still shows in the registry; `load_production` returns
-  `None` and churn prediction answers `no production churn model`.
+- Artifacts live on the engine's `MODEL_PATH`. Compose sets `MODEL_PATH=/code/data/models`,
+  which is exactly where the `models-cache` volume is mounted, so artifacts survive a
+  container rebuild with no extra configuration. The engine's own default is `./models`
+  relative to its `/code` working directory, so running it outside Compose without setting
+  `MODEL_PATH` loses every artefact on a rebuild.
+- A model that vanishes from disk still shows in the registry; `load_production` raises
+  `OSError` out of `joblib.load` on the missing `artifact_path` rather than returning `None`.
+  The `no production churn model` answer is for a model row with no version, not a missing
+  file.
 - Retraining a name never mutates an existing version. It appends, so the previous
   `PRODUCTION` pointer stays valid until you promote the new `version_id`.
 - There is no GPU path, no `CELERY_TASK_TIME_LIMIT` and no training timeout beyond the

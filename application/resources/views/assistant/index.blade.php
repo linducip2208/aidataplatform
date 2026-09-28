@@ -29,6 +29,11 @@
                 />
             @else
                 <ul class="space-y-4">
+                    @if (! empty($messagesTruncated))
+                        <li class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                            Menampilkan {{ $messages->count() }} pesan terbaru. Percakapan yang lebih panjang dipangkas agar halaman tetap cepat — riwayat penuh tidak ditampilkan.
+                        </li>
+                    @endif
                     @foreach ($messages as $message)
                         @php
                             $role = strtolower((string) ($message->role ?? 'user'));

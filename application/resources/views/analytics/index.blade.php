@@ -306,6 +306,23 @@
         @php
             $cohortPeriods = collect($cohort)->pluck('period_offset')->filter(fn ($value): bool => is_numeric($value))->map(fn ($value): int => (int) $value)->unique()->sort()->values();
             $cohortNames = collect($cohort)->pluck('cohort')->filter()->unique()->values();
+
+            // Index the cohort rows once, keyed exactly as the grid looks them
+            // up below. Scanning the whole collection again for every
+            // cohort x period cell made this table quadratic in the number of
+            // rows the engine returns.
+            //
+            // The key carries the value's type because the lookup is a strict
+            // `===`: `1` and `'1'` are distinct cohort names here, and
+            // collapsing them onto one key would merge two grid cells. `??=`
+            // keeps the first row for a duplicate key, which is what
+            // Collection::first() returned before.
+            $cohortCells = [];
+
+            foreach ($cohort as $row) {
+                $cohortValue = $row['cohort'] ?? null;
+                $cohortCells[gettype($cohortValue).':'.$cohortValue.'|'.((int) ($row['period_offset'] ?? -1))] ??= $row;
+            }
         @endphp
 
         @if ($cohort === [])
@@ -331,10 +348,7 @@
                                 </th>
                                 @foreach ($cohortPeriods as $offset)
                                     @php
-                                        $cell = collect($cohort)->first(
-                                            fn ($row): bool => ($row['cohort'] ?? null) === $name
-                                                && (int) ($row['period_offset'] ?? -1) === $offset
-                                        );
+                                        $cell = $cohortCells[gettype($name).':'.$name.'|'.((int) $offset)] ?? null;
                                     @endphp
                                     <td class="text-right tabular-nums">
                                         @if ($cell === null)

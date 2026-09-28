@@ -3,11 +3,13 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\AuditLog;
 use App\Models\Dataset;
 use App\Services\DatasetIngestionService;
 use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * Token API mirror of the Blade dataset flow. Response envelope follows
@@ -121,7 +123,24 @@ class DatasetController extends Controller
 
     public function destroy(Request $request, Dataset $dataset): JsonResponse
     {
+        $name = $dataset->name;
+        $size = $dataset->size_bytes;
+        $filename = $dataset->source_filename;
+
+        // The stored upload goes with the row. Without this the API left the
+        // source file on disk forever, with no row pointing at it and no way
+        // to reclaim it.
+        if ($dataset->path) {
+            Storage::disk($dataset->disk)->delete($dataset->path);
+        }
+
         $dataset->delete();
+
+        AuditLog::record('dataset.deleted', 'dataset', $dataset->getKey(), [
+            'name' => $name,
+            'source_filename' => $filename,
+            'size_bytes' => $size,
+        ]);
 
         return ApiResponse::message('Dataset deleted.');
     }

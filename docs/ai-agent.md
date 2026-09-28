@@ -100,19 +100,21 @@ OpenRouter group):
 
 | Variable | Default | Notes |
 |---|---|---|
-| `LLM_PROVIDER` | `openai` | Root `.env.example` ships `openrouter` |
-| `LLM_BASE_URL` | `https://api.openai.com/v1` | Used for any non-OpenRouter provider |
+| `LLM_PROVIDER` | `openai` | Compose and the root `.env.example` both ship `openrouter`, so that is what a Docker run uses |
+| `LLM_BASE_URL` | `https://api.openai.com/v1` | Used for any non-OpenRouter provider; the root `.env` also ships `https://openrouter.ai/api/v1` |
 | `LLM_API_KEY` | empty | Empty means the offline fallback, not an error |
-| `LLM_MODEL` | `gpt-4o-mini` | Root `.env.example` ships `anthropic/claude-3.5-sonnet` |
+| `LLM_MODEL` | `gpt-4o-mini` | The only model id the engine reads; the root `.env` ships `anthropic/claude-3.5-sonnet` |
 | `OPENROUTER_API_KEY` | empty | Used when `LLM_PROVIDER=openrouter`, else falls back to `LLM_API_KEY` |
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | |
-| `LLM_TIMEOUT_SECONDS` | `60` | Per attempt; `LLM_MAX_RETRIES` (default 3) attempts with linear backoff |
-| `LLM_EMBEDDING_MODEL` | `text-embedding-3-small` | See `rag.md` |
+| `LLM_TIMEOUT_SECONDS` | `60` | Per attempt; `LLM_MAX_RETRIES` (default 3, hard-capped at 5) attempts, sleeping `0.5 × (attempt + 1)` between them |
+| `LLM_EMBEDDING_MODEL` | `text-embedding-3-small` | Compose forwards the deprecated alias `EMBED_MODEL` instead, so under Docker that value is what takes effect. See `rag.md` §4 |
 
-There is no `LLM_TEMPERATURE`, `LLM_MAX_TOKENS` or `LLM_FALLBACK_MODEL` setting.
-`chat()` hardcodes `temperature=0.2` and `max_tokens=1500`, and there is no fallback model:
-on `LLM_MAX_RETRIES` exhausted calls, `chat()` returns the offline summary. The Laravel
-budget for the call is `AI_ENGINE_LLM_TIMEOUT` (120 s).
+There is no `LLM_TEMPERATURE`, `LLM_MAX_TOKENS` or `LLM_FALLBACK_MODEL` setting, and no
+per-provider model variable: `OPENROUTER_MODEL` is forwarded into the container and ignored.
+
+`chat()` hardcodes `temperature=0.2` and `max_tokens=1500`, and on exhausted retries it
+returns the offline summary. The Laravel budget for the call is `AI_ENGINE_LLM_TIMEOUT`
+(120 s).
 
 Switching providers needs no code change: `effective_llm_base_url()` and
 `effective_llm_api_key()` in `app/core/config.py` resolve the pair from `LLM_PROVIDER`.

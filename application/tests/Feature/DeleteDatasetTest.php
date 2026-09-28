@@ -73,6 +73,22 @@ class DeleteDatasetTest extends TestCase
         $this->assertDatabaseMissing('datasets', ['id' => $dataset->getKey()]);
     }
 
+    public function test_deleting_a_dataset_is_audited(): void
+    {
+        $dataset = $this->storedDataset();
+
+        $this->actingAs(User::factory()->analyst()->create())
+            ->delete(route('datasets.destroy', $dataset));
+
+        // Delete removes the row and the uploaded file with no undo, so the one
+        // destructive action an analyst can take must leave a trace.
+        $this->assertDatabaseHas('audit_logs', [
+            'action' => 'dataset.deleted',
+            'resource' => 'dataset',
+            'resource_id' => $dataset->getKey(),
+        ]);
+    }
+
     public function test_the_api_delete_endpoint_returns_a_message_envelope(): void
     {
         $dataset = $this->storedDataset();

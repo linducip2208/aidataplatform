@@ -1,6 +1,7 @@
 <?php
 
 use App\Exceptions\AiEngineException;
+use App\Http\Middleware\EnsureAccountActive;
 use App\Http\Middleware\EnsureRole;
 use App\Http\Middleware\ForceJsonResponse;
 use Illuminate\Foundation\Application;
@@ -21,6 +22,19 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
 
         $middleware->append(ForceJsonResponse::class);
+
+        // Every authenticated route, not just the role-gated ones: a
+        // deactivated account must lose read access too, not only the ability
+        // to write.
+        $middleware->web(append: [
+            EnsureAccountActive::class,
+        ]);
+        $middleware->api(append: [
+            EnsureAccountActive::class,
+            // A blanket ceiling on the token API; the specific routes below
+            // carry the tighter limits.
+            'throttle:api',
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
         // The routing pipeline renders exceptions itself, so a global middleware

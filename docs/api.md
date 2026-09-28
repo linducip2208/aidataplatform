@@ -10,7 +10,7 @@ Base URLs: Laravel `http://laravel:8000` (public `/`, direct `:8080`); FastAPI
   `X-Service-Key`). No browser ever calls it directly in production.
 
 > Job ids are **integers**, not UUIDs. The engine's `import_jobs.id` is the id
-> returned by `POST /imports/upload` and polled at `GET /imports/jobs/{id}`.
+> returned by `POST /imports/upload` and polled at `GET /imports/jobs/{job_id}`.
 > Datasets are identified in the Laravel API by a UUID (`datasets.uuid`).
 
 ## Envelope conventions
@@ -35,12 +35,24 @@ Laravel responses:
 
 | Method | Path | Auth | Response |
 |---|---|---|---|
-| GET | `/up` (laravel) | none | `200` health probe |
+| GET | `/up` (laravel) | none | health probe, the container healthcheck target |
 | GET | `/api/health` (laravel) | bearer | engine health, `200` even when the engine is down |
 | GET | `/api/v1/health` (engine) | none | `{"status":"ok","app","env","version"}` |
 | GET | `/api/v1/readiness` (engine) | none | `{"ready":bool,"checks":{"db","redis"}}` |
+| GET | `/api/v1/liveness` (engine) | none | `{"alive":true}` |
 | GET | `/metrics` (engine) | none/internal | Prometheus text |
 | GET | `/docs`, `/redoc`, `/openapi.json` (engine) | none | Swagger |
+
+None of the engine rows use the envelope. `require_service_auth` is a dependency
+of every business route and of nothing else, so `/health`, `/readiness`,
+`/liveness`, `/metrics` and the schema routes answer bare objects and text —
+which is why a green health check says nothing about service-key configuration.
+The engine also exposes unauthenticated root aliases of the first three
+(`/health`, `/readiness`, `/liveness`); the root `/readiness` is a fixed
+`{"ready":true}` stub, so only `/api/v1/readiness` performs the dependency
+checks. Nginx clears `X-Service-Key` on `/ai-api/` and 404s `/ai-api/metrics` outright, so
+every business call through that prefix is rejected and no scrape can be relayed from
+outside the network — it is for the docs and the probe routes only.
 
 ## Auth (Laravel)
 
@@ -60,7 +72,7 @@ Wrong credentials or a deactivated account → `422`.
 | GET | `/api/datasets` | any | paginated; filters `q`, `dataset_type`, `status`; `sort=-created_at` |
 | POST | `/api/datasets` | admin, analyst | multipart `file`, optional `name`, required `dataset_type`; `201` |
 | GET | `/api/datasets/{uuid}` | any | includes `columns`, `mappings`, `metadata` |
-| GET | `/api/datasets/{uuid}/quality` | any | runs the profile, `score`/`verdict`/`checks`/`issues` |
+| GET | `/api/datasets/{uuid}/quality` | admin, analyst | runs the profile and writes the result back to the row, so it is a write behind a GET; `score`/`verdict`/`checks`/`issues` |
 | POST | `/api/datasets/{uuid}/mapping` | admin, analyst | `{"mappings":{"src":"target"},"save_as_template":"name"?}` |
 | POST | `/api/datasets/{uuid}/commit` | admin, analyst | `{"run_async":true}`, `202` |
 | DELETE | `/api/datasets/{uuid}` | admin, analyst | deletes the row and the stored file |
@@ -93,7 +105,9 @@ unknown to the engine.
 | POST | `/api/v1/imports/commit` | `{import_job_id,dataset_type,mappings{},run_async}` | ETL result, or `{import_job_id,status:"queued"}` |
 | GET | `/api/v1/imports/jobs/{job_id}` | — | `{id,status,progress,total_rows,processed_rows,error_rows,report}` |
 
-Statuses only ever gain values; `queued|uploaded|running|succeeded|failed`.
+Status values are exactly `uploaded` (created by the upload), `queued` (`run_async`
+accepted the job), `done` and `done_with_errors` (terminal, written by the ETL),
+and `failed` (validation rejected the file, or the task exhausted its retries).
 
 ## Analytics (Laravel proxies the engine)
 
@@ -127,12 +141,70 @@ All accept `date_from`, `date_to`, `branch`, `category`, `granularity`
 | Method | Path | Auth | Notes |
 |---|---|---|---|
 | POST | `/api/agent/chat` | bearer | `{message,conversation_id?}` → `data` carries `reply` **and** `answer` (same value), `conversation_id`, `evidence[]`, `steps` |
-| POST | `/api/rag/query` | bearer | `{question\|query,top_k?}` → `{answer,citations[]}` |
+| POST | `/api/rag/query` | bearer | `{question or query,top_k?}` → `{answer,citations[]}` |
 
 `reply` is kept as an alias of `answer` so older clients keep working.
 
-Engine-side, the assistant is `POST /api/v1/ai/chat` (`{message,conversation_id,context}`)
-and RAG indexing is `POST /api/v1/rag/ingest` (`{title,content,source,doc_type}`).
+## Engine endpoints with no Laravel proxy
+
+Published for completeness. All take the service key and return the standard
+envelope; `App\Services\AiEngineClient` has a method for each one.
+
+| Method | Path | Auth | Body / notes |
+|---|---|---|---|
+| GET | `/api/v1/models` | key | registry list, newest first, capped at 200 rows |
+| GET | `/api/v1/models/{model_id}` | key | model plus `versions[]` |
+| POST | `/api/v1/models/{model_id}/promote` | key | `{version_id,to_status}` |
+| POST | `/api/v1/training/train` | key | `{model_type,name,params{},dataset[]}`, synchronous |
+| POST | `/api/v1/training/predict` | key | `{model_type,model_name,payload{}}` |
+| POST | `/api/v1/ai/chat` | key | `{message,conversation_id,context}` |
+| POST | `/api/v1/ai/report` | key | `{period,branch,format}`; `format: "html"` returns raw HTML, not the envelope |
+| POST | `/api/v1/rag/ingest` | key | `{title,content,source,doc_type}`, synchronous |
+| POST | `/api/v1/rag/query` | key | `{query,top_k}` |
+| POST | `/api/v1/forecast` | key | `{history[],horizon,granularity}` |
+| POST | `/api/v1/customers/churn` | key | `{customers[]}` |
+| POST | `/api/v1/customers/segment` | key | `{customers[],n_clusters}` |
+| POST | `/api/v1/inventory/health` | key | `{}` |
+| POST | `/api/v1/anomaly/detect` | key | `{series[],sensitivity}` |
+| POST | `/api/v1/recommend` | key | `{customer_id,product_id,top_k}` |
+
+## Alerting (engine, service key)
+
+Laravel has no proxy for these; call the engine directly or drive them from a
+scheduled job. `app/alerts/rules.py` owns the vocabulary and the
+open → acknowledged → resolved state machine; `app/alerts/service.py` owns the
+SQL and exposes the Celery task the beat schedule runs every minute.
+
+| Method | Path | Auth | Notes |
+|---|---|---|---|
+| GET | `/api/v1/alerts/metrics` | key | the metric registry, with unit, default severity and operators |
+| GET | `/api/v1/alerts/rules` | key | `?active_only=true` to filter |
+| POST | `/api/v1/alerts/rules` | key | `{name,metric,operator,threshold,is_active}`; created |
+| GET | `/api/v1/alerts/rules/{rule_id}` | key | one rule |
+| PATCH | `/api/v1/alerts/rules/{rule_id}` | key | only the keys in `RULE_FIELDS`; an unknown key is a configuration error |
+| DELETE | `/api/v1/alerts/rules/{rule_id}` | key | refused while any alert still references the rule; no content |
+| GET | `/api/v1/alerts/alerts` | key | alerts newest first; `?status=`, `?rule_id=`, `?limit=` (default 50, max 200) |
+| GET | `/api/v1/alerts/alerts/{alert_id}/events` | key | the alert's history, oldest first |
+| POST | `/api/v1/alerts/alerts/{alert_id}/ack` | key | `{note?}`; acknowledging is not resolving |
+
+The list route is also reachable at `GET /api/v1/alerts`, the shorter alias the router
+declares. Both call the same handler; the table names the explicit form.
+
+`metric` is one of `sales.revenue`, `sales.orders`, `sales.units`, `sales.aov`,
+`sales.growth_pct`, `branch.revenue_max`, `branch.count`,
+`inventory.stockout_count`, `inventory.dead_stock_count`,
+`inventory.min_days_of_stock`, `finance.net_profit`, `finance.margin_pct`.
+`operator` (or `condition`) is one of `>`, `>=`, `<`, `<=`, `==`, `!=`; the
+spelled-out aliases (`gt`, `greater`, `less_or_equal`, …) are accepted too.
+`alerts.severity` is derived from the metric, not from the rule, because
+`alert_rules` has no severity column.
+
+Notification is a single optional webhook: set `ALERT_WEBHOOK_URL` on the engine
+to enable it, leave it unset for no delivery. Failures are recorded on the
+`alert_events` row and never abort an evaluation. See `monitoring.md` §8.
+
+`GET /api/v1/alerts/alerts` is an unlisted alias of `GET /api/v1/alerts`, hidden from the
+schema; prefer the short form.
 
 ## Errors
 
@@ -141,7 +213,7 @@ and RAG indexing is `POST /api/v1/rag/ingest` (`{title,content,source,doc_type}`
 - Engine down / connection refused → `503`, `code: ai_engine_error`.
 - Engine 5xx or a rejected service key → `502` (the platform, not the browser,
   is misconfigured). Upstream 4xx (e.g. a malformed mapping) → `422`.
-- The engine sets `X-Request-Id` on every response; the failure body carries the
+- The engine sets `X-Request-ID` on every response; the failure body carries the
   operation name (`imports.upload`, `analytics.kpi`, …).
 
 ## Pagination

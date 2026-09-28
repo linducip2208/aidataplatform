@@ -44,8 +44,9 @@ LLM_API_KEY= / OPENROUTER_API_KEY=<real>
 Set `SERVICE_API_KEY` to a real random value: the engine treats the shipped placeholder (and
 any empty value) as "not configured" and then rejects every caller, so a placeholder boots the
 stack but breaks every engine-backed page. `SERVICE_API_KEY_HEADER` must stay `X-Service-Key`
-— Compose passes it to the `laravel` service but not to the engine, so renaming it there alone
-desynchronises the two.
+— Compose injects the one root-`.env` value into `laravel`, `fastapi` and both Celery
+services, so the two sides cannot drift; a malformed name is the one case where they can,
+because the engine falls back to the default.
 
 `APP_ENV` is shared by both services. The engine accepts `dev`, `demo`, `local`, `test`,
 `staging`, `stage`, `prod` and `production`, and raises at startup on any other value rather
@@ -85,7 +86,8 @@ Both migration systems must run after any schema change:
 ```bash
 make migrate                                   # artisan migrate --force + alembic upgrade head
 docker compose exec laravel php artisan db:seed --force   # first boot only
-docker compose ps                              # celery-worker and celery-beat must be Up
+docker compose ps                              # laravel-queue, laravel-schedule, celery-worker
+                                                # and celery-beat must be Up
 ```
 
 The Laravel image entrypoint already runs `php artisan migrate --force` and
@@ -96,28 +98,39 @@ The Laravel image entrypoint already runs `php artisan migrate --force` and
 docker compose exec laravel php artisan platform:doctor
 ```
 
-`platform:doctor` is read-only and checks `APP_KEY`, `APP_ENV`, `APP_DEBUG`, `AI_ENGINE_URL`,
-`SERVICE_API_KEY`, `MAX_UPLOAD_MB` against the PHP limits, `QUALITY_THRESHOLD`, the engine
-health and readiness, the database connection, the `vector` and `pg_trgm` extensions, the 27
-engine tables, the 12 Laravel tables, row counts, and that `storage/` and the datasets disk
-are writable. It exits non-zero on any `fail`. `--json` emits the same report for a monitor.
+`platform:doctor` is read-only and runs seventeen checks in four groups: configuration
+(`APP_KEY`, `APP_ENV`, `APP_DEBUG`, `AI_ENGINE_URL`, `SERVICE_API_KEY`, `MAX_UPLOAD_MB`
+against the PHP limits, `QUALITY_THRESHOLD`), the engine (`/api/v1/health`,
+`/api/v1/readiness`, and an authenticated `engine_auth` round trip to `/api/v1/models`),
+the database (connection, the `vector` and `pg_trgm` extensions, the 27 engine tables, the
+12 Laravel tables, row counts) and the filesystem (`storage/` and the datasets disk
+writable). It exits non-zero on any `fail`. `--json` emits the same report for a monitor.
 
 Scale worker throughput when training or imports back up:
 
 ```bash
 docker compose up -d --scale celery-worker=3
+docker compose up -d --scale laravel-queue=3
 ```
+
+`laravel-queue` consumes the `datasets` and `default` queues;
+`laravel-schedule` runs `php artisan schedule:work --whisper` and therefore never exits — a
+`laravel-schedule` that is restarting is a real failure, not noise. Both share the `laravel`
+image, environment and volumes, so no build is needed.
 
 Keep `CELERY_QUEUES` a superset of the queues `celery_app.py` routes to: `import_file` and
 `transform_dataset` go to `imports`, `validate_dataset` to `quality`, the ML tasks to `ml`,
 `generate_ai_report` to `agent`, `generate_embeddings` to `rag` and `scheduled_data_sync` to
 `default`. A task routed to a queue the worker does not subscribe to is enqueued and never
-consumed, which looks exactly like a stuck import. Compose's default list already matches.
+consumed, which looks exactly like a stuck import. Compose's default list already matches. The
+alert evaluation task has no route of its own and lands on `default`, which is why the
+per-minute `alert-evaluation` entry in the beat schedule runs without a queue change.
 
 `CELERY_BEAT_SCHEDULER` must be `celery.beat.PersistentScheduler`. Compose's own default is
 `redbeat.RedBeatScheduler` and `redbeat` is not in `ai-engine/requirements.txt`, so with the
 variable unset the beat container crash-loops with "Cannot load the scheduler class" and the
-two scheduled entries (a nightly sync at 01:15 and an hourly AI report) never run.
+three scheduled entries (a nightly sync at 01:15, an hourly AI report, and the per-minute
+alert evaluation) never run.
 
 ## 5. Applying updates
 
@@ -143,9 +156,10 @@ Run through this with `security.md` before go-live.
   `GRAFANA_ADMIN_PASSWORD` and the LLM keys. The shipped `.env.example` defaults are not
   secrets.
 - `REDIS_PASSWORD` is empty by design. The Redis healthcheck in `docker-compose.yml` runs
-  `redis-cli ping` without `-a`, so setting a password makes Redis permanently unhealthy and
-  `laravel` and `fastapi` block on `service_healthy` forever. If you must set one, add
-  `-a $REDIS_PASSWORD` to that healthcheck as well.
+  `redis-cli -a "$REDIS_PASSWORD" ping` when the variable is non-empty, so setting a password
+  is supported; `infrastructure/scripts/healthcheck.sh` authenticates the same way. Before
+  relying on it, verify with `docker compose ps` that `redis` reports `healthy` — a mismatch
+  between the two scripts leaves the stack waiting forever.
 - Postgres and Redis publish host ports for operator convenience. Bind them to `127.0.0.1` or
   drop the `ports:` entries.
 - Nginx already sets `X-Frame-Options`, `X-Content-Type-Options`, `X-XSS-Protection` and

@@ -23,14 +23,15 @@ The three seeded demo accounts in `README.md` are development credentials. Rotat
 **Service-to-service** — `X-Service-Key: $SERVICE_API_KEY` on every Laravel → engine call,
 injected by `App\Services\AiEngineClient`. The key never reaches a browser, a Blade template
 or a Vite-exposed variable. Laravel sends it in the header named by
-`SERVICE_API_KEY_HEADER`, and the engine reads the same variable
-(`ai-engine/app/core/security.py::resolve_service_key_header`), so the two agree as long as
-the name is left alone. It must stay `X-Service-Key`: `docker-compose.yml` passes
-`SERVICE_API_KEY_HEADER` to the `laravel` service but **not** to `fastapi`, `celery-worker` or
-`celery-beat`, so renaming it on the Laravel side alone makes the engine keep listening on
-`X-Service-Key` while Laravel sends something else. The engine also rejects a header name that
-is not a valid RFC 7230 token or that collides with a load-bearing header (`Authorization`,
-`Cookie`, `Host`, `X-Request-ID`, …), falling back to `X-Service-Key` in both cases.
+`SERVICE_API_KEY_HEADER`, and the engine reads the same variable through
+`app/core/config.py::service_api_key_header` and resolves it with
+`ai-engine/app/core/security.py::resolve_service_key_header`. Compose injects the one
+root-`.env` value into `laravel`, `laravel-queue`, `laravel-schedule`, `fastapi`,
+`celery-worker` and `celery-beat`, so the two sides cannot drift apart. Keep it at
+`X-Service-Key`: the engine falls back to that name whenever the configured one is not a
+valid RFC 7230 token or collides with a load-bearing header (`Authorization`, `Cookie`,
+`Host`, `X-Request-ID`, …), so a malformed value desynchronises the pair rather than
+failing loudly.
 
 Generate and rotate per environment:
 
@@ -46,11 +47,9 @@ placeholder secrets are treated as "not configured" — an empty value, `change-
 anyone who read the repository. So a correct deployment cannot serve the warehouse to an
 anonymous client, and an unconfigured one cannot serve it to anybody.
 
-What you must still get right is the *key itself*: it has to be identical on both sides and
-non-empty. Compose injects one root-`.env` value into `laravel`, `fastapi`, `celery-worker` and
-`celery-beat`, so they agree by construction; a mismatch means someone edited
-`application/.env` separately (the container reads the four `AI_ENGINE_*_TIMEOUT` values from
-there) or restarted only some of the containers. Verify:
+What you must still get right is the *key itself*: it has to be non-empty and real. Compose
+injects one root-`.env` value into all six services, so a mismatch is unlikely; a placeholder
+or a stale value is not.
 
 ```bash
 curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8001/api/v1/models                        # 401
@@ -59,7 +58,10 @@ curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8001/api/v1/models -H 
 ```
 
 `GET /api/v1/health` is deliberately unauthenticated and answers `200` regardless, so a green
-health check proves nothing about key configuration. `GET /api/v1/readiness` likewise.
+health check proves nothing about key configuration. `GET /api/v1/readiness` and
+`GET /api/v1/liveness` likewise. `platform:doctor` closes that gap with an `engine_auth` check
+that makes one authenticated round trip to `GET /api/v1/models` and reports the mismatch by
+name.
 
 The engine's limiter is a sliding window that fails closed: `RATE_LIMIT_PER_MINUTE`
 requests per minute (default 120) per credential fingerprint **and** three times that per path
@@ -104,12 +106,17 @@ header in `infrastructure/nginx/default.conf` and restart nginx. `default.conf` 
 JS.
 
 The browser must reach the engine only through Laravel. Nginx does expose `/ai-api/` with the
-prefix stripped, which makes the engine reachable from the internet on the same origin as the
-app; the service key is the only thing protecting it. Either remove that `location` block, or
-restrict it to internal callers with `allow`/`deny` plus an `internal;` directive. In Docker,
-`docker-compose.yml` publishes `fastapi` on host port 8001 and Postgres on 5432 and Redis on
-6379 — bind those to `127.0.0.1` or drop the `ports:` entries so they are reachable only from
-the host and the compose network. UFW allows 22, 80 and 443.
+prefix stripped, but the `location` block clears `X-Service-Key` before proxying, so no caller
+can present the credential through it: every business route answers `401` and only the
+unauthenticated routes (`/api/v1/health`, `/api/v1/readiness`, `/api/v1/liveness`, `/docs`,
+`/redoc`, `/openapi.json`) answer at all. `/ai-api/metrics` gets a hard `404` from nginx
+without reaching the engine, because proxying it would make the peer the nginx container —
+which is on the internal network — and hand the full scrape to the internet. That is
+intentional; keep both directives, and if you want `/ai-api/` gone entirely, remove the
+`location` block. In Docker, `docker-compose.yml` publishes `fastapi` on host port 8001 and
+Postgres on 5432 and Redis on 6379 — the published engine port is the one real exposure,
+because it bypasses Nginx; bind those to `127.0.0.1` or drop the `ports:` entries so they
+are reachable only from the host and the compose network. UFW allows 22, 80 and 443.
 
 Internal traffic is plain HTTP on the compose network, which is the normal arrangement; the
 one thing to avoid is `AI_ENGINE_URL` pointing at a plain-HTTP non-internal host from a
@@ -133,6 +140,13 @@ SQLAlchemy with bound parameters. `AiEngineClient` sends JSON only, so there is 
 inject a filter expression through the analytics endpoints — the `branch`, `category`,
 `date_from`, `date_to` and `granularity` query parameters are passed as bound values.
 
+**Authorization.** `App\Http\Middleware\EnsureRole` backs the `role:` middleware used in
+`routes/web.php` and `routes/api.php`. It resolves each role string with
+`UserRole::tryFrom()` and refuses the whole route with `403` when any entry is unrecognised,
+rather than treating it as `viewer` — a typo such as `role:admin,analist` must not widen the
+gate. An inactive account is refused before the role comparison, and an unauthenticated JSON
+request is answered `401` with `Unauthenticated.` rather than a redirect.
+
 **PII.** The warehouse (`fact_sales`, `fact_purchases`, `fact_expenses`, `fact_inventory`, `dim_customer`) and the
 RAG corpus (`rag_documents`, `rag_chunks`) contain the business data. There is no row-level
 security and no per-dataset ACL in this build: role checks happen in the controllers only, and
@@ -155,10 +169,13 @@ whatever is in the warehouse to anyone allowed to ask a question.
 
 Base images are pinned to specific tags: `pgvector/pgvector:pg18`, `redis:7-alpine`,
 `nginx:1.27-alpine`, `prom/prometheus:v2.53.0`, `grafana:11.2.0`, `php:8.3-fpm-alpine`,
-`python:3.13-slim`. Laravel requires `php ^8.2` and `laravel/framework ^12.0`; the engine
-pins its Python dependencies in `ai-engine/requirements.txt`. Run `composer audit` and
-`pip-audit` before a release; `.github/workflows/laravel.yml` and `python.yml` are where to
-add them as blocking steps.
+`node:22-alpine` (frontend assets stage, not in the runtime image), `python:3.13-slim`.
+Laravel requires `php ^8.2` and `laravel/framework ^12.0`; the engine pins its Python
+dependencies in `ai-engine/requirements.txt`. The frontend stage runs `npm ci` against the
+committed `application/package-lock.json` and aborts the build if it is missing, so a
+non-reproducible asset tree cannot reach an image. Run `composer audit` and `pip-audit` before
+a release; `.github/workflows/laravel.yml` and `python.yml` are where to add them as blocking
+steps.
 
 `infrastructure/nginx/default.conf` is mounted read-only, and the Laravel container runs as a
 non-root user with `storage/` and `bootstrap/cache` chowned to `www-data`. In compose,
@@ -170,16 +187,17 @@ image content instead of mounting.
 
 `audit_logs` is append-only and Laravel-owned. It records the actor (the user's e-mail, or
 `system`), the action, the resource and its id, the request IP, and a JSON detail blob, for
-login, logout, upload, mapping, quality, commit, assistant turns, training and promotion. See
-`administrator.md` §6 for the full action list and ready-to-run compliance queries. Review it
-monthly and on every leaver.
+login, logout, password changes, upload, mapping, quality, commit, assistant turns, user
+administration, training and promotion. See `administrator.md` §6 for the full action list and
+ready-to-run compliance queries. Review it monthly and on every leaver.
 
-There is no separate audit trail inside the engine: its own `audit_logs` table is migrated but
-never written, and `ai_conversations`/`ai_messages` store the assistant transcript without an
-actor. Attribute AI work through the Laravel rows.
+There is no separate audit trail inside the engine, and there cannot be one: `audit_logs` is
+declared only by the Laravel migration, so the engine has no table to write to. `ai_conversations`
+and `ai_messages` store the assistant transcript without an actor. Attribute AI work through
+the Laravel rows.
 
 On a suspected leak, in order: rotate `SERVICE_API_KEY` (root `.env`, then
-`docker compose up -d laravel fastapi celery-worker celery-beat`), rotate the LLM keys,
-deactivate the affected user, then investigate `audit_logs` and the container logs. Preserve
-`docker compose logs` output before restarting anything — it is the only record of the
-failure.
+`docker compose up -d laravel laravel-queue laravel-schedule fastapi celery-worker celery-beat`),
+rotate the LLM keys, deactivate the affected user, then investigate `audit_logs` and the
+container logs. Preserve `docker compose logs` output before restarting anything — it is the
+only record of the failure.

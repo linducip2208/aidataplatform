@@ -17,15 +17,18 @@ Laravel (app/orchestration) + FastAPI AI Engine (ingestion, quality, ML, agent, 
                          |              |                        |
                   +------+------+ +-----+------+ +------+-------+ +------+
                   | Postgres:5432| | Redis:6379 | | Celery worker| | Beat |
-                  | pgvector     | | broker+cache| | imports,ml.. | | sched|
+                  | pgvector     | | broker     | | imports,ml.. | | sched|
                   +------+------+ +-----+------+ +--------------+ +------+
                          |              |
-                  +------+------+ +-----+------+
-                  | Prometheus:9090     | Grafana:3000 |
-                  +---------------------+--------------+
+                  +------+------+ +-----+------+ +--------------+ +------+
+                  | Prometheus:9090    | Grafana:3000 | laravel-queue    | laravel-
+                  +---------------------+--------------+ datasets,default | schedule
 ```
 
-**Service map:** `laravel` (UI + REST orchestration, calls FastAPI with `SERVICE_API_KEY`), `fastapi` (stateless API + enqueues Celery), `celery-worker` (imports/quality/ML/agent/RAG jobs), `celery-beat` (scheduler; `app/workers/celery_app.py` defines no `beat_schedule` yet, so it currently idles), `postgres` (all tables live in the default `public` schema and are namespaced by prefix: `raw_*`, `staging_*`, `fact_*`/`dim_*`, `ml_*`, `rag_*`, `ai_*`, `audit_logs`), `redis` (cache + broker), `prometheus`/`grafana` (metrics).
+`laravel-queue` and `laravel-schedule` are the same image as `laravel` with the
+entrypoint cleared, so they share its environment, volumes and build.
+
+**Service map:** `laravel` (UI + REST orchestration, calls FastAPI with `SERVICE_API_KEY`), `fastapi` (stateless API + enqueues Celery), `celery-worker` (imports/quality/ML/agent/RAG jobs), `celery-beat` (engine schedule: `nightly-data-sync` at 01:15, `hourly-ai-report` at :00, `alert-evaluation` every minute, all `Asia/Jakarta`), `laravel-queue` (Laravel queue worker for the `datasets` and `default` queues), `laravel-schedule` (`php artisan schedule:work --whisper`: `sync:import-status` at 02:15 and `sync:quality` at 02:45), `postgres` (all tables live in the default `public` schema and are namespaced by prefix: `raw_*`, `staging_*`, `fact_*`/`dim_*`, `ml_*`, `rag_*`, `ai_*`, `alert_*`, `audit_logs`), `redis` (cache + broker), `prometheus`/`grafana` (metrics).
 
 ## Repo layout
 
@@ -43,7 +46,7 @@ aidataplatform/
 │  ├─ app/core/                 config, security (service key), errors
 │  ├─ alembic/                  engine schema migrations
 │  └─ docker-entrypoint.sh      waits for Postgres, runs `alembic upgrade head`
-├─ infrastructure/       nginx, docker (laravel/celery images), monitoring, scripts
+├─ infrastructure/       nginx, docker (laravel assets+runtime image), monitoring, scripts
 ├─ docs/                 Indonesian documentation set (api.md is the English contract)
 ├─ tests/                cross-service smoke tests: run.sh, README.md, fixtures/
 ├─ .github/workflows/    laravel.yml, python.yml (CI), docker.yml (image build), deploy.yml
@@ -57,16 +60,16 @@ aidataplatform/
 Two services share one Postgres database and one schema, and they own different tables.
 
 - **Laravel owns** users, roles, personal access tokens, datasets plus their columns, mappings and metadata, chat threads and messages, audit logs, and the cache/job tables. It serves the Blade UI and the public `/api/*` surface.
-- **The engine owns** `raw_uploads`, `staging_tables`, `import_jobs`, `mapping_templates`, `data_quality_reports`, the star schema (`fact_sales`, `fact_purchases`, `fact_expenses`, `fact_inventory`, `dim_*`), `ml_models`/`model_versions`/`training_runs`/`prediction_runs`, `rag_documents`/`rag_chunks`, `ai_conversations`/`ai_messages` and `alerts*`.
+- **The engine owns** `raw_uploads`, `staging_tables`, `import_jobs`, `mapping_templates`, `data_quality_reports`, the star schema (`fact_sales`, `fact_purchases`, `fact_expenses`, `fact_inventory`, `dim_*`), `ml_models`/`model_versions`/`training_runs`/`prediction_runs`, `rag_documents`/`rag_chunks`, `ai_conversations`/`ai_messages` and `alert_rules`/`alerts`/`alert_events`.
 - **The browser never calls the engine.** Laravel proxies it: the UI talks to `/api/*`, Laravel calls the engine on `AI_ENGINE_URL` with the `X-Service-Key` header, and returns `502`/`503` when the engine is unreachable or rejects the key.
 - **Migrations are split.** Laravel's tables come from `php artisan migrate` (run by the Laravel container on start), the engine's from `alembic upgrade head` (run by `ai-engine/docker-entrypoint.sh`). Run both after changing a schema: `make migrate`.
-- **One collision to know about:** both services declare an `audit_logs` table. Alembic skips a table that already exists, so whichever migration runs first defines the columns and the other service gets the shorter definition.
+- **No table has two owners.** `audit_logs` is declared only by the Laravel migration; the engine's Alembic revision deliberately does not create it, because the two containers start concurrently and whichever ran second would fail on "relation already exists".
 
 ## Prerequisites
 
 - Docker Desktop 4.30+ (or Docker Engine 26+ + Compose v2) — 8 GB RAM minimum, 20 GB disk.
 - Git, Make (`choco install make` on Windows or use Git Bash / WSL2).
-- Node.js 20+ to build the frontend assets in `application/` (needed on a fresh clone even for the Docker path), plus PHP 8.3 and Python 3.13 for the local non-Docker path.
+- Node.js 20+ **only for the local non-Docker path** — the Docker image compiles the frontend itself, so nothing is needed on the host for `docker compose up`. Plus PHP 8.3 and Python 3.13 for that same local path.
 - Ports free: 80, 443, 8080, 8001, 9090, 3000, 5432, 6379.
 - (Optional prod) Ubuntu 24.04 VM + domain + LLM key (OpenRouter).
 
@@ -83,22 +86,14 @@ cp .env.example .env
 #    service key: python -c "import secrets; print(secrets.token_urlsafe(48))"
 #    app key:     openssl rand -base64 32   (prefix with base64:)
 
-# 2) build the frontend assets — REQUIRED, the Blade layouts call @vite()
-#    (application/resources/views/layouts/app.blade.php) and every page 500s
-#    without public/build/manifest.json
-cd application
-npm install
-npm run build
-cd ..
-
-# 3) start the stack
+# 2) start the stack
 docker compose up -d --build
 docker compose ps
 bash infrastructure/scripts/healthcheck.sh        # Linux/macOS/Git Bash
 powershell -ExecutionPolicy Bypass -File infrastructure/scripts/healthcheck.ps1   # Windows
 ```
 
-Compose bind-mounts `./application` over `/var/www/html`, so the container serves the `application/public/build` you just built. `docker compose up` alone is not enough on a fresh clone.
+The frontend assets do **not** need to be built on the host. `infrastructure/docker/laravel.Dockerfile` has a `node:22-alpine` assets stage that runs `npm ci && npm run build` inside the image, and `laravel-entrypoint.sh` installs the result into `public/build` on every start. The only host-side prerequisite is that `application/package-lock.json` is committed — the build stage runs `npm ci` and fails loudly if the lockfile is missing.
 
 Open:
 
@@ -109,7 +104,7 @@ Open:
 | AI Engine direct | http://localhost:8001/docs — `/api/v1/health` health |
 | AI via Nginx | http://localhost/ai-api/docs |
 | Prometheus | http://localhost:9090 |
-| Grafana | http://localhost:3000 (admin / `$GRAFANA_ADMIN_PASSWORD`) |
+| Grafana | http://localhost:3000 (admin / `$GRAFANA_ADMIN_PASSWORD`) — the Prometheus datasource and the dashboard are provisioned automatically |
 
 Migrate + seed:
 
@@ -150,7 +145,13 @@ copy .env.example .env
 #   DATABASE_URL / REDIS_URL at your local Postgres and Redis
 alembic upgrade head
 uvicorn app.main:app --reload --port 8001
-celery -A app.workers.celery_app:celery_app worker -l info -P solo  # Windows: solo pool
+
+# 3) worker, beat, and the Laravel queue/scheduler (further terminals)
+celery -A app.workers.celery_app:celery_app worker -l info -P solo -Q default,imports,quality,ml,agent,rag
+celery -A app.workers.celery_app:celery_app beat -l info --scheduler celery.beat.PersistentScheduler
+# Windows: solo pool (-P solo) is required for Celery
+# Laravel side: `php artisan queue:work --queue=datasets,default --tries=3`
+#               `php artisan schedule:work`
 ```
 
 Port 8001 on purpose: `application/.env.example` ships `AI_ENGINE_URL=http://127.0.0.1:8001`, so the engine has to listen there. Laravel reaches the engine on that URL and sends `SERVICE_API_KEY` in the `SERVICE_API_KEY_HEADER` header; if the two values disagree, every engine-backed page returns `502`.
@@ -171,8 +172,8 @@ GRAFANA_ADMIN_PASSWORD=
 
 `.env.example` is the complete, grouped reference for every variable Compose interpolates, plus the AI engine timeouts read by `application/config/ai_engine.php`. Two rules that are easy to get wrong:
 
-- `SERVICE_API_KEY_HEADER` must stay `X-Service-Key` unless the engine is patched too — `ai-engine/app/core/security.py` hardcodes that header name and does not read the variable.
-- `APP_ENV` must be one of `demo`, `dev`, `staging`, `prod`. Any other value (including Compose's own `production` default) is silently rewritten to `dev` by the engine, which turns off service-key enforcement.
+- `SERVICE_API_KEY_HEADER` must stay `X-Service-Key`. Both services read it and both resolve it the same way (`application/config/ai_engine.php` and `ai-engine/app/core/config.py::service_api_key_header`, via `ai-engine/app/core/security.py::resolve_service_key_header`), and Compose injects the one root-`.env` value into `laravel`, `fastapi` and both Celery services, so the two cannot drift apart. The engine still validates the name: a value that is not a valid RFC 7230 token, or that collides with a load-bearing header (`Authorization`, `Cookie`, `Host`, `X-Request-ID`, …), falls back to `X-Service-Key`.
+- `APP_ENV` must be one of `dev`, `demo`, `local`, `test`, `staging`, `stage`, `prod`, `production`. The engine raises at startup on anything else rather than guessing, so a typo stops the `fastapi` container instead of silently running it as a dev box. Compose's own default is `production` and the shipped root `.env.example` uses `prod`.
 
 Rules: no real secrets in repo, rotate the service key per environment, `APP_DEBUG=false` in prod.
 
@@ -207,19 +208,18 @@ There is no Swagger/Scribe UI on the Laravel side. The available surfaces are:
 
 ## Monitoring
 
-- Prometheus scrapes `fastapi:8000/metrics` every 15s. The `laravel` job in `infrastructure/monitoring/prometheus.yml` points at `laravel:8000/metrics`, which this build does not expose, so that target stays DOWN until a Prometheus exporter is added. The `redis` and `postgres` jobs need the optional `redis-exporter` / `postgres-exporter` containers, which are not part of the base compose file.
-- Grafana: the dashboard JSON lives at `infrastructure/monitoring/grafana-dashboard.json` (API latency p95, Celery queue depth, import/ML job rates, average quality score, RAG queries). Compose mounts it into `/etc/grafana/provisioning/dashboards/`, but no dashboard provider is provisioned, so import it by hand on first run: Grafana → Dashboards → New → Import → upload the JSON, datasource Prometheus.
+- `infrastructure/monitoring/prometheus.yml` scrapes two targets: `fastapi:8000/metrics` every 15s and Prometheus itself. Laravel has no `/metrics` route, and the `redis` / `postgres` exporter jobs are present only as commented-out blocks, so they are not even registered as DOWN targets. To scrape Laravel, add a Prometheus client library and a `/metrics` route; to add the exporters, uncomment the blocks and start the containers on `aidata-appnet`.
+- The engine declares exactly two metrics, `http_requests_total{method,path,status}` and `http_request_latency_seconds` (a `Histogram`).
+- Grafana: `docker-compose.yml` provisions both the Prometheus datasource and a dashboard provider, and mounts `infrastructure/monitoring/grafana-dashboard.json` into `/etc/grafana/provisioning/dashboards/`, so the dashboard appears on first start under the **AIDataPlatform** folder. Several of its panels are written against metric names this build does not emit; see `docs/monitoring.md` §5 for the two to edit.
 - Details: `docs/monitoring.md`.
 
 ## Troubleshooting (top 5)
 
-1. Every page returns `500` / "Vite manifest not found" → frontend assets were never built. Run `npm install && npm run build` in `application/`; under Compose the bind mount serves `application/public/build`, so build it before `docker compose up`. `npm run dev` is the alternative while developing.
-2. `laravel unhealthy / curl /up fail` → `docker compose logs laravel`. Three usual causes: `APP_KEY` still empty (every request fails on the encrypter), Postgres not reachable (`docker compose exec postgres pg_isready`), or `storage/` not writable by the web user.
-3. Engine-backed pages return `502` / the engine logs `401` → `SERVICE_API_KEY` mismatch between Laravel and the engine. Compose injects the same value into both, so this normally means `application/.env` was edited and diverges, or `SERVICE_API_KEY_HEADER` was renamed while the engine still hardcodes `X-Service-Key`. Note that `GET /api/v1/health` is deliberately unauthenticated and will keep answering `200` while business calls fail.
-4. Stack never finishes starting / `redis` is reported unhealthy → you set `REDIS_PASSWORD` in `.env`. The Redis healthcheck in `docker-compose.yml` runs `redis-cli ping` without `-a`, so with a password Redis stays unhealthy and `laravel`/`fastapi` block on `service_healthy` forever. Leave it empty in development; if you must set it, add `-a $REDIS_PASSWORD` to that healthcheck too.
+1. Every page returns `500` / "Vite manifest not found" → the `laravel` image was built without a working assets stage. `docker compose build --no-cache laravel`, then `up -d laravel`. The `laravel` healthcheck tests `public/build/manifest.json` explicitly, so it reports unhealthy rather than waiting for a request. If the build itself failed, the missing piece is almost always an absent `application/package-lock.json`, which the assets stage requires for `npm ci`.
+2. `laravel` unhealthy / curl /up fail → `docker compose logs laravel`. Three usual causes: `APP_KEY` still empty (the entrypoint refuses to start and every request would fail on the encrypter), Postgres not reachable (`docker compose exec postgres pg_isready`), or a `php artisan migrate --force` failure — the entrypoint leaves `storage/framework/migrate_failed` behind, which the same healthcheck detects.
+3. Engine-backed pages return `502` / the engine logs `401` → `SERVICE_API_KEY` mismatch between Laravel and the engine. Compose injects the same value into both, so this normally means `application/.env` was edited and diverges, or the value was changed without restarting every service. Note that `GET /api/v1/health` is deliberately unauthenticated and will keep answering `200` while business calls fail.
+4. Async work never finishes / the `laravel-queue` or `laravel-schedule` container keeps restarting → check `docker compose ps`. `laravel-queue` consumes the `datasets` and `default` queues, `laravel-schedule` runs `php artisan schedule:work` (the long-running form; `schedule:run` would fire once and exit). For the engine side, `celery-worker` crash-loops with "Cannot load the scheduler class" on `celery-beat` if `CELERY_BEAT_SCHEDULER=redbeat.RedBeatScheduler` — `redbeat` is not in `ai-engine/requirements.txt`, so the shipped `.env.example` defaults to the built-in scheduler.
 5. `413` on upload → three separate limits: `client_max_body_size 500M` in `infrastructure/nginx/default.conf`, PHP `upload_max_filesize=500M` / `post_max_size=550M` (baked into the image by `infrastructure/docker/laravel.Dockerfile`), and Laravel's own `max:MAX_UPLOAD_MB` validation rule. Raise all three together; if the file passes the size check but the extension is not in `config('ai_engine.allowed_extensions')`, you get `422` instead of `413`.
-
-Also worth knowing: `celery-beat` crash-loops with "Cannot load the scheduler" if `CELERY_BEAT_SCHEDULER=redbeat.RedBeatScheduler` — `redbeat` is not in `ai-engine/requirements.txt`. The shipped `.env.example` defaults to the built-in scheduler.
 
 Full matrix: `docs/troubleshooting.md`.
 

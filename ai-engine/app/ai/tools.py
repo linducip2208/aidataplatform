@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import math
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Dict, List
 
@@ -134,16 +134,26 @@ def evidence_data(data: Any) -> Dict[str, Any]:
     return {"value": safe}
 
 
-def _load_frame(table: str, db_session) -> pd.DataFrame:
+def _load_frame(table: str, db_session, window_days: int = 90) -> pd.DataFrame:
     """Load a warehouse frame for ``table`` as a DataFrame of plain Python values.
 
-    The table is selected by literal comparison, never interpolated, and every filter
-    this layer needs is expressed as a SQLAlchemy join condition, so the dialect binds
-    the values. Returns an empty frame when the session is absent or the query fails.
+    The table is selected by literal comparison, never interpolated, and every
+    filter this layer needs is expressed as a SQLAlchemy condition, so the dialect
+    binds the values. Returns an empty frame when the session is absent or the query fails.
+
+    The window and the ordering matter. Previously this was an unfiltered
+    ``LIMIT 5000`` with no ``ORDER BY``, so it scanned the whole fact table and
+    returned an *arbitrary* 5000 rows: the same question could be answered with
+    different numbers on two consecutive calls, and the evidence persisted
+    alongside the answer was not reproducible. It is now a bounded, ordered
+    window — recent rows only, served by the ``transaction_date`` index — so the
+    numbers are stable and the cost is proportional to the window, not to the
+    table.
     """
     if db_session is None:
         return pd.DataFrame()
     try:
+        cutoff = date.today() - timedelta(days=max(1, int(window_days)))
         if table == "sales":
             from app.database.models import DimBranch, DimCustomer, DimProduct, FactSales
 
@@ -152,7 +162,9 @@ def _load_frame(table: str, db_session) -> pd.DataFrame:
                                  DimBranch.branch_name, DimProduct.category).outerjoin(
                 DimCustomer, FactSales.customer_id == DimCustomer.id).outerjoin(
                 DimProduct, FactSales.product_id == DimProduct.id).outerjoin(
-                DimBranch, FactSales.branch_id == DimBranch.id).limit(FRAME_ROW_LIMIT)
+                DimBranch, FactSales.branch_id == DimBranch.id).filter(
+                FactSales.transaction_date >= cutoff).order_by(
+                FactSales.transaction_date.desc().nullslast()).limit(FRAME_ROW_LIMIT)
             rows = [{"revenue": r[0] or 0, "quantity": r[1] or 0, "transaction_date": r[2],
                      "customer_name": r[3] or "", "product_name": r[4] or "",
                      "branch_name": r[5] or "", "category": r[6] or ""} for r in q.all()]
@@ -161,7 +173,9 @@ def _load_frame(table: str, db_session) -> pd.DataFrame:
             from app.database.models import DimProduct, FactInventory
 
             q = db_session.query(FactInventory.stock_qty, DimProduct.product_name).outerjoin(
-                DimProduct, FactInventory.product_id == DimProduct.id).limit(FRAME_ROW_LIMIT)
+                DimProduct, FactInventory.product_id == DimProduct.id).filter(
+                FactInventory.snapshot_date >= cutoff).order_by(
+                FactInventory.snapshot_date.desc().nullslast()).limit(FRAME_ROW_LIMIT)
             return pd.DataFrame([{"product_name": r[1] or "", "stock_qty": r[0] or 0} for r in q.all()])
     except Exception:
         return pd.DataFrame()

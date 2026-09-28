@@ -11,6 +11,67 @@ name: aidataplatform
 # Dockerfile may sit outside the context), but the COPY paths would then resolve
 # to application/application/... and the build would fail. Root context is also
 # what .github/workflows/docker.yml uses.
+#
+# The three x-laravel-* blocks below are the build, the environment and the
+# volumes shared by `laravel`, `laravel-queue` and `laravel-schedule`. They are
+# anchors rather than copies on purpose: a worker booted with a subset of the app
+# env does not fail loudly, it falls back to the defaults in
+# config/database.php (127.0.0.1) and quietly talks to nothing.
+
+x-laravel-build: &laravel-build
+  context: .
+  dockerfile: infrastructure/docker/laravel.Dockerfile
+
+x-laravel-environment: &laravel-environment
+  APP_NAME: ${APP_NAME:-AIDataPlatform}
+  APP_ENV: ${APP_ENV:-production}
+  APP_DEBUG: ${APP_DEBUG:-false}
+  APP_URL: ${APP_URL:-http://localhost}
+  APP_KEY: ${APP_KEY:-}
+  DB_CONNECTION: pgsql
+  DB_HOST: postgres
+  DB_PORT: 5432
+  DB_DATABASE: ${POSTGRES_DB:-aidata}
+  DB_USERNAME: ${POSTGRES_USER:-aidata}
+  DB_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+  REDIS_HOST: redis
+  REDIS_PORT: 6379
+  # "null" is the literal Laravel's env() maps to PHP null. An empty string
+  # is not null, and config/database.php would then call Redis AUTH('') against
+  # a passwordless server and fail every cache/session/queue operation.
+  REDIS_PASSWORD: ${REDIS_PASSWORD:-null}
+  # config/database.php reads the queue's database from REDIS_DB and the cache
+  # store's from REDIS_CACHE_DB. Compose injected neither, so the value in the
+  # root .env.example was silently ignored and both stores resolved from
+  # application/.env instead - which can put the queue on the cache database.
+  REDIS_DB: ${REDIS_DB:-0}
+  REDIS_CACHE_DB: ${REDIS_CACHE_DB:-1}
+  CACHE_STORE: redis
+  SESSION_DRIVER: redis
+  QUEUE_CONNECTION: redis
+  AI_ENGINE_URL: ${AI_ENGINE_URL:-http://fastapi:8000}
+  SERVICE_API_KEY: ${SERVICE_API_KEY:-}
+  SERVICE_API_KEY_HEADER: ${SERVICE_API_KEY_HEADER:-X-Service-Key}
+  FILESYSTEM_DISK: ${FILESYSTEM_DISK:-local}
+  MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-500}
+  QUALITY_THRESHOLD: ${QUALITY_THRESHOLD:-0.75}
+  # php artisan serve forks PHP_CLI_SERVER_WORKERS children only when the
+  # value is in the process environment. laravel-entrypoint.sh exports it.
+  PHP_CLI_SERVER_WORKERS: ${PHP_CLI_SERVER_WORKERS:-4}
+  # Read by laravel-entrypoint.sh; mirrors the ai-engine/.env.example contract.
+  # laravel-queue and laravel-schedule clear that entrypoint, so for them the
+  # variable is inert: only the `laravel` service ever migrates.
+  AUTO_MIGRATE: ${AUTO_MIGRATE:-true}
+  AUTO_MIGRATE_STRICT: ${AUTO_MIGRATE_STRICT:-false}
+
+# The bind mount hides everything the image put in /var/www/html, including
+# the Vite build; the assets stage therefore writes to /opt/aidata/vite and
+# the entrypoint installs it into public/build on every start.
+x-laravel-volumes: &laravel-volumes
+  - ./application:/var/www/html
+  - laravel-storage:/var/www/html/storage
+  - datasets-data:/var/www/html/storage/app/datasets
+  - models-cache:/var/www/html/storage/app/models
 
 services:
   postgres:
@@ -77,9 +138,7 @@ services:
       - appnet
 
   laravel:
-    build:
-      context: .
-      dockerfile: infrastructure/docker/laravel.Dockerfile
+    build: *laravel-build
     container_name: aidata-laravel
     restart: unless-stopped
     depends_on:
@@ -88,45 +147,8 @@ services:
       redis:
         condition: service_healthy
     environment:
-      APP_NAME: ${APP_NAME:-AIDataPlatform}
-      APP_ENV: ${APP_ENV:-production}
-      APP_DEBUG: ${APP_DEBUG:-false}
-      APP_URL: ${APP_URL:-http://localhost}
-      APP_KEY: ${APP_KEY:-}
-      DB_CONNECTION: pgsql
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_DATABASE: ${POSTGRES_DB:-aidata}
-      DB_USERNAME: ${POSTGRES_USER:-aidata}
-      DB_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      # "null" is the literal Laravel's env() maps to PHP null. An empty string
-      # is not null, and config/database.php would then call Redis AUTH('') against
-      # a passwordless server and fail every cache/session/queue operation.
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-null}
-      CACHE_STORE: redis
-      SESSION_DRIVER: redis
-      QUEUE_CONNECTION: redis
-      AI_ENGINE_URL: ${AI_ENGINE_URL:-http://fastapi:8000}
-      SERVICE_API_KEY: ${SERVICE_API_KEY:-}
-      FILESYSTEM_DISK: ${FILESYSTEM_DISK:-local}
-      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-500}
-      QUALITY_THRESHOLD: ${QUALITY_THRESHOLD:-0.75}
-      # php artisan serve forks PHP_CLI_SERVER_WORKERS children only when the
-      # value is in the process environment. laravel-entrypoint.sh exports it.
-      PHP_CLI_SERVER_WORKERS: ${PHP_CLI_SERVER_WORKERS:-4}
-      # Read by laravel-entrypoint.sh; mirrors the ai-engine/.env.example contract.
-      AUTO_MIGRATE: ${AUTO_MIGRATE:-true}
-      AUTO_MIGRATE_STRICT: ${AUTO_MIGRATE_STRICT:-false}
-    volumes:
-      # The bind mount hides everything the image put in /var/www/html, including
-      # the Vite build; the assets stage therefore writes to /opt/aidata/vite and
-      # the entrypoint installs it into public/build on every start.
-      - ./application:/var/www/html
-      - laravel-storage:/var/www/html/storage
-      - datasets-data:/var/www/html/storage/app/datasets
-      - models-cache:/var/www/html/storage/app/models
+      <<: *laravel-environment
+    volumes: *laravel-volumes
     expose:
       - "8000"
     ports:
@@ -152,6 +174,93 @@ services:
     networks:
       - appnet
 
+  # Consumes the `datasets` queue RefreshQualityScoreJob is pushed onto
+  # ($this->onQueue('datasets') in application/app/Jobs). `default` is listed
+  # too so a job dispatched without an explicit queue is still executed.
+  laravel-queue:
+    build: *laravel-build
+    container_name: aidata-laravel-queue
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      # The laravel-storage volume hides storage/framework and storage/logs on
+      # first boot, and laravel-entrypoint.sh is the only thing that recreates
+      # them. Waiting for `laravel` to be healthy means the schema is migrated
+      # and the skeleton exists before the first job tries to log anything.
+      laravel:
+        condition: service_healthy
+    # laravel-entrypoint.sh ends in `exec php artisan serve`, so a `command:`
+    # alone would be ignored and this container would serve HTTP on 8000. An
+    # empty entrypoint clears the image ENTRYPOINT (Compose spec) and leaves
+    # `command:` as PID 1. The boot steps the entrypoint performs are covered by
+    # the `laravel: service_healthy` gate above.
+    entrypoint: []
+    command:
+      - php
+      - artisan
+      - queue:work
+      - --queue=datasets,default
+      - --tries=3
+      - --backoff=30
+      # Laravel recycles the worker process after an hour so a slow leak cannot
+      # accumulate; `restart: unless-stopped` starts the replacement.
+      - --max-time=3600
+    environment:
+      <<: *laravel-environment
+    volumes: *laravel-volumes
+    # No healthcheck, the same choice as celery-worker and celery-beat: this
+    # process listens on no port, and no artisan command reports on a running
+    # worker (Horizon is not a dependency). A dead worker is already restarted
+    # by the restart policy; a wedged one is visible as a queue depth that stops
+    # falling in Redis.
+    networks:
+      - appnet
+
+  laravel-schedule:
+    build: *laravel-build
+    container_name: aidata-laravel-schedule
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      # withoutOverlapping() stores its mutex in the cache store (redis here), and
+      # both scheduled commands read the datasets table.
+      laravel:
+        condition: service_healthy
+    # Same entrypoint override as laravel-queue; schedule:work must be PID 1.
+    entrypoint: []
+    # schedule:work, not schedule:run. schedule:run is one-shot - it fires the
+    # due tasks and exits - so as a container command it would run the schedule
+    # once and stop. Nothing else in this stack calls it (no cron, no host
+    # crontab entry), which is what left routes/console.php dead code.
+    # schedule:work is the long-running form: it re-execs schedule:run once a
+    # minute, forever, and it is what composes well with `restart: unless-stopped`.
+    # withoutOverlapping() is honoured inside the schedule:run it spawns, and
+    # --whisper keeps "no scheduled commands were ready" out of the logs at that
+    # cadence.
+    command:
+      - php
+      - artisan
+      - schedule:work
+      - --whisper
+    environment:
+      <<: *laravel-environment
+    volumes: *laravel-volumes
+    # No healthcheck, like celery-beat: schedule:work is an infinite loop, so the
+    # only failure mode is exiting, which the restart policy already covers. A
+    # skipped minute is not observable from inside the container. The engine is
+    # deliberately not a depends_on either: both scheduled commands preflight it
+    # themselves and exit non-zero, and withoutOverlapping(30) releases the lock
+    # when the process ends, so an engine outage costs one failed run in the log
+    # rather than the whole scheduler.
+    networks:
+      - appnet
+
   fastapi:
     build:
       context: ./ai-engine
@@ -171,16 +280,19 @@ services:
       CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-}@redis:6379/${CELERY_BROKER_DB:-1}
       CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-}@redis:6379/${CELERY_RESULT_DB:-2}
       SERVICE_API_KEY: ${SERVICE_API_KEY:-}
+      SERVICE_API_KEY_HEADER: ${SERVICE_API_KEY_HEADER:-X-Service-Key}
       LLM_PROVIDER: ${LLM_PROVIDER:-openrouter}
       LLM_BASE_URL: ${LLM_BASE_URL:-https://openrouter.ai/api/v1}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-anthropic/claude-3.5-sonnet}
-      EMBED_MODEL: ${EMBED_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+      LLM_EMBEDDING_MODEL: ${LLM_EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
-      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-anthropic/claude-3.5-sonnet}
       QUALITY_THRESHOLD: ${QUALITY_THRESHOLD:-0.75}
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-500}
+      # celery_app.py reads TZ; without it the containers ran UTC while the
+      # Laravel app and the seeders are configured for Asia/Jakarta.
+      TZ: ${TZ:-Asia/Jakarta}
       # ai-engine/Dockerfile works in /code and docker-entrypoint.sh defaults
       # APP_DIR to /code, so the bind mount and the writable data directories have
       # to live under /code. The previous /app paths mounted nothing: the engine
@@ -224,7 +336,7 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
-    command: celery -A app.celery_app.celery_app worker --loglevel=info --concurrency=${CELERY_CONCURRENCY:-4} -Q ${CELERY_QUEUES:-default,imports,quality,ml,agent,rag}
+    command: celery -A app.workers.celery_app.celery_app worker --loglevel=info --concurrency=${CELERY_CONCURRENCY:-4} -Q ${CELERY_QUEUES:-default,imports,quality,ml,agent,rag}
     environment:
       APP_DIR: /code
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-aidata}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-aidata}
@@ -233,12 +345,21 @@ services:
       CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-}@redis:6379/${CELERY_BROKER_DB:-1}
       CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-}@redis:6379/${CELERY_RESULT_DB:-2}
       SERVICE_API_KEY: ${SERVICE_API_KEY:-}
+      SERVICE_API_KEY_HEADER: ${SERVICE_API_KEY_HEADER:-X-Service-Key}
       LLM_PROVIDER: ${LLM_PROVIDER:-openrouter}
       LLM_API_KEY: ${LLM_API_KEY:-}
+      # The worker runs the LLM tasks (agent, report), so it needs the same
+      # provider configuration as the API. Without these it fell back to
+      # api.openai.com / gpt-4o-mini while the API used openrouter.
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://openrouter.ai/api/v1}
+      LLM_MODEL: ${LLM_MODEL:-anthropic/claude-3.5-sonnet}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
       QUALITY_THRESHOLD: ${QUALITY_THRESHOLD:-0.75}
       STORAGE_PATH: /code/data/datasets
       MODEL_PATH: /code/data/models
       AUTO_MIGRATE: ${AUTO_MIGRATE:-false}
+      TZ: ${TZ:-Asia/Jakarta}
     volumes:
       - ./ai-engine:/code
       - datasets-data:/code/data/datasets
@@ -257,15 +378,17 @@ services:
         condition: service_started
       redis:
         condition: service_healthy
-    command: celery -A app.celery_app.celery_app beat --loglevel=info --scheduler ${CELERY_BEAT_SCHEDULER:-redbeat.RedBeatScheduler} --pidfile=/tmp/celerybeat.pid
+    command: celery -A app.workers.celery_app.celery_app beat --loglevel=info --scheduler ${CELERY_BEAT_SCHEDULER:-celery.beat.PersistentScheduler} --pidfile=/tmp/celerybeat.pid
     environment:
       APP_DIR: /code
       REDIS_URL: redis://:${REDIS_PASSWORD:-}@redis:6379/${REDIS_DB:-0}
       CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-}@redis:6379/${CELERY_BROKER_DB:-1}
       CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-}@redis:6379/${CELERY_RESULT_DB:-2}
       SERVICE_API_KEY: ${SERVICE_API_KEY:-}
+      SERVICE_API_KEY_HEADER: ${SERVICE_API_KEY_HEADER:-X-Service-Key}
       # Beat only schedules; it must not run migrations.
       AUTO_MIGRATE: "false"
+      TZ: ${TZ:-Asia/Jakarta}
     volumes:
       - ./ai-engine:/code
     networks:

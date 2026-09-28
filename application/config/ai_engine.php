@@ -54,11 +54,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | API token lifetime (days)
+    |--------------------------------------------------------------------------
+    */
+
+    'token_ttl_days' => (int) env('API_TOKEN_TTL_DAYS', 30),
+
+    /*
+    |--------------------------------------------------------------------------
     | Accepted upload extensions and dataset types
     |--------------------------------------------------------------------------
     */
 
     'allowed_extensions' => ['csv', 'xlsx', 'xls', 'json', 'parquet', 'zip', 'txt'],
-    'dataset_types' => ['sales', 'inventory', 'purchases', 'expenses', 'customers', 'generic'],
+    // Mirrors the branches `ai-engine/app/ingestion/etl.py` actually dispatches.
+    // `generic` was offered here but has no ETL branch — the engine raises on
+    // it — and `products` was supported by the engine but missing here, so both
+    // lists disagreed with the other side.
+    'dataset_types' => ['sales', 'inventory', 'purchases', 'expenses', 'customers', 'products'],
 
 ];

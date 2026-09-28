@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Enums\DatasetStatus;
+use App\Models\AuditLog;
 use App\Models\Dataset;
 use App\Services\DatasetIngestionService;
 use App\Support\ApiResponse;
@@ -89,12 +90,24 @@ class DatasetController extends Controller
 
     public function destroy(Request $request, Dataset $dataset): RedirectResponse
     {
+        $name = $dataset->name;
+        $size = $dataset->size_bytes;
+        $filename = $dataset->source_filename;
+
         if ($dataset->path) {
             Storage::disk($dataset->disk)->delete($dataset->path);
         }
 
-        $name = $dataset->name;
         $dataset->delete();
+
+        // Deleting a dataset also removes the uploaded file from disk, with no
+        // undo. Without this the audit trail records nothing for the one
+        // destructive action an analyst can take.
+        AuditLog::record('dataset.deleted', 'dataset', $dataset->getKey(), [
+            'name' => $name,
+            'source_filename' => $filename,
+            'size_bytes' => $size,
+        ]);
 
         return redirect()
             ->route('datasets.index')

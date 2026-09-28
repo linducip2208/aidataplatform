@@ -10,7 +10,7 @@ For a one-off, the engine accepts the service key on its own — that is how `te
 `infrastructure/scripts/healthcheck.sh` work.
 
 ```bash
-BASE=http://localhost:8001          # or http://localhost/ai-api (prefix stripped, same paths)
+BASE=http://localhost:8001
 KEY=$SERVICE_API_KEY
 
 # health needs no key
@@ -23,6 +23,11 @@ J=$(curl -s -X POST $BASE/api/v1/imports/upload -H "X-Service-Key: $KEY" \
 # poll it
 curl -s "$BASE/api/v1/imports/jobs/$J" -H "X-Service-Key: $KEY"
 ```
+
+Use the published engine port, not the Nginx path. `/ai-api/` strips the prefix correctly and
+serves `/docs`, `/redoc` and the unauthenticated probes, but `infrastructure/nginx/default.conf`
+sets `proxy_set_header X-Service-Key ""` on that location, so any credential you send through
+it is dropped and every business route answers `401`.
 
 Every engine response is an envelope: `{"success": true, "data": …}` or
 `{"success": false, "error": {"message": "…"}}`. The exception is `GET /api/v1/health`,
@@ -87,6 +92,11 @@ Two shapes, and only two:
 - **Celery.** `POST /api/v1/imports/commit` with `run_async: true` enqueues
   `app.workers.tasks.import_file` on the `imports` queue. The engine has no callback or
   webhook mechanism, so polling is the only way to observe completion.
+- **Laravel queue and scheduler.**   `php artisan sync:quality --queue` pushes one
+  `App\Jobs\RefreshQualityScoreJob` per dataset onto the `datasets` queue, which
+  `docker-compose.yml` runs as the `laravel-queue` service. `application/routes/console.php`
+  schedules `sync:import-status` and `sync:quality` daily, run by `laravel-schedule`
+  (`php artisan schedule:work --whisper`).
 
 Progress is a 0.0–1.0 fraction on `import_jobs.progress`, not 0–100. There is no
 `GET /api/v1/jobs/{id}` catch-all; the import job status lives at

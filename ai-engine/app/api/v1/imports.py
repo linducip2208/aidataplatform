@@ -8,6 +8,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from sqlalchemy.orm import Session
+from typing import Literal
 
 from app.core.config import settings
 from app.core.security import require_service_auth
@@ -15,6 +16,11 @@ from app.database.connection import get_db
 from app.schemas.imports import MappingRequest
 
 router = APIRouter(tags=["imports"])
+
+# The types `app.ingestion.etl.run_etl` dispatches on. `dataset_type` used to be
+# free text, so an unsupported value was accepted here and only failed at commit
+# time, minutes later, as a ValueError inside the worker.
+DatasetType = Literal["sales", "inventory", "purchases", "expenses", "customers", "products"]
 
 
 def _save_upload(up: UploadFile) -> Path:
@@ -26,7 +32,7 @@ def _save_upload(up: UploadFile) -> Path:
 
 
 @router.post("/imports/upload")
-def upload_file(file: UploadFile = File(...), dataset_type: str = Form(default="sales"),
+def upload_file(file: UploadFile = File(...), dataset_type: DatasetType = Form(default="sales"),
                 db: Session = Depends(get_db), _: str = Depends(require_service_auth)) -> dict:
     from app.database.models import ImportJob, RawUpload
     from app.ingestion.validator import validate_file

@@ -8,11 +8,13 @@ empty. Do not qualify a table with one of them.
 
 Each table has exactly one DDL owner: Alembic for the data tables, Laravel migrations for the
 app tables. Laravel links to engine-owned ids through soft integer columns and never through
-foreign keys. See `architecture.md` §3 for the rule and the one known `audit_logs` collision.
+foreign keys. See `architecture.md` §3 for the rule; §7 covers the one table that is only
+declared once, on purpose.
 
 Column types below are read from `ai-engine/alembic/versions/0001_initial_data_platform.py`
-and `application/database/migrations/`. Primary keys are `integer` (a `SERIAL`) everywhere in
-the engine; the one exception is `dim_date`, whose natural key `date_key` is declared
+(tables) and `0002_query_indexes.py` (indexes), and from
+`application/database/migrations/`. Primary keys are `integer` (a `SERIAL`) everywhere in the
+engine; the one exception is `dim_date`, whose natural key `date_key` is declared
 `autoincrement=False` so it never becomes a sequence-backed `SERIAL`.
 
 ## 1. Ingestion (engine, Alembic)
@@ -55,15 +57,23 @@ dates inline in `_load_warehouse`.
 
 | Table | Columns | Indexes |
 |---|---|---|
-| `fact_sales` | `transaction_date`, `customer_id` FK `dim_customer.id`, `product_id` FK `dim_product.id`, `branch_id` FK `dim_branch.id`, `quantity`, `selling_price`, `discount`, `revenue`, `import_job_id` | `ix_fact_sales_transaction_date`, `ix_fact_sales_date`, `ix_fact_sales_import_job_id` |
-| `fact_inventory` | `snapshot_date`, `product_id` FK `dim_product.id`, `warehouse_id` FK `dim_warehouse.id`, `stock_qty`, `import_job_id` | `ix_fact_inventory_snapshot_date` |
-| `fact_purchases` | `purchase_date`, `supplier_id` FK `dim_supplier.id`, `product_id` FK `dim_product.id`, `quantity`, `cost`, `import_job_id` | `ix_fact_purchases_purchase_date` |
-| `fact_expenses` | `expense_date`, `department_id` FK `dim_department.id`, `amount`, `category`, `import_job_id` | `ix_fact_expenses_expense_date` |
+| `fact_sales` | `transaction_date`, `customer_id` FK `dim_customer.id`, `product_id` FK `dim_product.id`, `branch_id` FK `dim_branch.id`, `quantity`, `selling_price`, `discount`, `revenue`, `import_job_id` | `ix_fact_sales_transaction_date`, `ix_fact_sales_import_job_id` |
+| `fact_inventory` | `snapshot_date`, `product_id` FK `dim_product.id`, `warehouse_id` FK `dim_warehouse.id`, `stock_qty`, `import_job_id` | `ix_fact_inventory_snapshot_date`, `ix_fact_inventory_import_job_id` |
+| `fact_purchases` | `purchase_date`, `supplier_id` FK `dim_supplier.id`, `product_id` FK `dim_product.id`, `quantity`, `cost`, `import_job_id` | `ix_fact_purchases_purchase_date`, `ix_fact_purchases_import_job_id` |
+| `fact_expenses` | `expense_date`, `department_id` FK `dim_department.id`, `amount`, `category`, `import_job_id` | `ix_fact_expenses_expense_date`, `ix_fact_expenses_import_job_id` |
 
 `import_job_id` on every fact is a plain integer with **no** foreign key: it is the
 idempotency handle. `run_etl` deletes the rows of that job before rewriting them, so
 re-running a job replaces its own output and touches nothing else. The tables are not
 partitioned; `fact_sales` grows linearly and is the first candidate when it gets large.
+
+Revision `0002_query_indexes.py` is the diff between what the models declare and what the
+queries need. It adds the three missing `import_job_id` indexes above, because the identical
+purge delete runs against all three tables, and it drops `ix_fact_sales_date` as a duplicate of
+`ix_fact_sales_transaction_date` on the same column. That drop is one half of a fix: the
+standalone `Index("ix_fact_sales_date", FactSales.transaction_date)` at the bottom of
+`app/database/models.py` still declares it, so a future `create_all()` would recreate the
+duplicate. `downgrade()` puts it back, on purpose, so the revision is reversible.
 
 ## 4. ML registry (engine, Alembic)
 
@@ -85,27 +95,49 @@ partitioned; `fact_sales` grows linearly and is the first candidate when it gets
 ## 5. AI assistant and RAG (engine, Alembic)
 
 - `ai_conversations(id, created_at, updated_at, title, meta JSONB)` — one per assistant
-  thread. `title` is the first message truncated to 80 characters.
+  thread. `title` is the first line of the user message, truncated to 200 characters
+  (`MAX_TITLE_CHARS` in `app/ai/agent.py`).
 - `ai_messages(id, created_at, updated_at, conversation_id FK ai_conversations.id, role,
   content, evidence JSONB)` — `role` is `user` or `assistant`; `evidence` holds the tool
   output the answer was grounded in. Indexed by `ix_ai_messages_conversation_id`.
 - `rag_documents(id, created_at, updated_at, source, title, doc_type, meta JSONB)` — one row
-  per `POST /api/v1/rag/ingest` call.
+  per ingested *content*, not per call. `ingest_text` looks up `(source, title)` first and
+  compares the SHA-256 of the content; the same text re-ingested replaces the chunks in place
+  and answers `unchanged`, different text answers `updated`.
 - `rag_chunks(id, created_at, updated_at, document_id FK rag_documents.id, chunk_index,
   content, embedding, meta JSONB)` — the embedding column is `pgvector Vector(1536)` when
   pgvector is importable, otherwise `JSONB`. **There is no HNSW index on it.** Retrieval in
-  `app/ai/rag.py` loads up to 2000 chunks and scores them in Python (cosine, plus a +0.05
-  keyword boost); when the embedding call fails it falls back to a substring match scored
-  1.0 or 0.0. Plan for that O(n) scan before indexing at scale.
+  `app/ai/rag.py` loads up to 2000 chunks (`SCAN_LIMIT`) and scores them in Python (cosine,
+  plus a +0.05 keyword boost); when the embedding call fails it falls back to a substring
+  match scored 1.0 or 0.0. Plan for that O(n) scan before indexing at scale. `0002` explains
+  why adding an ANN index now would be dead weight.
 
 ## 6. Alerting and quality (engine, Alembic)
 
-- `alert_rules(id, created_at, updated_at, name, metric, condition, threshold, is_active)`
-- `alerts(id, created_at, updated_at, rule_id FK alert_rules.id, severity, message, status)`
-- `alert_events(id, created_at, updated_at, alert_id FK alerts.id, event_type, payload JSONB)`
+- `alert_rules(id, created_at, updated_at, name VARCHAR(128), metric VARCHAR(64),
+  condition VARCHAR(16), threshold FLOAT, is_active BOOLEAN)`
+- `alerts(id, created_at, updated_at, rule_id FK alert_rules.id, severity VARCHAR(16),
+  message TEXT, status VARCHAR(32))`
+- `alert_events(id, created_at, updated_at, alert_id FK alerts.id, event_type VARCHAR(32),
+  payload JSONB)` — indexed on `alert_id`
 
-All three are declared and migrated. No endpoint and no Celery task writes to them yet, so
-alerting is schema-only in this build.
+All three are declared, migrated and now written. `ai-engine/app/alerts/` is the first and
+only writer: `rules.py` holds the metric registry, the operator aliases and the
+open/acknowledged/resolved state machine; `service.py` holds the CRUD, the evaluation and the
+Celery task; `notifiers.py` holds the optional webhook. `celery-beat` runs
+`app.alerts.service.evaluate_alerts` every minute, and the read surface is the engine's own
+`/api/v1/alerts/*` routes — see `api.md` §Alerting and `monitoring.md` §8.
+
+`alerts.status` is one of `open`, `acknowledged`, `resolved`; an acknowledged alert is still
+un-resolved, so it keeps suppressing a duplicate. `alert_events.event_type` is one of `fired`,
+`acknowledged`, `resolved`, `notified`.
+
+Two schema limitations shape the design and are worth knowing before you write a rule. There
+is no severity column on `alert_rules`, so severity is a property of the *metric* and is copied
+onto the alert when it opens. And there is no per-rule dimension, filter or evaluation window,
+so the window is the constant `EVALUATION_WINDOW_DAYS` (1) for every rule. "One un-resolved
+alert per rule" is an application invariant, not a database one — the service takes a per-rule
+process lock to hold it.
 
 - `data_quality_reports(id, created_at, updated_at, import_job_id FK import_jobs.id, score,
   breakdown JSONB, issues JSONB)` — one row per `GET /api/v1/imports/quality/{job_id}` call,
@@ -113,19 +145,23 @@ alerting is schema-only in this build.
   `consistency`; `issues` is a list of `{rule, column, count, sample_rows, message}`.
   Laravel mirrors the latest run onto `datasets.quality_score` / `datasets.quality_verdict`.
 
-## 7. `audit_logs` — declared twice
+## 7. `audit_logs` — Laravel only
 
-The engine's Alembic revision declares `audit_logs(id, actor, action, resource, detail JSONB,
-created_at)`. Laravel's `2026_09_28_000400_create_audit_logs_table.php` declares the wider
-`audit_logs(id, user_id FK users.id, actor, action, resource, resource_id, ip, detail JSONB,
-created_at)`, with indexes on `(resource, resource_id)` and `created_at`.
+Declared once, by
+`application/database/migrations/2026_09_28_000400_create_audit_logs_table.php`:
+`audit_logs(id, user_id FK users.id, actor, action VARCHAR(128) indexed, resource VARCHAR(191),
+resource_id, ip, detail JSONB, created_at)` with indexes on `(resource, resource_id)` and
+`created_at`.
 
-Laravel's definition is the one `App\Models\AuditLog` requires — it writes all of `user_id`,
-`actor`, `action`, `resource`, `resource_id`, `ip`, `detail`. Alembic's `upgrade()` skips a
-table that already exists, so if the engine migrates first, Laravel's `Schema::create` fails
-on a missing `migrations` row and Laravel's columns are never added. Run
-`php artisan migrate --force` (or `make migrate`, which does both) and verify with
-`php artisan platform:doctor` that the table has the Laravel columns.
+The Alembic revision does **not** create it, and that is deliberate. `laravel` and `fastapi`
+start concurrently; two `CREATE TABLE audit_logs` would race, and the loser's whole migration
+run aborts on "relation already exists" — taking the engine's other 26 tables with it on a
+first boot. `App\Models\AuditLog` therefore only ever talks to the Laravel definition, and
+`laravel` is the only writer.
+
+The engine keeps no audit trail of its own, so `ai_conversations` and `ai_messages` hold the
+assistant transcript with no actor attached. Attribute AI work through the Laravel rows; see
+`administrator.md` §6.
 
 ## 8. App tables (Laravel, migrations)
 
@@ -146,7 +182,8 @@ columns added by `2026_09_28_000100_add_role_to_users_table.php`:
 checksum_sha256, status, import_job_id, row_count, column_count, columns JSONB, mappings JSONB,
 metadata JSONB, quality_score, quality_verdict, quality_checked_at, committed_at,
 user_id FK users.id (nullOnDelete), timestamps`, with indexes on `dataset_type`, `status`,
-`checksum_sha256`, `import_job_id`, and `(user_id, created_at)`.
+`checksum_sha256`, `import_job_id`, `(user_id, created_at)`, `created_at`, `updated_at` and
+the composite `(quality_verdict, quality_checked_at)`.
 
 - `uuid` is the public identifier. Every Laravel path is `/api/datasets/{uuid}`; `id` never
   leaves the database.
@@ -157,7 +194,11 @@ user_id FK users.id (nullOnDelete), timestamps`, with indexes on `dataset_type`,
   (`DatasetStatus::isTerminal()`).
 - `quality_verdict` holds `pass` or `quarantine` (`App\Enums\QualityVerdict`).
 - `dataset_type` is one of `config('ai_engine.dataset_types')`:
-  `sales`, `inventory`, `purchases`, `expenses`, `customers`, `generic`.
+  `sales`, `inventory`, `purchases`, `expenses`, `customers`, `generic`. That allowlist is
+  Laravel's only: the engine's `DATASET_TYPES` is `sales`, `inventory`, `purchases`,
+  `expenses`, `customers`, `products`, and it raises `Unsupported dataset_type` for anything
+  else. A `generic` dataset therefore passes Laravel's validation and fails at the engine on
+  commit.
 - `metadata` accumulates the raw engine payloads under the keys `validation`, `preview`,
   `quality` and `import_job`.
 - `disk` and `path` locate the copy Laravel stores; deleting the dataset row also removes
@@ -178,9 +219,10 @@ evidence JSONB, steps, timestamps)`, indexed on `(chat_thread_id, created_at)`.
 See §7. Written by `AuditLog::record($action, $resource, $resourceId, $detail)`, which fills
 `actor` from `auth()->user()->email` (or the literal `system`) and `ip` from the current
 request. Append-only: the model sets `UPDATED_AT = null`, so there is no `updated_at` column.
-Actions emitted by the current code: `auth.api_login`, `auth.api_logout`, `dataset.uploaded`,
-`dataset.mapping_applied`, `dataset.quality_checked`, `dataset.committed`, `agent.chat`,
-`model.trained`, `model.promoted`.
+Actions emitted by the current code: `auth.api_login`, `auth.api_logout`, `auth.login`,
+`auth.logout`, `auth.password_changed`, `dataset.uploaded`, `dataset.mapping_applied`,
+`dataset.quality_checked`, `dataset.committed`, `agent.chat`, `assistant.chat`,
+`model.trained`, `model.promoted`, `user.created`, `user.updated`, `user.deleted`.
 
 ### Framework tables
 

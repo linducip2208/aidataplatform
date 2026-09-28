@@ -70,8 +70,14 @@ Daily:
 docker compose ps
 docker compose exec laravel php artisan platform:doctor
 ls -lh backups/            # the 02:00 cron should have added a dump
-docker compose logs --tail=100 celery-worker
+docker compose logs --tail=100 celery-worker laravel-queue laravel-schedule
 ```
+
+`docker compose ps` should show eleven services Up: `postgres`, `redis`, `laravel`,
+`laravel-queue`, `laravel-schedule`, `fastapi`, `celery-worker`, `celery-beat`, `nginx`,
+`prometheus`, `grafana`. Only the first five plus `nginx` carry a healthcheck; the others are
+covered by the restart policy, so a container that is repeatedly restarting is the signal for
+those.
 
 - Investigate `failed` datasets on the **Datasets** page: they are `failed` status, and the
   reason is in the `metadata.validation` payload or the engine's `import_jobs.report`.
@@ -90,9 +96,9 @@ Monthly:
 
 - Rotate `SERVICE_API_KEY`. Change it in the root `.env` only — Compose injects the same value
   into `laravel`, `fastapi`, `celery-worker` and `celery-beat` — then
-  `docker compose up -d laravel fastapi celery-worker celery-beat`. Laravel and the engine
-  disagreeing on the key shows up as `502` on every engine-backed page and `401` in the engine
-  log.
+  `docker compose up -d laravel laravel-queue laravel-schedule fastapi celery-worker celery-beat`.
+  Laravel and the engine disagreeing on the key shows up as `502` on every engine-backed page
+  and `401` in the engine log.
 - Restore drill to staging (`backup-restore.md`). A backup never restored is assumed broken.
 - Review LLM provider spend.
 - `VACUUM (ANALYZE)` the database after a month of bulk loads; nothing does it for you.
@@ -134,12 +140,13 @@ per-dataset threshold override in this build — the two global thresholds are
 | `top_k` on RAG queries | `RagQueryRequest` | 5, max 20 |
 | `top_k` on recommendations | `RecommendRequest` | 5, max 50 |
 
-Nothing prunes data in this build. `celery-beat` runs only two entries — `scheduled_data_sync`
-at 01:15, which is a placeholder returning a status message, and an hourly AI report — so
-`raw_uploads` rows and their stored files, old `fact_*` rows, `rag_chunks`,
-`data_quality_reports` and `audit_logs` all grow without limit. Plan a retention job before
-the warehouse outgrows the disk, and keep `docker system df` and the `pgdata` volume on the
-weekly review.
+Nothing prunes data in this build. `celery-beat` runs three entries — `scheduled_data_sync`
+at 01:15, which is a placeholder returning a status message; an hourly AI report; and the
+per-minute alert evaluation — and `laravel-schedule` runs only `sync:import-status` and
+`sync:quality`, which reconcile existing rows rather than deleting any. So `raw_uploads` rows
+and their stored files, old `fact_*` rows, `rag_chunks`, `data_quality_reports`, `alerts` and
+`audit_logs` all grow without limit. Plan a retention job before the warehouse outgrows the
+disk, and keep `docker system df` and the `pgdata` volume on the weekly review.
 
 Space per dataset is roughly: the copy Laravel stores, the copy the engine stores, and the
 `fact_*` rows the ETL produced. Those are three separate volumes' worth of growth for one
@@ -156,13 +163,17 @@ Actions written by the current code:
 | Action | Resource | Written when |
 |---|---|---|
 | `auth.api_login`, `auth.api_logout` | `user` | `POST /api/login`, `POST /api/logout` |
+| `auth.login`, `auth.logout` | `user` | the Blade `POST /login` and `POST /logout` |
+| `auth.password_changed` | `user` | `PUT /profile/password` |
 | `dataset.uploaded` | `dataset` | Upload completes, with `filename`, `size_bytes`, `import_job_id` |
 | `dataset.mapping_applied` | `dataset` | Mappings saved, with the mapping and the template name |
 | `dataset.quality_checked` | `dataset` | Quality run, with `score`, `verdict`, `threshold` |
 | `dataset.committed` | `dataset` | Commit called, with `status` and `async` |
-| `agent.chat` | `agent` | Assistant turn, with `message_length` and `steps` |
+| `agent.chat` | `agent` | Assistant turn over the API, with `message_length` and `steps` |
+| `assistant.chat` | `chat_thread` | Assistant turn started from the Blade UI |
 | `model.trained` | `model` | Training, with `model_type`, `name`, `version` |
 | `model.promoted` | `model` | Promotion, with `version_id`, `to_status` |
+| `user.created`, `user.updated`, `user.deleted` | `user` | **Admin → Users**, with `role` |
 
 Compliance extracts, all from `public`:
 
@@ -183,18 +194,22 @@ FROM audit_logs WHERE action = 'dataset.uploaded' ORDER BY created_at DESC;
 Export with `psql \copy` or a CSV query. Note that `detail` also holds the column mappings
 submitted for a dataset, so treat the extract as potentially sensitive.
 
-Known gap: there is no `ml.approvals` table, and the engine's own `audit_logs` rows are never
-written. `audit_logs` is therefore the only trail, and it is a Laravel table — see the
-collision note in `data-dictionary.md` §7 and back it up with the database dump.
+Known gap: there is no `ml.approvals` table and no engine-side audit trail — `audit_logs` is
+created only by the Laravel migration, so the engine has no table to write to and
+`ai_conversations` / `ai_messages` keep the assistant transcript without an actor. `audit_logs`
+is therefore the only trail; see `data-dictionary.md` §7 and back it up with the database dump.
 
 ## 7. Incidents
 
-1. **Scope it.** `bash infrastructure/scripts/healthcheck.sh` covers Laravel `/up`, the engine
-   `/api/v1/health`, Nginx, Postgres, Redis and the two Celery containers.
+1. **Scope it.** `bash infrastructure/scripts/healthcheck.sh` covers Laravel `/up` plus
+   `POST /api/login` and `GET /api/me`, the engine `/api/v1/health` and `/api/v1/readiness`,
+   the Nginx `/ai-api/` prefix strip and `/health`, Postgres, Redis, and the two Celery
+   containers. It does not cover `laravel-queue` or `laravel-schedule`; `docker compose ps` does.
 2. **Read the logs.** `docker compose logs --tail=100 <service>`; the engine logs
    `X-Request-ID`, which also appears in the Laravel response, so one id ties the two sides
    together.
-3. **Mitigate.** Scale workers (`docker compose up -d --scale celery-worker=3`) for a backlog;
+3. **Mitigate.** Scale workers (`docker compose up -d --scale celery-worker=3`,
+   `... --scale laravel-queue=3`) for a backlog;
    revoke `SERVICE_API_KEY` and the LLM keys if a secret leaked; restore from a dump
    (`backup-restore.md`) for corruption.
 4. **Record it.** A postmortem in the repository issue tracker, with the `X-Request-ID`s, the

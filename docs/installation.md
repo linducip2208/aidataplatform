@@ -17,17 +17,12 @@ cd aidataplatform
 cp .env.example .env
 ```
 
-3. Build the frontend assets. This is **required** on a fresh clone even for the Docker path:
-   the Blade layout calls `@vite()`, and every page fails with a missing Vite manifest until
-   `application/public/build/manifest.json` exists. Compose bind-mounts `./application` over
-   `/var/www/html`, so the container serves exactly what you build here.
-
-```bash
-cd application
-npm install
-npm run build
-cd ..
-```
+3. Nothing to build on the host. `infrastructure/docker/laravel.Dockerfile` compiles the
+   frontend in a `node:22-alpine` assets stage (`npm ci && npm run build`) and
+   `laravel-entrypoint.sh` installs the result into `public/build` on every container start, so
+   the `./application` bind mount never leaves a page without a Vite manifest. The one
+   host-side requirement is a committed `application/package-lock.json`: the assets stage runs
+   `npm ci` and aborts the build if the lockfile is missing.
 
 4. Edit `.env`. Minimum for a working install:
 
@@ -43,14 +38,16 @@ APP_KEY=<base64:...>
      empty, `change-me` and `changeme` as "not configured" and rejects every caller, so a
      placeholder gives you a platform that boots but returns `502` on every engine-backed
      page.
-   - `SERVICE_API_KEY_HEADER` must stay `X-Service-Key`. Compose passes it to `laravel` but
-     not to the engine, so renaming it on the Laravel side alone makes Laravel send a header
-     the engine no longer reads.
+   - `SERVICE_API_KEY_HEADER` must stay `X-Service-Key`. Compose injects the one root-`.env`
+     value into `laravel`, `fastapi` and both Celery services, and both services resolve it the
+     same way, so the two cannot drift apart. The engine still falls back to `X-Service-Key` if
+     the configured name is not a valid header token, so a malformed value fails quietly.
 
    `APP_ENV` is shared by both services and must be one of `dev`, `demo`, `local`, `test`,
    `staging`, `stage`, `prod`, `production`. The engine raises at startup on anything else
-   rather than guessing, so a typo there stops the `fastapi` container. Leave it at the
-   shipped `prod` for a real deployment.
+   rather than guessing, so a typo there stops the `fastapi` container. Compose's own default is
+   `production` and the shipped root `.env.example` uses `prod`; keep one of the two for a real
+   deployment.
 
    `LLM_API_KEY` / `OPENROUTER_API_KEY` are optional but recommended: without one the
    assistant, RAG and reports fall back to a local echo summary while ingestion, analytics
@@ -65,9 +62,12 @@ docker compose ps
 bash infrastructure/scripts/healthcheck.sh
 ```
 
-   `healthcheck.sh` probes `GET /up` on Laravel, `GET /api/v1/health` on the engine, Nginx
-   `GET /health`, `pg_isready`, `redis-cli ping`, and that `celery-worker` and `celery-beat`
-   are up. On Windows use
+   `healthcheck.sh` probes `GET /up` on Laravel, `POST /api/login` + `GET /api/me` with the
+   seeded admin, `GET /api/v1/health` and `GET /api/v1/readiness` on the engine, the
+   `/ai-api/` prefix strip through Nginx, Nginx `GET /health`, `pg_isready`, `redis-cli ping`
+   (authenticated when `REDIS_PASSWORD` is set), and that `celery-worker` and `celery-beat` are
+   up. It does not probe `laravel-queue` or `laravel-schedule`; check those with
+   `docker compose ps`. On Windows use
    `powershell -ExecutionPolicy Bypass -File infrastructure/scripts/healthcheck.ps1`.
 
 6. Confirm both schemas landed. The Laravel image entrypoint runs
@@ -110,23 +110,29 @@ Compose.
 | Variable | Default | Notes |
 |---|---|---|
 | `SERVICE_API_KEY` | placeholder | Shared secret; a placeholder is treated as unset and rejects every call |
-| `SERVICE_API_KEY_HEADER` | `X-Service-Key` | Compose does not pass it to the engine; leave it alone |
-| `APP_ENV` | `production` (Compose) | Must be one of `dev, demo, local, test, staging, stage, prod, production` |
-| `QUALITY_THRESHOLD` | Laravel `0.75`, engine `0.6` | Set explicitly so both agree — see `data-quality.md` §3 |
-| `MAX_UPLOAD_MB` | Laravel `500`, engine `200` | The engine value is not enforced on the upload path, which Laravel owns |
+| `SERVICE_API_KEY_HEADER` | `X-Service-Key` | Compose injects it into laravel, fastapi and celery, so the two sides cannot drift; a malformed value silently falls back to the default |
+| `APP_ENV` | `production` (Compose), `prod` (root `.env.example`) | Must be one of `dev, demo, local, test, staging, stage, prod, production` |
+| `QUALITY_THRESHOLD` | Laravel `0.75`, engine `0.6` | Compose injects `0.75` into both, so the shipped stack agrees; set it explicitly anyway — see `data-quality.md` §3 |
+| `MAX_UPLOAD_MB` | Laravel `500`, engine `200` | Compose injects `500` into both, overriding the engine default; the engine does not enforce it on the upload path, which Laravel owns |
 | `RATE_LIMIT_PER_MINUTE` | `120` | Per credential, and 3× that per path |
 | `METRICS_ENABLED` / `METRICS_ALLOW_PUBLIC` | `true` / `false` | `/metrics` is internal-only by default |
 | `DOCS_ENABLED` | `true` | Set `false` to close `/docs`, `/redoc`, `/openapi.json` |
-| `STORAGE_PATH` / `MODEL_PATH` | `./datasets`, `./models` | Relative to the engine's `/code` working directory, **not** the mounted volumes — see `architecture.md` §7 |
+| `STORAGE_PATH` / `MODEL_PATH` | `/code/data/datasets`, `/code/data/models` (Compose) | The engine's own defaults are `./datasets` and `./models` beside the code; Compose points them at the `datasets-data` and `models-cache` volumes — see `architecture.md` §7 |
 | `CHUNK_ROWS` | `20000` | Read size for the ETL, and the basis of the preview row limit |
-| `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | `openai`, … | See the table in `ai-agent.md` §4 |
-| `LLM_EMBEDDING_MODEL` or `EMBED_MODEL` | `text-embedding-3-small` | Both names are accepted; set one |
-| `LLM_TIMEOUT_SECONDS`, `LLM_MAX_RETRIES` | `60`, `3` | |
-| `OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL` | empty, `https://openrouter.ai/api/v1` | Used when `LLM_PROVIDER=openrouter` |
+| `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | `openrouter`, `https://openrouter.ai/api/v1`, … | Compose overrides `ai-engine/.env.example`'s `openai` default; see the table in `ai-agent.md` §4 |
+| `LLM_EMBEDDING_MODEL` or `EMBED_MODEL` | `text-embedding-3-small` (engine default), `sentence-transformers/all-MiniLM-L6-v2` (root `.env`) | `LLM_EMBEDDING_MODEL` is the canonical name and `EMBED_MODEL` the accepted alias; Compose forwards `EMBED_MODEL`, so under Docker the root value wins. Keep the two identical |
+| `LLM_TIMEOUT_SECONDS`, `LLM_MAX_RETRIES` | `60`, `3` | Capped at 5 attempts by `MAX_RETRIES_CEILING` |
+| `OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL` | empty, `https://openrouter.ai/api/v1` | Used when `LLM_PROVIDER=openrouter`, which is the Compose default |
 | `CORS_ORIGINS` | `http://localhost:3000,http://localhost:8000` | Only relevant if a browser ever calls the engine, which it should not |
-| `JWT_SECRET`, `JWT_ALGORITHM`, `JWT_EXPIRE_MINUTES` | placeholder, `HS256`, `60` | The Bearer path; a placeholder `JWT_SECRET` makes the engine refuse to mint tokens |
-| `AUTO_MIGRATE`, `AUTO_MIGRATE_STRICT` | `true`, `false` | Control the `alembic upgrade head` in `ai-engine/docker-entrypoint.sh` |
+| `JWT_SECRET`, `JWT_ALGORITHM`, `JWT_EXPIRE_MINUTES` | placeholder, `HS256`, `60` | The Bearer path. Compose injects none of these, so the engine runs on the placeholder and the Bearer path never validates; a placeholder `JWT_SECRET` makes it refuse to mint tokens |
+| `DATABASE_URL` / `SYNC_DATABASE_URL` | Compose assembles both | Compose passes an async driver in `DATABASE_URL` and a sync one in `SYNC_DATABASE_URL`; the settings class rewrites the async driver rather than letting it reach `create_engine()` |
+| `REDIS_DB`, `REDIS_CACHE_DB` | `0`, `1` | Compose injects both into Laravel, which is why `application/.env` cannot override them |
+| `CELERY_BROKER_DB`, `CELERY_RESULT_DB` | `1`, `2` | Assemble `CELERY_BROKER_URL` and `CELERY_RESULT_BACKEND`; set the URLs themselves only for a non-Docker Celery run |
+| `NETWORK_NAME`, `VOLUME_PREFIX` | `aidata-appnet`, `aidata` | Name of the compose network and prefix for every named volume |
+| `AUTO_MIGRATE`, `AUTO_MIGRATE_STRICT` | `true`, `false` | Control the `alembic upgrade head` in `ai-engine/docker-entrypoint.sh` and the `artisan migrate --force` in `laravel-entrypoint.sh`; `celery-worker` and `celery-beat` set `AUTO_MIGRATE=false` so only `laravel` and `fastapi` migrate |
 | `PG_WAIT_ATTEMPTS`, `PG_WAIT_INTERVAL` | `60`, `2` | Postgres wait budget before migrating (~120 s) |
+| `TZ` | `Asia/Jakarta` | The Celery timezone; Compose does not forward it, so it comes from `ai-engine/.env` |
+| `ALERT_WEBHOOK_URL` | empty | Read with `os.environ` by `app/alerts/notifiers.py`; empty means alerts are recorded but not delivered |
 | `LOG_LEVEL` | `INFO` | Anything unrecognised falls back to `INFO` |
 
 `UPLOAD_MAX_MB` and `QUALITY_MIN_SCORE` are the deprecated engine-local spellings of
@@ -194,6 +200,20 @@ celery -A app.workers.celery_app:celery_app beat -l info --scheduler celery.beat
 Keep `-Q` a superset of the queues `celery_app.py` routes to (`TASK_ROUTES`): a task routed
 outside the list is enqueued and never consumed. Keep the built-in scheduler —
 `redbeat` is not in `ai-engine/requirements.txt` and the beat container cannot load it.
+
+5. The Laravel queue worker and scheduler, in two more terminals. `docker-compose.yml` runs
+   them as `laravel-queue` and `laravel-schedule`; outside Docker they are plain commands:
+
+```powershell
+cd application
+php artisan queue:work --queue=datasets,default --tries=3 --backoff=30 --max-time=3600
+php artisan schedule:work --whisper
+```
+
+`datasets` is the queue `App\Jobs\RefreshQualityScoreJob` is pushed onto by
+`sync:quality --queue`; `default` catches anything dispatched without an explicit queue. Use
+`schedule:work`, not `schedule:run` — the latter fires the due commands once and exits.
+`--whisper` only silences the "no scheduled commands were ready" line each minute.
 
 ## C. Verify the install
 

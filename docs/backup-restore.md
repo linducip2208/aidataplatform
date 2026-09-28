@@ -83,9 +83,10 @@ docker compose exec laravel php artisan platform:doctor
 bash tests/run.sh
 ```
 
-Order matters for one table: `audit_logs` is declared by both migration systems, and Alembic
-skips a table that already exists (`data-dictionary.md` §7). If a restore leaves Laravel's
-`audit_logs` in place, the Laravel columns are already correct — verify rather than assume:
+Restore order does not matter, and there is no collision to reason about: `audit_logs` is
+declared by the Laravel migration only — the Alembic revision does not create it
+(`data-dictionary.md` §7) — and Alembic guards every `CREATE TABLE` with a `has_table` check
+anyway. Verify the columns rather than assume them:
 
 ```sql
 SELECT column_name FROM information_schema.columns
@@ -102,7 +103,7 @@ WHERE table_name = 'audit_logs' ORDER BY ordinal_position;
 | Whole database lost | `docker compose up -d postgres` → `restore.sh` with the newest dump → `make migrate` → `healthcheck.sh` → `tests/run.sh` |
 | `datasets-data` volume lost | The rows and checksums are in the dump, the files are not. Re-upload the sources: the ETL is idempotent per `import_job_id`, so re-committing an existing job id replaces its own fact rows instead of duplicating them |
 | Engine upload copies lost | Same as above; `raw_uploads.stored_path` will point at files that no longer exist, so re-upload rather than re-commit |
-| ML artifacts lost | Registry rows survive in the dump, artifacts do not. Retrain. `MODEL_PATH` defaults to `./models` inside the container, so confirm the files were on a mounted volume before assuming they are recoverable |
+| ML artifacts lost | Registry rows survive in the dump, artifacts do not. Retrain. Under Compose the artefacts are on the `models-cache` volume (`MODEL_PATH=/code/data/models`), so a volume loss is the only realistic cause; outside Compose `MODEL_PATH` is `./models` beside the code and is lost on every rebuild |
 | Password changed and `pgdata` still has the old one | The first-boot password is baked into the volume. `docker compose exec postgres psql -c "ALTER USER aidata PASSWORD 'new';"` and update `.env`. `docker compose down -v` does fix it and destroys all data — never in production |
 
 ## 5. Volume snapshots
@@ -115,7 +116,7 @@ docker run --rm --volumes-from aidata-laravel -v $(pwd)/backups:/bk alpine \
   tar czf /bk/files_$(date +%Y%m%d).tgz /var/www/html/storage/app/datasets
 
 docker run --rm --volumes-from aidata-fastapi -v $(pwd)/backups:/bk alpine \
-  tar czf /bk/models_$(date +%Y%m%d).tgz /app/data/models
+  tar czf /bk/models_$(date +%Y%m%d).tgz /code/data/models
 ```
 
 Restore by reversing the tar into a fresh volume before `up -d`. Prune on the same
@@ -123,12 +124,14 @@ Restore by reversing the tar into a fresh volume before `up -d`. Prune on the sa
 the database dump — two copies on the same disk are one failure domain.
 
 Volume paths are worth confirming before you trust a snapshot. The Laravel datasets volume is
-mounted at `/var/www/html/storage/app/datasets`, which is where the upload service writes. The
-engine's `STORAGE_PATH` and `MODEL_PATH` default to `./datasets` and `./models` relative to
-its `/code` working directory, which is *not* `/app/data/...` where compose mounts
-`datasets-data` and `models-cache`. Set those two variables to the mounted paths if the
-engine's files need to survive a container rebuild; otherwise they live in the container's
-ephemeral layer and no snapshot will ever see them.
+mounted at `/var/www/html/storage/app/datasets`, which is where the upload service writes, and
+`laravel` owns the upload. The engine volumes are mounted at `/code/data/datasets`
+(`datasets-data`) and `/code/data/models` (`models-cache`), and Compose sets `STORAGE_PATH` and
+`MODEL_PATH` to exactly those two paths, so the engine's uploads and artefacts survive a
+rebuild. The engine's own defaults are `./datasets` and `./models` relative to its `/code`
+working directory, which are *not* those paths — set both variables explicitly if you run the
+engine outside Compose, or its files will live in the container's ephemeral layer where no
+snapshot will ever see them.
 
 ## 6. Off-host copy
 

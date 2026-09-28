@@ -65,8 +65,17 @@ checks. It then upserts the star schema: natural-key dimension rows are created 
 Idempotency is per `import_job_id`: before loading, the loader deletes the rows that job
 already wrote, so replaying a job replaces its own output and touches nothing else.
 
-`sales`, `inventory`, `purchases` and `expenses` have loaders. `customers` and `generic` are
-valid `dataset_type` values but have no loader branch — they import without writing facts.
+The engine's `DATASET_TYPES` is `sales`, `inventory`, `purchases`, `expenses`, `customers`
+and `products`. The first four have a fact loader; `customers` upserts `dim_customer` only
+and `products` upserts `dim_product` only, so neither writes a fact row. Anything else
+raises `Unsupported dataset_type` and fails the job. Laravel's allowlist in
+`config('ai_engine.dataset_types')` is `sales`, `inventory`, `purchases`, `expenses`,
+`customers`, `generic`, so a `generic` dataset passes validation and fails here on commit,
+and a `products` dataset is rejected by Laravel before it ever gets this far. Keep the two
+lists in step.
+
+Canonical target columns per type, which the mapper suggests against, are listed in
+`ai-engine/app/ingestion/mapper.py::CANONICAL_FIELDS`; `generic` has no entry there.
 
 ## 4. Job status
 
@@ -100,5 +109,7 @@ or run `php artisan sync:import-status`.
   duplicate facts appear if you upload the same file twice; delete and re-create the dataset
   instead.
 - Retention: nothing purges `raw_uploads` rows, their stored files, old fact rows or
-  `data_quality_reports` in this build. `celery-beat` runs only `scheduled_data_sync` (a
-  placeholder) and an hourly AI report, so plan the cleanup yourself.
+  `data_quality_reports` in this build. `celery-beat` runs `scheduled_data_sync` (a
+  placeholder), an hourly AI report and the per-minute alert evaluation, none of which delete
+  anything, so plan the cleanup yourself. `php artisan sync:import-status` reconciles existing
+  rows rather than pruning them.

@@ -6,22 +6,22 @@ Stack: the engine's Prometheus text at `GET /metrics` → Prometheus on `:9090` 
 
 ## 1. What is scraped
 
-`infrastructure/monitoring/prometheus.yml` defines five jobs:
+`infrastructure/monitoring/prometheus.yml` defines two active jobs:
 
 | Job | Target | Interval | State in this build |
 |---|---|---|---|
 | `fastapi` | `fastapi:8000/metrics` | 15s | UP — the engine serves `/metrics` |
-| `laravel` | `laravel:8000/metrics` | 30s | **DOWN by design** — Laravel exposes no `/metrics` route |
-| `redis` | `redis-exporter:9121` | 15s | DOWN — the exporter is not in the compose file |
-| `postgres` | `postgres-exporter:9187` | 30s | DOWN — the exporter is not in the compose file |
-| `prometheus` | `localhost:9090` | default | UP |
+| `prometheus` | `localhost:9090` | 15s | UP |
 
-Global `scrape_interval` is `${PROMETHEUS_SCRAPE_INTERVAL:-15s}` and retention is
-`${PROMETHEUS_RETENTION:-15d}`, both from the root `.env`.
+The global `scrape_interval` is a literal `15s`: Prometheus does no shell-style
+`${VAR:-default}` substitution, and such a string is not a valid `model.Duration`, so the
+process would refuse to start. Retention is the one value Compose interpolates, as
+`--storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}`.
 
-The three DOWN targets are expected and safe to ignore. To clear `laravel`, install a
-Prometheus client library in `application/` and add a `/metrics` route; to clear the other two,
-start the exporters on the compose network:
+Three further blocks are present but commented out, so they are not registered as targets at
+all rather than sitting DOWN: `laravel` (the application exposes no `/metrics` route),
+`redis` (`redis-exporter:9121`) and `postgres` (`postgres-exporter:9187`). To enable the
+exporters, uncomment the block and start the container on the compose network:
 
 ```bash
 docker run -d --network aidata-appnet --name redis-exporter \
@@ -32,7 +32,8 @@ docker run -d --network aidata-appnet --name postgres-exporter \
   prometheuscommunity/postgres-exporter
 ```
 
-`redis-exporter` needs `REDIS_PASSWORD` in its address once that is set.
+`redis-exporter` needs the password in `REDIS_ADDR` once `REDIS_PASSWORD` is set. To clear
+`laravel`, add a Prometheus client library in `application/` and register a `/metrics` route.
 
 ## 2. The metrics that exist
 
@@ -43,11 +44,16 @@ docker run -d --network aidata-appnet --name postgres-exporter \
 | `http_requests_total` | Counter | `method`, `path`, `status` | Request rate and error ratio |
 | `http_request_latency_seconds` | Histogram | `path` | Latency; percentiles from the `_bucket` series |
 
-`/metrics` is gated: `METRICS_ENABLED=false` removes the route, and while
-`METRICS_ALLOW_PUBLIC` is `false` (the default) only internal peers are served. The check is
-on the socket peer address, not a header, so it cannot be spoofed. Prometheus scrapes over the
-compose network, which is internal, so the default configuration works — but a browser or a
-curl from the host sees a rejection, which is the intended behaviour.
+`/metrics` is gated: `METRICS_ENABLED=false` removes the route entirely, and while
+`METRICS_ALLOW_PUBLIC` is `false` (the default) only internal peers are served — a public client
+gets `404` rather than `403`, so the scrape path is not advertised to whoever is scanning for it.
+The check is on the socket peer address, not a header, so it cannot be spoofed. Prometheus
+scrapes over the compose network, which is internal, so the default configuration works — but a
+browser or a curl from the host sees the rejection, which is the intended behaviour.
+
+The health, readiness, liveness, metrics and schema routes are also exempt from the engine's
+rate limiter (`_UNRATE_LIMITED_PATHS` in `app/main.py`), so a probe can never be answered with
+`429` and take a container out of rotation.
 
 Because `http_request_latency_seconds` is a `Histogram`, p95 is
 `histogram_quantile(0.95, sum(rate(http_request_latency_seconds_bucket[5m])) by (le, path))`
@@ -82,20 +88,26 @@ SELECT count(*) FROM data_quality_reports WHERE created_at > now() - interval '2
 
 ## 3. Container health, the part that actually pages
 
-Every service in `docker-compose.yml` has a healthcheck, and that is the primary signal:
-
 | Service | Probe | Consequence of failing |
 |---|---|---|
 | `postgres` | `pg_isready` | Everything depending on it blocks |
-| `redis` | `redis-cli ping` | `laravel`, `fastapi` and the Celery containers block on `service_healthy` |
-| `laravel` | `GET /up`, falling back to `/health` | `nginx` blocks |
+| `redis` | `redis-cli ping`, with `-a "$REDIS_PASSWORD"` when one is set | `laravel`, `laravel-queue`, `laravel-schedule`, `fastapi` and the Celery containers block on `service_healthy` |
+| `laravel` | `GET /up` **and** `public/build/manifest.json` exists **and** `storage/framework/migrate_failed` does not | `nginx`, `laravel-queue` and `laravel-schedule` block |
+| `laravel-queue` | none | — (no artisan command reports on a running worker; a dead one is restarted by the policy) |
+| `laravel-schedule` | none | — (`schedule:work` is an infinite loop; the only failure mode is exiting) |
 | `fastapi` | `GET /api/v1/health` | `nginx`, `celery-worker` block |
-| `nginx` | `GET /health` | — |
-| `prometheus`, `grafana` | their own HTTP probes | — |
+| `celery-worker`, `celery-beat` | none | — |
+| `nginx` | `GET /health`, answered locally without touching either upstream | — |
+| `prometheus`, `grafana` | none | — (no `healthcheck:` block in `docker-compose.yml`; the `laravel.Dockerfile` `HEALTHCHECK` only applies to the three `laravel*` services, and Compose overrides it) |
 
-Note the Redis trap: setting `REDIS_PASSWORD` in the root `.env` breaks its healthcheck,
-because the probe runs `redis-cli ping` without `-a`. Redis then stays unhealthy and the stack
-never finishes starting. Add `-a $REDIS_PASSWORD` to that healthcheck if you must set one.
+The `laravel` probe is deliberately three-part. `/up` alone proves only that the framework
+booted; the Vite manifest check catches an image built without a working assets stage, and the
+`migrate_failed` marker — written by `laravel-entrypoint.sh` when `artisan migrate --force`
+fails — keeps a broken schema from reporting healthy. A failed migration leaves the container
+up so the logs can be read; it reports `unhealthy` instead.
+
+Setting `REDIS_PASSWORD` in the root `.env` is safe: the Compose healthcheck authenticates when
+the variable is non-empty, and so does `infrastructure/scripts/healthcheck.sh`.
 
 ## 4. Platform doctor
 
@@ -107,29 +119,41 @@ docker compose exec laravel php artisan platform:doctor
 docker compose exec laravel php artisan platform:doctor --json     # for a monitor
 ```
 
-It groups sixteen checks into configuration, ai engine, database and filesystem, prints a
+It groups seventeen checks into configuration, ai engine, database and filesystem, prints a
 remedy line for every non-pass, and exits non-zero if anything failed:
 
-- **configuration** — `app_key`, `app_env`, `app_debug`, `engine_url`, `service_key`,
+- **configuration** (7) — `app_key`, `app_env`, `app_debug`, `engine_url`, `service_key`,
   `max_upload_mb` (cross-checked against PHP's `post_max_size` and `upload_max_filesize`),
   `quality_threshold`.
-- **ai engine** — `engine_health` (`GET /api/v1/health`) and `engine_readiness`
-  (`GET /api/v1/readiness`). A `401` or `403` from either is reported explicitly as a
-  `SERVICE_API_KEY` mismatch with the exact remedy, and the key is redacted from the message.
-- **database** — the connection, the `vector` and `pg_trgm` extensions, the 27 engine tables
-  (Alembic's) and the 12 Laravel tables, and row counts for `users` and `datasets`.
-- **filesystem** — that `storage/`, `storage/framework`, `storage/logs`,
-  `storage/app/private` and the dataset disk roots exist and are writable by the current user.
+- **ai engine** (3) — `engine_health` (`GET /api/v1/health`), `engine_readiness`
+  (`GET /api/v1/readiness`, which must be read as a body because it answers `200` even when a
+  dependency is down) and `engine_auth`, an authenticated round trip to `GET /api/v1/models`.
+  A `401` or `403` from any of them is reported explicitly as a `SERVICE_API_KEY` mismatch with
+  the exact remedy, and the key is redacted from the message. `engine_auth` exists because the
+  engine's own health and readiness routes carry no auth dependency, so a key mismatch is
+  invisible there.
+- **database** (5) — `database`, `database_extensions` (`vector` and `pg_trgm`), `engine_tables`
+  (the 27 Alembic tables), `laravel_tables` (the 12 Laravel tables) and `records` (row counts for
+  `users` and `datasets`).
+- **filesystem** (2) — `storage`, that `storage/`, `storage/framework`, `storage/logs` and
+  `storage/app/private` exist and are writable by the current user, and `datasets_disk`, that
+  every disk named in `datasets.disk` plus the default disk exists, is writable, and is defined
+  in `config/filesystems.php`.
 
-Overall status is the worst component status. Run it after every deploy and after any `.env`
-change; it catches the majority of misconfigurations before a user does.
+The extension and engine-table checks are skipped with a `warn` on a non-Postgres connection,
+because the engine schema only ever lives in Postgres. Overall status is the worst component
+status. Run it after every deploy and after any `.env` change; it catches the majority of
+misconfigurations before a user does.
 
 ## 5. Grafana
 
 Login with `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` at `http://localhost:3000`. Compose
-mounts `infrastructure/monitoring/grafana-dashboard.json` into
-`/etc/grafana/provisioning/dashboards/`, but no dashboard *provider* is provisioned, so import
-it by hand on first run: Dashboards → New → Import → upload the JSON → datasource Prometheus.
+provisions two things inline as `configs:` entries, so nothing has to be imported by hand: the
+Prometheus datasource (named `Prometheus`, marked default) and a file-based dashboard provider
+pointing at `/etc/grafana/provisioning/dashboards`. The dashboard JSON itself is a normal read-only
+bind mount, so it can be edited without touching `docker-compose.yml`. It appears on first start
+under the **AIDataPlatform** folder and refreshes every 30 s; use Grafana → Dashboards →
+AIDataPlatform to open it.
 
 The dashboard's panels are written against metric names this build does not emit (it expects
 `http_request_duration_seconds_bucket`, `celery_queue_length{queue}`, `import_jobs_total`,
@@ -142,12 +166,13 @@ The dashboard's panels are written against metric names this build does not emit
 Queue depth has no metric at all. Watch it with
 `docker compose exec redis redis-cli llen <queue>` for the queues you care about —
 `imports`, `quality`, `ml`, `agent` and `rag` are the ones the engine routes to, and
-`default` carries the nightly sync.
+`default` carries the nightly sync. The Laravel queue depth is the same command on the
+`datasets` and `default` Redis keys.
 
 ## 6. Logs
 
 ```bash
-docker compose logs -f <laravel|fastapi|celery-worker|celery-beat|postgres|redis|nginx>
+docker compose logs -f <laravel|laravel-queue|laravel-schedule|fastapi|celery-worker|celery-beat|postgres|redis|nginx>
 make logs                    # tails all services, last 200 lines each
 ```
 
@@ -176,7 +201,47 @@ Not instrumented anywhere — track them from the metrics and the SQL above.
 | Import jobs stuck in `queued` | 0 sustained | `SELECT count(*) FROM import_jobs WHERE status = 'queued'` |
 | Datasets not `committed` | reviewed weekly | `SELECT status, count(*) FROM datasets GROUP BY status` |
 | RAG answer quality | spot-check weekly | `POST /api/rag/query`; no metric exists |
+| Open alerts | reviewed daily | `SELECT severity, count(*) FROM alerts WHERE status IN ('open','acknowledged') GROUP BY severity` |
 
 Queue depth, model training duration and RAG query volume have no instrumentation in this
 build. If you add metrics, emit them from `ai-engine/app/main.py` next to the existing
 `Counter` and `Histogram` declarations, and update the Grafana dashboard JSON in the same PR.
+
+## 8. Alerting
+
+`ai-engine/app/alerts/` implements threshold alerting on the engine, and it is the only
+subscriber to the `alert-evaluation` beat entry. `celery-beat` runs it every minute
+(`crontab(minute="*")` in `app/workers/celery_app.py`); the task is
+`app.alerts.service.evaluate_alerts`, registered through
+`include=["app.workers.tasks", "app.alerts.service"]`. It has no `TASK_ROUTES` entry, so it
+lands on `task_default_queue`, which is `default` — inside the worker's `-Q` list.
+
+A **rule** (`alert_rules`) is a name, a metric, an operator, a threshold and an `is_active`
+flag. A **metric** is one of the thirteen in `app/alerts/rules.py`: `sales.revenue`,
+`sales.orders`, `sales.units`, `sales.aov`, `sales.growth_pct`, `branch.revenue_max`,
+`branch.count`, `inventory.stockout_count`, `inventory.dead_stock_count`,
+`inventory.min_days_of_stock`, `finance.net_profit`, `finance.margin_pct`. `GET
+/api/v1/alerts/metrics` returns the registry with each metric's unit, default severity and
+the operators it accepts, so a client never has to hardcode the list.
+
+Severity is a property of the metric (`low`/`medium`/`high`/`critical`) because
+`alert_rules` has no severity column; it is copied onto `alerts.severity` when the alert
+opens. The evaluation window is one day, also a constant rather than a column — `fact_sales`
+is re-aggregated over the trailing day on every pass, which is idempotent for a daily-grain
+metric.
+
+The state machine keeps one row per rule: an open rule that keeps firing updates the same
+`alerts` row instead of opening a second one, an acknowledgement does not resolve it, and a
+rule that stops firing moves the row to `resolved`. Every transition appends a row to
+`alert_events` (`fired`, `acknowledged`, `resolved`, `notified`). "One un-resolved alert per
+rule" is an application invariant — there is no unique index for it — so the service also
+takes a per-rule process lock before evaluating.
+
+Delivery is a single optional webhook, `ALERT_WEBHOOK_URL`, off by default and with a 5 s
+timeout. A failed delivery is recorded on the `alert_events` row as `notified` with a failure
+detail and never aborts the evaluation, so an unreachable webhook cannot stop alerting.
+
+The read surface is the engine's own API — `docs/api.md` §"Alerting" lists the routes.
+`GET /api/v1/alerts` (also declared as `/api/v1/alerts/alerts`) is the list. Laravel proxies
+none of them, so an operator works from Swagger or curl; there is no `/alerts` page in the
+Blade UI, and `alert_events` is not surfaced in `platform:doctor` or the Grafana dashboard.

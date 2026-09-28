@@ -85,8 +85,10 @@ request. There is no `column_profiles` table; per-column statistics live inside 
 
 ## 5. Re-checking on a schedule
 
-Beat has no quality re-check scheduled, so the re-check is a Laravel command. From cron, once
-a day:
+Beat has no quality re-check of its own, so the re-check is a Laravel command — and it is
+already scheduled: `application/routes/console.php` runs `sync:quality --limit=100 --days=30`
+every day at 02:45 under `laravel-schedule` (`php artisan schedule:work`), guarded by
+`withoutOverlapping(30)`. `sync:import-status --limit=100` runs at 02:15. To run it by hand:
 
 ```bash
 docker compose exec laravel php artisan sync:quality

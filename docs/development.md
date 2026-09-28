@@ -17,7 +17,7 @@ The endpoint contract lives in `api.md` and is the source of truth for every pat
 
 ```bash
 docker compose up -d
-docker compose logs -f laravel fastapi celery-worker   # one window
+docker compose logs -f laravel laravel-queue laravel-schedule fastapi celery-worker   # one window
 make migrate                                          # after pulling a schema change
 docker compose exec fastapi pytest -q                  # fast feedback
 bash tests/run.sh                                     # contract check before pushing
@@ -42,21 +42,28 @@ request or response shape means updating, in the same PR:
 The engine's endpoint groups are fixed: `/imports/*`, `/analytics/*`, `/forecast`,
 `/customers/{churn,segment}`, `/inventory/health`, `/anomaly/detect`, `/recommend`,
 `/models/*`, `/training/{train,predict}`, `/ai/{chat,report}`, `/rag/{ingest,query}` and
-`/health`, `/readiness`, `/liveness`. The queue names in `CELERY_QUEUES` and the DDL split
-between Alembic and Laravel migrations are equally frozen; see `data-dictionary.md`.
+`/health`, `/readiness`, `/liveness`. `/health`, `/readiness`, `/liveness`, `/metrics` and the
+schema routes are the only ones without a `require_service_auth` dependency, and adding a route
+outside that set is a security change, not a refactor. The queue names in `CELERY_QUEUES` and the
+DDL split between Alembic and Laravel migrations are equally frozen; see `data-dictionary.md`.
 
 ## 4. Laravel specifics
 
 - `application/` is a standard Laravel 12 app: `php artisan make:*`, Pint for formatting
   (`./vendor/bin/pint`, or `make lint`), PHPUnit/Pest for tests. Migrations must be
   reversible; seeders idempotent (`UserSeeder` is keyed on the e-mail and only fills columns
-  that are still `null`).
+  that are still `null`). The frontend is built by Vite; `npm run build` is required for a
+  non-Docker run, and the Docker image does it in its own assets stage.
 - All engine access goes through `App\Services\AiEngineClient`. Add a method there rather
   than calling `Http::` from a controller. It already handles the envelope unwrap, the
   service-key header, per-call timeouts and retries (2 attempts, 250 ms apart).
 - Never hardcode `http://fastapi:8000`; read `config('ai_engine.base_url')`.
 - Long or queued work is Laravel's own queue: `App\Jobs\RefreshQualityScoreJob`, dispatched
-  with `php artisan sync:quality --queue`.
+  with `php artisan sync:quality --queue` onto the `datasets` queue, which `laravel-queue`
+  consumes as `datasets,default`.
+- Recurring work belongs in `application/routes/console.php`. The two entries there run under
+  `laravel-schedule` (`php artisan schedule:work --whisper`); keep `withoutOverlapping()` on
+  anything that hits the engine, because its mutex lives in the cache store.
 - Roles and permissions are declared in `App\Enums\UserRole` and enforced by
   `App\Http\Middleware\EnsureRole` via the `role:` middleware. Add a capability by extending
   the middleware's role list in `routes/web.php` and `routes/api.php`, not with ad-hoc

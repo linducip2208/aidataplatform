@@ -6,10 +6,26 @@ on:
   push:
     paths:
       - "application/**"
+      - "docs/api.md"
+      - "tests/verify-*.sh"
+      - "tests/run.sh"
+      - "docker-compose.yml"
+      - "infrastructure/nginx/**"
+      - ".env.example"
+      - "ai-engine/.env.example"
+      - "ai-engine/app/api/**"
       - ".github/workflows/laravel.yml"
   pull_request:
     paths:
       - "application/**"
+      - "docs/api.md"
+      - "tests/verify-*.sh"
+      - "tests/run.sh"
+      - "docker-compose.yml"
+      - "infrastructure/nginx/**"
+      - ".env.example"
+      - "ai-engine/.env.example"
+      - "ai-engine/app/api/**"
       - ".github/workflows/laravel.yml"
   workflow_dispatch:
 
@@ -105,3 +121,50 @@ jobs:
         # require-dev, so it currently falls through to plain phpunit. Both
         # commands propagate a non-zero exit, so real failures still fail the job.
         run: php artisan test --parallel || ./vendor/bin/phpunit
+
+  contract:
+    name: Contract and wiring checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: .
+    env:
+      APP_ENV: testing
+      APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      DB_CONNECTION: sqlite
+      DB_DATABASE: ":memory:"
+      CACHE_STORE: array
+      SESSION_DRIVER: array
+      QUEUE_CONNECTION: sync
+      FILESYSTEM_DISK: local
+      AI_ENGINE_URL: http://fastapi.ci:8000
+      SERVICE_API_KEY: ci-test-service-key
+      QUALITY_THRESHOLD: "0.75"
+      MAX_UPLOAD_MB: "500"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          extensions: pdo_sqlite, sqlite3, mbstring
+          coverage: none
+          tools: composer:v2
+
+      - name: Install dependencies
+        # verify-contract.sh runs `php artisan route:list`, so the framework has
+        # to be installed even though no test runs in this job.
+        working-directory: application
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: docs/api.md matches the real routes
+        run: bash tests/verify-contract.sh
+
+      - name: Environment variables are wired end to end
+        run: bash tests/verify-env.sh
+
+      - name: nginx routing invariants
+        run: bash tests/verify-routing.sh

@@ -9,8 +9,10 @@ docker compose logs --tail=50 <service>
 docker compose exec laravel php artisan platform:doctor
 ```
 
-`healthcheck.sh` probes Laravel `/up`, the engine `/api/v1/health`, Nginx `/health`,
-`pg_isready`, `redis-cli ping`, and that `celery-worker` and `celery-beat` are up.
+`healthcheck.sh` probes Laravel `/up` plus `POST /api/login` and `GET /api/me`, the engine
+`/api/v1/health` and `/api/v1/readiness`, the `/ai-api/` prefix strip and Nginx `/health`,
+`pg_isready`, `redis-cli ping`, and that `celery-worker` and `celery-beat` are up. It does not
+probe `laravel-queue` or `laravel-schedule`; `docker compose ps` does.
 `platform:doctor` adds configuration, service-key, schema and storage checks, and prints a
 remedy line per failure. The engine-backed pages are all proxy calls, so a Laravel `502` or
 `503` almost always means the engine is down or the two services disagree about the key.
@@ -19,9 +21,10 @@ remedy line per failure. The engine-backed pages are all proxy calls, so a Larav
 
 | Symptom | Cause → Fix |
 |---|---|
-| Every page `500`, "Vite manifest not found" | The frontend was never built. `cd application && npm install && npm run build`. Compose bind-mounts `./application` over `/var/www/html`, so build on the host before `up -d`. `npm run dev` while iterating. |
-| `laravel` unhealthy, `/up` fails | `APP_KEY` empty (every request fails on the encrypter) → `docker compose exec laravel php artisan key:generate --show`, set it in `.env`, `up -d laravel`. Or Postgres unreachable, or `storage/` not writable: `chown -R www-data:www-data storage bootstrap/cache`. |
-| Stack never finishes starting, `redis` unhealthy | You set `REDIS_PASSWORD`. The Redis healthcheck runs `redis-cli ping` with no `-a`, so with a password Redis stays unhealthy and `laravel`/`fastapi`/`celery-*` block on `service_healthy` forever. Leave it empty, or add `-a $REDIS_PASSWORD` to that healthcheck. |
+| Every page `500`, "Vite manifest not found" | The `laravel` image was built without a working assets stage. `docker compose build --no-cache laravel` then `up -d laravel` — the Dockerfile compiles the frontend in a `node:22-alpine` stage and `laravel-entrypoint.sh` installs it, so there is nothing to build on the host. The most likely build failure is a missing `application/package-lock.json`, which `npm ci` refuses to proceed without. For a non-Docker run, `cd application && npm install && npm run build`. |
+| `laravel` unhealthy, `/up` fails | `APP_KEY` empty (every request fails on the encrypter) → `docker compose exec laravel php artisan key:generate --show`, set it in `.env`, `up -d laravel`. Or Postgres unreachable, or `artisan migrate --force` failed — the entrypoint leaves `storage/framework/migrate_failed`, which the same healthcheck looks for. Or `storage/` not writable: `chown -R www-data:www-data storage bootstrap/cache`. |
+| `laravel-queue` or `laravel-schedule` keeps restarting | They run the same image as `laravel` with the entrypoint cleared. A crash is a plain `php artisan` error: `docker compose logs laravel-queue` and re-run the command by hand inside the container. `schedule:work` is an infinite loop, so a container that exited is genuinely broken. |
+| Stack never finishes starting, `redis` unhealthy | Fixed in the current `docker-compose.yml`: the healthcheck runs `redis-cli -a "$REDIS_PASSWORD" ping` when the variable is non-empty, and so does `healthcheck.sh`. If you pinned an older compose file, add `-a` yourself. |
 | `nginx` 502 | Upstreams not healthy yet (30 s start period) — wait, then `healthcheck.sh`. Otherwise the `default.conf` mount path is wrong. |
 | `postgres` auth failed after changing `POSTGRES_PASSWORD` | `pgdata` keeps the first-boot password. `docker compose exec postgres psql -c "ALTER USER aidata PASSWORD 'new';"` and update `.env`. `docker compose down -v` fixes it and destroys all data. |
 | `celery-beat` crash-loops, "Cannot load the scheduler class" | `CELERY_BEAT_SCHEDULER=redbeat.RedBeatScheduler`, and `redbeat` is not in `ai-engine/requirements.txt`. Use `celery.beat.PersistentScheduler`. |
@@ -35,11 +38,11 @@ remedy line per failure. The engine-backed pages are all proxy calls, so a Larav
 
 | Symptom | Cause → Fix |
 |---|---|
-| Engine-backed pages `502`, engine log shows `401` | `SERVICE_API_KEY` mismatch, or a placeholder. Compose injects one value into all four services, so this normally means `application/.env` was edited separately and now diverges, or the value was changed without restarting `celery-worker`/`celery-beat`. `platform:doctor` names this case explicitly. |
-| Every engine call is `401`, and the key in `.env` is the shipped one | Placeholders are treated as *not configured*: empty, `change-me`, `change-me-service-key`, `changeme` and `secret` all reject every caller by design. Generate a real key and restart `laravel fastapi celery-worker celery-beat`. |
-| Renaming `SERVICE_API_KEY_HEADER` breaks every engine call | Expected. Compose passes that variable to `laravel` but not to `fastapi`, so the engine keeps reading `X-Service-Key`. Keep `SERVICE_API_KEY_HEADER=X-Service-Key`. |
+| Engine-backed pages `502`, engine log shows `401` | `SERVICE_API_KEY` mismatch, or a placeholder. Compose injects one value into all four engine-facing services, so this normally means `application/.env` was edited separately and now diverges, or the value was changed without restarting `celery-worker`/`celery-beat`. `platform:doctor` names this case explicitly. |
+| Every engine call is `401`, and the key in `.env` is the shipped one | Placeholders are treated as *not configured*: empty, `change-me`, `change-me-service-key`, `changeme` and `secret` all reject every caller by design. Generate a real key and restart `laravel laravel-queue laravel-schedule fastapi celery-worker celery-beat`. |
+| Renaming `SERVICE_API_KEY_HEADER` breaks every engine call | Compose injects the one root-`.env` value into both sides, so a rename there reaches both — but the engine falls back to `X-Service-Key` when the configured name is not a valid RFC 7230 token or collides with a load-bearing header, and Laravel keeps sending your new name. `platform:doctor` reports it under `service_key`. |
 | `fastapi` will not start, log says `APP_ENV=... is not a known environment` | The engine accepts only `dev`, `demo`, `local`, `test`, `staging`, `stage`, `prod`, `production` and now raises instead of guessing. Correct the value in the root `.env`. |
-| `fastapi` will not start, log says `SERVICE_API_KEY is not a usable HTTP header name` | `SERVICE_API_KEY_HEADER` is not a valid RFC 7230 token. The engine falls back to `X-Service-Key` for a malformed value, so rename it only to a well-formed name — and only on both services. |
+| `fastapi` will not start, log says `SERVICE_API_KEY is not a usable HTTP header name` | `SERVICE_API_KEY_HEADER` is not a valid RFC 7230 token. The engine falls back to `X-Service-Key` for a malformed value, so rename it only to a well-formed name. Compose injects the variable into both services, so a well-formed rename reaches both. |
 | Login returns `422` with a correct password | The account is `is_active = false`, or the seeder never ran for that address (`UserSeeder` only sets a password when it creates the row). Check `users.is_active`. |
 | `403` with `code: forbidden` on a write | Role gate. `EnsureRole` allows `POST /datasets`, `/mapping`, `/commit`, `/ml/train` for `admin` and `analyst` only, and `POST /ml/models/{id}/promote` for `admin` only. Check the role in `GET /api/me`. |
 | `404` on `/api/datasets/{id}` | The path takes a UUID, not the integer `id`. `GET /api/datasets` returns `data[].id` as the uuid. |
@@ -83,22 +86,25 @@ remedy line per failure. The engine-backed pages are all proxy calls, so a Larav
 | Assistant `502` on a heavy question | Laravel gives up at `AI_ENGINE_LLM_TIMEOUT` (120 s) while the engine may spend `LLM_MAX_RETRIES × LLM_TIMEOUT_SECONDS` (3 × 60 s). Lower `LLM_TIMEOUT_SECONDS` or raise `AI_ENGINE_LLM_TIMEOUT`. |
 | RAG query returns irrelevant or no citations | The corpus is empty, or `rag_chunks` has more than 2000 rows — `query` loads at most 2000 and ranks them in Python, so the tail is invisible. There is no vector index. |
 | RAG answers are nonsense but non-empty | The engine fell back to `_hash_embed` (128-dimension hash vectors) because the embedding call failed. That happens with no API key or a provider error; check the engine log for `embeddings failed, fallback`. |
-| `GET /metrics` answers 403 or is empty from outside the compose network | Intentional. `/metrics` is served only to internal peers unless `METRICS_ALLOW_PUBLIC=true`, because Compose publishes the engine on the host. Prometheus on the compose network is internal and unaffected. |
+| `GET /metrics` answers 404 or is empty from outside the compose network | Intentional. `/metrics` is served only to internal peers unless `METRICS_ALLOW_PUBLIC=true`, and a non-internal peer gets a plain `404` rather than a `403`, because Compose publishes the engine on the host. Prometheus on the compose network is internal and unaffected. |
 | Swagger `/docs` is gone | `DOCS_ENABLED=false` closes `/docs`, `/redoc` and `/openapi.json`. |
-| Model artifacts disappear after a container rebuild | The engine's `MODEL_PATH` defaults to `./models` under its `/code` working directory, while compose mounts `models-cache` at `/app/data/models`. Set `MODEL_PATH` to the mounted path. |
+| `/ai-api/*` returns `401` for everything you send it | Intentional. `infrastructure/nginx/default.conf` clears `X-Service-Key` on that location, so no credential survives the proxy. Use the engine's own published port, or Laravel's `/api/*` surface. `/ai-api/metrics` is a hard `404` from nginx. |
+| Model artifacts disappear after a container rebuild | Fixed in the current `docker-compose.yml`: `MODEL_PATH=/code/data/models` is the `models-cache` mount point. Outside Compose, set `MODEL_PATH` yourself or it stays at `./models` beside the code. |
 
 ## 6. Observability
 
-Prometheus targets `laravel`, `redis` and `postgres` show DOWN. Expected: Laravel exposes no
-`/metrics` route, and neither exporter is in the compose file. The engine target is the only
-one that resolves, and it emits only `http_requests_total` and
-`http_request_latency_seconds` — every other panel in the shipped Grafana dashboard shows
-"No data" because those metrics do not exist. See `monitoring.md` for the working queries and
-the exporter commands.
+`infrastructure/monitoring/prometheus.yml` registers only two active jobs — `fastapi` and
+`prometheus`. The `laravel`, `redis` and `postgres` blocks are commented out, so those targets
+are absent rather than DOWN: Laravel exposes no `/metrics` route and neither exporter is in the
+compose file. The engine target is the only one that resolves, and it emits only
+`http_requests_total` and `http_request_latency_seconds` — every other panel in the shipped
+Grafana dashboard shows "No data" because those metrics do not exist. See `monitoring.md` for
+the working queries and the exporter commands.
 
 Grafana login fails: use `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` from the root `.env`,
-reset with `docker compose exec grafana grafana cli admin reset-admin-password`. The dashboard
-is mounted but no provider is provisioned, so import the JSON by hand.
+reset with `docker compose exec grafana grafana cli admin reset-admin-password`. The
+dashboard and its provider are both provisioned by Compose, so it appears on first start
+without an import.
 
 ## 7. `tests/run.sh` results
 

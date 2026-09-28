@@ -29,12 +29,29 @@ class EnsureRole
                 : abort(403, 'This account is deactivated.');
         }
 
-        $allowed = array_map(
-            static fn (string $role): UserRole => UserRole::tryFromName($role),
-            $roles,
-        );
+        // `UserRole::tryFromName()` maps anything unrecognised to Viewer, so
+        // running the allowed-list through it makes a typo'd or stale role
+        // string widen the route instead of narrowing it: `role:admin,analist`
+        // resolves to [Admin, Viewer] and every viewer walks in. Resolve with
+        // `tryFrom()` and refuse the whole list when any entry is unknown.
+        $allowed = [];
 
-        if (! in_array($user->role(), $allowed, true)) {
+        foreach ($roles as $role) {
+            $resolved = UserRole::tryFrom(trim($role));
+
+            if ($resolved === null) {
+                return $request->expectsJson()
+                    ? response()->json([
+                        'message' => 'Misconfigured role guard: unknown role "'.$role.'".',
+                        'code' => 'forbidden',
+                    ], 403)
+                    : abort(403, 'Misconfigured role guard: unknown role "'.$role.'".');
+            }
+
+            $allowed[] = $resolved;
+        }
+
+        if ($allowed === [] || ! in_array($user->role(), $allowed, true)) {
             return $request->expectsJson()
                 ? response()->json([
                     'message' => 'This action requires role: '.implode(' or ', $roles).'.',

@@ -11,11 +11,18 @@ use Illuminate\View\View;
 
 class AssistantController extends Controller
 {
+    /** Sidebar width: a user with hundreds of threads still gets a usable page. */
+    private const THREAD_LIMIT = 25;
+
+    /** Older messages are reachable by starting a new thread, not by unbounded growth. */
+    private const MESSAGE_LIMIT = 100;
+
     public function index(Request $request): View
     {
         $threads = ChatThread::where('user_id', $request->user()->getKey())
             ->orderByDesc('last_message_at')
             ->orderByDesc('id')
+            ->limit(self::THREAD_LIMIT)
             ->get();
 
         $thread = null;
@@ -26,12 +33,23 @@ class AssistantController extends Controller
 
         $thread ??= $threads->first();
 
+        // Bounded, but still shown oldest-first: take the newest page and reverse
+        // it rather than loading a thread that has been chatted with for a year.
+        $messages = $thread
+            ? $thread->messages()
+                ->orderByDesc('created_at')
+                ->orderByDesc('id')
+                ->limit(self::MESSAGE_LIMIT)
+                ->get()
+                ->reverse()
+                ->values()
+            : collect();
+
         return view('assistant.index', [
             'threads' => $threads,
             'thread' => $thread,
-            'messages' => $thread
-                ? $thread->messages()->orderBy('created_at')->orderBy('id')->get()
-                : collect(),
+            'messages' => $messages,
+            'messagesTruncated' => $thread !== null && $thread->message_count > self::MESSAGE_LIMIT,
         ]);
     }
 
@@ -66,10 +84,16 @@ class AssistantController extends Controller
             'title' => mb_substr($message, 0, 60),
         ]);
 
+        // The user's message is committed and the thread counters are updated
+        // before the engine is called. If the engine then fails, the thread is
+        // left showing one message and a matching count, rather than a persisted
+        // message next to a `message_count` of 0.
         $thread->messages()->create([
             'role' => 'user',
             'content' => $message,
         ]);
+
+        $thread->update($this->threadCounters($thread));
 
         $result = $engine->chat($message, $thread->ai_conversation_id);
 
@@ -80,10 +104,7 @@ class AssistantController extends Controller
             'steps' => (int) ($result['steps'] ?? 0),
         ]);
 
-        $attributes = [
-            'message_count' => $thread->messages()->count(),
-            'last_message_at' => now(),
-        ];
+        $attributes = $this->threadCounters($thread);
 
         if (isset($result['conversation_id'])) {
             $attributes['ai_conversation_id'] = (int) $result['conversation_id'];
@@ -110,5 +131,20 @@ class AssistantController extends Controller
         return redirect()
             ->route('assistant.index')
             ->with('status', 'Percakapan dihapus.');
+    }
+
+    /**
+     * Counters are refreshed from the database rather than incremented, so the
+     * thread never advertises more or fewer messages than it holds — including
+     * after a partially completed turn.
+     *
+     * @return array<string, mixed>
+     */
+    private function threadCounters(ChatThread $thread): array
+    {
+        return [
+            'message_count' => $thread->messages()->count(),
+            'last_message_at' => now(),
+        ];
     }
 }

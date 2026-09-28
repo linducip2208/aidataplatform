@@ -22,7 +22,7 @@ use Illuminate\Support\Facades\Route;
 */
 
 Route::get('/login', [AuthController::class, 'create'])->name('login')->middleware('guest');
-Route::post('/login', [AuthController::class, 'store'])->name('login.store')->middleware('guest');
+Route::post('/login', [AuthController::class, 'store'])->name('login.store')->middleware(['guest', 'throttle:login']);
 Route::post('/logout', [AuthController::class, 'destroy'])->name('logout');
 
 /*
@@ -52,7 +52,7 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/assistant/threads/{thread}', [AssistantController::class, 'show'])->name('assistant.threads.show');
 
     Route::middleware('role:admin,analyst')->group(function (): void {
-        Route::post('/datasets', [DatasetController::class, 'store'])->name('datasets.store');
+        Route::post('/datasets', [DatasetController::class, 'store'])->middleware('throttle:upload')->name('datasets.store');
         Route::post('/datasets/{dataset}/preview', [DatasetWorkflowController::class, 'preview'])->name('datasets.preview');
         Route::post('/datasets/{dataset}/mapping', [DatasetWorkflowController::class, 'mapping'])->name('datasets.mapping');
         Route::post('/datasets/{dataset}/quality', [DatasetWorkflowController::class, 'quality'])->name('datasets.quality');

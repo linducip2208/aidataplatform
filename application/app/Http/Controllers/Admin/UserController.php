@@ -78,11 +78,36 @@ class UserController extends Controller
             'is_active' => 'status aktif',
         ]);
 
-        $user->update($validated);
+        // The admin form resubmits every field, so the payload is not the
+        // change set. Diffing against the stored values keeps the audit trail
+        // honest: an edit that changed nothing must not read as three changes.
+        $changed = [];
 
-        AuditLog::record('user.updated', 'user', $user->getKey(), [
-            'fields' => array_keys($validated),
-        ]);
+        foreach ($validated as $field => $value) {
+            // `role` is cast to a backed enum, which cannot be cast to string
+            // directly; compare the backing values.
+            $current = match ($field) {
+                'is_active' => (bool) $user->{$field},
+                'role' => $user->role()->value,
+                default => $user->{$field},
+            };
+            $after = $field === 'is_active' ? (bool) $value : $value;
+
+            if ((string) $current !== (string) $after) {
+                $changed[$field] = ['from' => $current, 'to' => $after];
+            }
+        }
+
+        $user->fill($validated);
+
+        if ($changed !== []) {
+            $user->save();
+
+            AuditLog::record('user.updated', 'user', $user->getKey(), [
+                'fields' => array_keys($changed),
+                'changes' => $changed,
+            ]);
+        }
 
         return back()->with('status', "Pengguna {$user->name} diperbarui.");
     }

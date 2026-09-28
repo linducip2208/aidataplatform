@@ -8,11 +8,13 @@ appends.
 from __future__ import annotations
 
 import re
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Iterator, Optional
 
 import pandas as pd
+from sqlalchemy import text
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -36,6 +38,52 @@ ProgressCb = Optional[Callable[[float, str], None]]
 FACT_DATASETS = ("sales", "inventory", "purchases", "expenses")
 DIM_DATASETS = ("customers", "products")
 DATASET_TYPES = FACT_DATASETS + DIM_DATASETS
+
+
+@contextmanager
+def _serialise_job(db_session, import_job_id: int | None) -> Iterator[bool]:
+    """Hold a Postgres advisory lock for the whole purge-and-load window.
+
+    The purge and every chunk commit separately, so a transaction-scoped lock
+    would be released before the inserts began. Nothing in the schema enforces
+    that a given ``import_job_id`` is loaded once, so two concurrent runs — a
+    Celery retry racing the original, or a double ``POST /imports/commit`` —
+    would interleave the purge and the inserts and double the revenue.
+
+    The lock is session-scoped, which means it survives a rollback and would
+    leak to whoever borrows the pooled connection next. The unlock therefore
+    runs in a ``finally`` on every path, and if it fails the session is closed so
+    the connection is discarded rather than returned with the lock held.
+    """
+    if db_session is None or import_job_id is None:
+        yield False
+        return
+
+    try:
+        dialect = db_session.get_bind().dialect.name
+    except Exception:
+        yield False
+        return
+
+    if dialect != "postgresql":
+        yield False
+        return
+
+    key = int(import_job_id)
+    db_session.execute(text("SELECT pg_advisory_lock(:key)"), {"key": key})
+    try:
+        yield True
+    finally:
+        try:
+            db_session.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": key})
+            db_session.commit()
+        except Exception:
+            log.error("could not release the advisory lock for import_job %s; "
+                      "discarding the connection so the lock is not leaked", import_job_id)
+            try:
+                db_session.close()
+            except Exception:
+                pass
 
 
 def _safe_error(exc: BaseException) -> str:
@@ -202,45 +250,49 @@ def run_etl(
 
     chunks_seen = 0
     try:
-        # The delete runs before any insert and unconditionally for this job, so
-        # a rerun that stages zero rows cannot leave last run's revenue behind.
-        if db_session is not None and dataset_type in FACT_DATASETS:
-            _purge_job_rows(db_session, dataset_type, import_job_id)
-            db_session.commit()
-    except Exception as exc:
-        raise RuntimeError(abort("purge", exc)) from exc
+        with _serialise_job(db_session, import_job_id):
+            # The delete runs before any insert and unconditionally for this job,
+            # so a rerun that stages zero rows cannot leave last run's revenue
+            # behind. It is inside the advisory lock because a concurrent run of
+            # the same job would otherwise interleave its purge with these
+            # inserts and double every fact row.
+            if db_session is not None and dataset_type in FACT_DATASETS:
+                _purge_job_rows(db_session, dataset_type, import_job_id)
+                db_session.commit()
 
-    try:
-        for chunk in iter_chunks(file_path, chunksize=chunksize):
-            chunks_seen += 1
-            n_rows = int(len(chunk))
             try:
-                if mappings:
-                    chunk = apply_mapping(chunk, mappings)
-                chunk = _clean(chunk)
-                q = run_quality_checks(chunk, dataset_type)
-                quality_reports.append(q)
-                quality_weights.append(n_rows)
-                if db_session is not None:
-                    _load_warehouse(db_session, chunk, dataset_type, import_job_id)
-                total_processed += n_rows
-            except Exception as exc:
-                total_errors += n_rows
-                error_log.append({"chunk": chunks_seen - 1, "error": _safe_error(exc)})
-                log.error(f"chunk {chunks_seen - 1} failed: {_safe_error(exc)}")
-                if db_session is not None:
+                for chunk in iter_chunks(file_path, chunksize=chunksize):
+                    chunks_seen += 1
+                    n_rows = int(len(chunk))
                     try:
-                        db_session.rollback()
-                    except Exception:
-                        pass
-            if estimated_rows > 0:
-                emit(0.05 + 0.65 * min(1.0, total_processed / estimated_rows),
-                     f"transformed {total_processed}/{estimated_rows} rows")
-            else:
-                emit(0.05 + 0.65 * (1 - 1 / (chunks_seen + 1)),
-                     f"transformed {total_processed} rows")
+                        if mappings:
+                            chunk = apply_mapping(chunk, mappings)
+                        chunk = _clean(chunk)
+                        q = run_quality_checks(chunk, dataset_type)
+                        quality_reports.append(q)
+                        quality_weights.append(n_rows)
+                        if db_session is not None:
+                            _load_warehouse(db_session, chunk, dataset_type, import_job_id)
+                        total_processed += n_rows
+                    except Exception as exc:
+                        total_errors += n_rows
+                        error_log.append({"chunk": chunks_seen - 1, "error": _safe_error(exc)})
+                        log.error(f"chunk {chunks_seen - 1} failed: {_safe_error(exc)}")
+                        if db_session is not None:
+                            try:
+                                db_session.rollback()
+                            except Exception:
+                                pass
+                    if estimated_rows > 0:
+                        emit(0.05 + 0.65 * min(1.0, total_processed / estimated_rows),
+                             f"transformed {total_processed}/{estimated_rows} rows")
+                    else:
+                        emit(0.05 + 0.65 * (1 - 1 / (chunks_seen + 1)),
+                             f"transformed {total_processed} rows")
+            except Exception as exc:
+                raise RuntimeError(abort("read", exc)) from exc
     except Exception as exc:
-        raise RuntimeError(abort("read", exc)) from exc
+        raise RuntimeError(abort("lock", exc)) from exc
 
     quality_agg = _merge_quality(quality_reports, quality_weights)
     if db_session is not None and import_job_id is not None:

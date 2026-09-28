@@ -29,10 +29,21 @@ class AuthController extends Controller
             ]);
         }
 
-        $token = $user->createToken($credentials['device_name'] ?? 'api-token');
+        // Tokens expire. A non-expiring bearer token on a platform holding
+        // uploaded business files is a permanent credential once leaked; the
+        // logout endpoint revokes the current one, but expiry bounds the damage
+        // when it does not.
+        $token = $user->createToken(
+            $credentials['device_name'] ?? 'api-token',
+            ['*'],
+            now()->addDays((int) config('ai_engine.token_ttl_days', 30)),
+        );
         $user->forceFill(['last_login_at' => now()])->save();
 
-        AuditLog::record('auth.api_login', 'user', $user->getKey());
+        // The actor is passed explicitly: the request is not authenticated by a
+        // guard at this point, so `AuditLog::record()` would resolve a null user
+        // and record the login against "system".
+        AuditLog::record('auth.api_login', 'user', $user->getKey(), [], $user);
 
         return ApiResponse::data([
             'token' => $token->plainTextToken,

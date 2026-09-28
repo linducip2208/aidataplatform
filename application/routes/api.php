@@ -19,7 +19,7 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
-Route::post('/login', [AuthController::class, 'store'])->name('api.login');
+Route::post('/login', [AuthController::class, 'store'])->name('api.login')->middleware('throttle:login');
 
 Route::middleware('auth:sanctum')->group(function (): void {
     Route::post('/logout', [AuthController::class, 'destroy'])->name('api.logout');
@@ -28,7 +28,15 @@ Route::middleware('auth:sanctum')->group(function (): void {
 
     Route::get('/datasets', [DatasetController::class, 'index'])->name('api.datasets.index');
     Route::get('/datasets/{dataset}', [DatasetController::class, 'show'])->name('api.datasets.show');
-    Route::get('/datasets/{dataset}/quality', [DatasetController::class, 'quality'])->name('api.datasets.quality');
+
+    // `GET .../quality` runs the engine's profile and writes `quality_score`,
+    // `status` and `metadata` back to the row, so it is a write behind a safe
+    // verb: a prefetch, a crawler or a link preview would trigger it. It stays
+    // a GET because the documented contract says so, but it is gated to the
+    // roles that may write, not to any authenticated user.
+    Route::get('/datasets/{dataset}/quality', [DatasetController::class, 'quality'])
+        ->middleware('role:admin,analyst')
+        ->name('api.datasets.quality');
 
     Route::get('/import-jobs/{importJobId}', [ImportJobController::class, 'show'])->name('api.import-jobs.show');
 
@@ -43,15 +51,17 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::get('/ml/models', [MlController::class, 'index'])->name('api.ml.models');
     Route::get('/ml/models/{modelId}', [MlController::class, 'show'])->name('api.ml.models.show');
 
-    Route::post('/agent/chat', [AgentController::class, 'store'])->name('api.agent.chat');
-    Route::post('/rag/query', [RagController::class, 'query'])->name('api.rag.query');
+    // An LLM call and a model training run are the two expensive endpoints, so
+    // they carry a tighter limit than the blanket one on the `api` group.
+    Route::post('/agent/chat', [AgentController::class, 'store'])->middleware('throttle:expensive')->name('api.agent.chat');
+    Route::post('/rag/query', [RagController::class, 'query'])->middleware('throttle:expensive')->name('api.rag.query');
 
     Route::middleware('role:admin,analyst')->group(function (): void {
-        Route::post('/datasets', [DatasetController::class, 'store'])->name('api.datasets.store');
+        Route::post('/datasets', [DatasetController::class, 'store'])->middleware('throttle:upload')->name('api.datasets.store');
         Route::post('/datasets/{dataset}/mapping', [DatasetController::class, 'mapping'])->name('api.datasets.mapping');
         Route::post('/datasets/{dataset}/commit', [DatasetController::class, 'commit'])->name('api.datasets.commit');
         Route::delete('/datasets/{dataset}', [DatasetController::class, 'destroy'])->name('api.datasets.destroy');
-        Route::post('/ml/train', [MlController::class, 'train'])->name('api.ml.train');
+        Route::post('/ml/train', [MlController::class, 'train'])->middleware('throttle:expensive')->name('api.ml.train');
     });
 
     Route::middleware('role:admin')->group(function (): void {

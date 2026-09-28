@@ -53,19 +53,21 @@ class RefreshQualityScoreJob implements ShouldQueue
     }
 
     /**
-     * `runQuality()` moves a passing dataset back to `uploaded` because it is
-     * meant for the pre-commit step. Re-checking an already committed dataset
-     * must not silently un-commit it, so the terminal status is restored here.
+     * Re-check one committed dataset.
+     *
+     * There is deliberately no status restore here. `runQuality()` owns the
+     * transition: a re-check that passes leaves a terminal status alone, and a
+     * re-check that fails quarantines it, which is the correct outcome — the
+     * warehouse row is now suspect and the quality page must say so. An earlier
+     * version undid a `uploaded` transition here, which was both dead code once
+     * the service grew its own guard and asymmetric, since it never restored a
+     * quarantine.
      *
      * @return array{score: float, verdict: string, status: string}
      */
     public function refresh(DatasetIngestionService $ingestion, Dataset $dataset): array
     {
         $result = $ingestion->runQuality($dataset);
-
-        if ($dataset->status() === DatasetStatus::Uploaded) {
-            $dataset->update(['status' => DatasetStatus::Committed]);
-        }
 
         $outcome = [
             'score' => (float) $result['score'],

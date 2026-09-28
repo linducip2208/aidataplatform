@@ -46,7 +46,7 @@ if _HAS_CELERY:
         "ai_engine",
         broker=BROKER,
         backend=BACKEND,
-        include=["app.workers.tasks"],
+        include=["app.workers.tasks", "app.alerts.service"],
     )
     _beat_schedule: Dict[str, Dict[str, Any]] = {}
     if crontab is not None:
@@ -57,6 +57,12 @@ if _HAS_CELERY:
         _beat_schedule["hourly-ai-report"] = {
             "task": "app.workers.tasks.generate_ai_report",
             "schedule": crontab(minute=0),
+        }
+        # Metric threshold rules are cheap and time-sensitive; one pass a minute
+        # keeps the open/resolved state machine's transition window short.
+        _beat_schedule["alert-evaluation"] = {
+            "task": "app.alerts.service.evaluate_alerts",
+            "schedule": crontab(minute="*"),
         }
     celery_app.conf.update(
         task_serializer="json",
