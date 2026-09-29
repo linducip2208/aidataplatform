@@ -33,6 +33,13 @@ class TrendChartTest extends TestCase
                 ]], 200);
             }
 
+            if (str_ends_with($url, '/api/v1/analytics/branches')) {
+                return Http::response(['success' => true, 'data' => [
+                    ['branch' => 'BR-01', 'revenue' => 402000000, 'orders' => 1104, 'share_pct' => 90.0],
+                    ['branch' => 'BR-07', 'revenue' => 40000000, 'orders' => 100, 'share_pct' => 10.0],
+                ]], 200);
+            }
+
             return Http::response(['success' => true, 'data' => []], 200);
         });
     }
@@ -50,6 +57,18 @@ class TrendChartTest extends TestCase
         $this->assertStringContainsString('2026-09-02', $html);
         // One data point per trend row.
         $this->assertSame(2, substr_count($html, '<circle'));
+    }
+
+    public function test_branch_bars_render_from_real_rows(): void
+    {
+        $html = $this->actingAs(User::factory()->admin()->create())
+            ->get(route('analytics.index', ['branch' => 'BR-01']))
+            ->assertOk()
+            ->getContent();
+
+        // Bars come from the same branch rows as the table below them.
+        $this->assertStringContainsString('Grafik batang pendapatan per cabang', $html);
+        $this->assertStringContainsString('progress-bar', $html);
     }
 
     public function test_empty_trend_renders_no_chart(): void

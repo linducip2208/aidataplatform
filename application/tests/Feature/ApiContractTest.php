@@ -289,7 +289,7 @@ class ApiContractTest extends TestCase
         sort($statuses);
 
         $this->assertSame(
-            [401, 403, 404, 422, 502, 503],
+            [401, 403, 404, 422, 429, 502, 503],
             $statuses,
             'The Errors section of docs/api.md and the responses the code actually produces have drifted apart.',
         );
@@ -420,6 +420,7 @@ class ApiContractTest extends TestCase
         $engineDown = $this->statusAfter('connection refused');
         $engineBroken = $this->statusAfter('rejected service key');
         $unknownJob = $this->statusAfter('/api/v1/imports/jobs/{id}`;');
+        $budgetExceeded = $this->statusAfter('Monthly AI budget reached');
 
         $produced = [];
 
@@ -459,6 +460,20 @@ class ApiContractTest extends TestCase
             ->assertStatus($engineBroken)
             ->assertJsonPath('code', 'ai_engine_error');
         $produced['GET /api/analytics/kpi (engine 5xx)'] = $engineBroken;
+
+        config(['ai_engine.ai_monthly_budget_usd' => 1.0]);
+        Http::fake(['*/api/v1/ai/usage/summary*' => Http::response(['success' => true, 'data' => [
+            'days' => 30,
+            'totals' => ['turns' => 1, 'estimated_cost_total' => 99.0, 'unpriced_rows' => 0],
+            'by_model' => [],
+            'by_day' => [],
+        ]], 200)]);
+        Sanctum::actingAs(User::factory()->analyst()->create());
+        $this->postJson(route('api.rag.query'), ['question' => 'halo?'])
+            ->assertStatus($budgetExceeded)
+            ->assertJsonPath('code', 'budget_exceeded');
+        $produced['POST /api/rag/query (budget exceeded)'] = $budgetExceeded;
+        config(['ai_engine.ai_monthly_budget_usd' => 0]);
 
         return $produced;
     }

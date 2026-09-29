@@ -2,6 +2,7 @@
 
 use App\Exceptions\AiEngineException;
 use App\Http\Middleware\EnsureAccountActive;
+use App\Http\Middleware\EnsureAiBudget;
 use App\Http\Middleware\EnsureRole;
 use App\Http\Middleware\ForceJsonResponse;
 use App\Http\Middleware\SecurityHeaders;
@@ -20,6 +21,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->alias([
             'role' => EnsureRole::class,
+            'ai.budget' => EnsureAiBudget::class,
         ]);
 
         $middleware->append(ForceJsonResponse::class);

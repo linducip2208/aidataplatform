@@ -290,6 +290,18 @@
                 @if ($branches === [])
                     <x-empty-state title="Belum ada data cabang" description="Data penjualan belum memuat informasi cabang." />
                 @else
+                    @php $maxBranchRevenue = max(1.0, (float) collect($branches)->max('revenue')); @endphp
+                    <div class="mb-3" role="img" aria-label="Grafik batang pendapatan per cabang">
+                        @foreach ($branches as $row)
+                            @php $barPct = max(0.0, min(100.0, (float) ($row['revenue'] ?? 0) / $maxBranchRevenue * 100)); @endphp
+                            <div class="d-flex align-items-center gap-2 mb-1">
+                                <span class="small text-secondary text-truncate" style="width: 6rem;">{{ $row['branch'] ?? '?' }}</span>
+                                <div class="progress flex-fill" style="height: 0.625rem;">
+                                    <div class="progress-bar bg-primary" style="width: {{ number_format($barPct, 1, '.', '') }}%"></div>
+                                </div>
+                            </div>
+                        @endforeach
+                    </div>
                     <x-table-wrapper label="Kinerja cabang">
                         <table class="table table-vcenter card-table">
                             <thead>

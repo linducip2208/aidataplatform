@@ -302,6 +302,7 @@ schema; prefer the short form.
 - Laravel validation → `422` with `errors` keyed by field.
 - Unauthenticated → `401`; wrong role → `403` with `code: forbidden`.
 - Engine down / connection refused → `503`, `code: ai_engine_error`.
+- Monthly AI budget reached on expensive endpoints → `429`, `code: budget_exceeded` (only when `AI_MONTHLY_BUDGET_USD` is set).
 - Engine 5xx or a rejected service key → `502` (the platform, not the browser,
   is misconfigured). Upstream 4xx (e.g. a malformed mapping) → `422`.
 - The engine sets `X-Request-ID` on every response; the failure body carries the

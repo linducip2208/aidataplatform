@@ -69,10 +69,10 @@ Route::middleware('auth:sanctum')->group(function (): void {
 
     // An LLM call and a model training run are the two expensive endpoints, so
     // they carry a tighter limit than the blanket one on the `api` group.
-    Route::post('/agent/chat', [AgentController::class, 'store'])->middleware('throttle:expensive')->name('api.agent.chat');
+    Route::post('/agent/chat', [AgentController::class, 'store'])->middleware(['throttle:expensive', 'ai.budget'])->name('api.agent.chat');
     Route::get('/ai/usage', [AgentController::class, 'usage'])->name('api.ai.usage');
     Route::get('/ai/usage/summary', [AgentController::class, 'usageSummary'])->name('api.ai.usage.summary');
-    Route::post('/rag/query', [RagController::class, 'query'])->middleware('throttle:expensive')->name('api.rag.query');
+    Route::post('/rag/query', [RagController::class, 'query'])->middleware(['throttle:expensive', 'ai.budget'])->name('api.rag.query');
     Route::post('/rag/documents', [RagController::class, 'storeDocument'])->middleware(['role:admin,analyst', 'throttle:expensive'])->name('api.rag.documents.store');
 
     // Enterprise data catalog (reads: viewer+, writes: analyst+).
@@ -133,9 +133,9 @@ Route::middleware('auth:sanctum')->group(function (): void {
         Route::post('/datasets/{dataset}/mapping', [DatasetController::class, 'mapping'])->name('api.datasets.mapping');
         Route::post('/datasets/{dataset}/commit', [DatasetController::class, 'commit'])->name('api.datasets.commit');
         Route::delete('/datasets/{dataset}', [DatasetController::class, 'destroy'])->name('api.datasets.destroy');
-        Route::post('/ml/train', [MlController::class, 'train'])->middleware('throttle:expensive')->name('api.ml.train');
+        Route::post('/ml/train', [MlController::class, 'train'])->middleware(['throttle:expensive', 'ai.budget'])->name('api.ml.train');
         Route::post('/ml/experiments', [MlController::class, 'createExperiment'])->name('api.ml.experiments.store');
-        Route::post('/ml/batch-predict', [MlController::class, 'batchPredict'])->name('api.ml.batch-predict');
+        Route::post('/ml/batch-predict', [MlController::class, 'batchPredict'])->middleware('ai.budget')->name('api.ml.batch-predict');
     });
 
     Route::middleware('role:admin')->group(function (): void {

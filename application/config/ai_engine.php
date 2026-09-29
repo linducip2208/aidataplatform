@@ -54,6 +54,22 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Monthly AI spend budget (USD)
+    |--------------------------------------------------------------------------
+    |
+    | Fail-closed ceiling for the expensive endpoints (agent chat, RAG query,
+    | model training). 0 or negative disables enforcement. When the ledgered
+    | month-to-date estimated cost reaches the budget, those endpoints answer
+    | 429 `budget_exceeded` until the next month. Checked against a 5-minute
+    | cached engine summary; an unreachable engine fails open (the incident
+    | must not cascade into a full AI outage) and is logged.
+    |
+    */
+
+    'ai_monthly_budget_usd' => (float) env('AI_MONTHLY_BUDGET_USD', 0),
+
+    /*
+    |--------------------------------------------------------------------------
     | API token lifetime (days)
     |--------------------------------------------------------------------------
     */

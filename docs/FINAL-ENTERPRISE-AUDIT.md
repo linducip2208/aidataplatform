@@ -15,7 +15,19 @@ Date: 2026-09-29 (UTC). Branch: `main`. Scope: master enterprise commands, itera
    `WebWorkflowTest` updated to act as owner + new non-owner 403 cases.
    Suite → **929 tests, 0 failures**.
 
-## Iteration 13 (this commit)
+## Iteration 14 (this commit)
+
+22. **AI budget enforcement** — `AI_MONTHLY_BUDGET_USD` (default 0 =
+   disabled) with `ai.budget` middleware on the expensive token API
+   (`agent/chat`, `rag/query`, `ml/train`, `ml/batch-predict`): at/over
+   budget → 429 `budget_exceeded`; 5-minute cached ledger read; engine
+   outage fails open and is logged. Contract test gained a real 429 probe.
+23. **Branch bars + measured 1M benchmark** — branch card renders
+   revenue-proportional bars from the same rows as its table; ETL measured
+   at **1.000.000 rows in 250 s (~4.001 rows/s)**, SQLite file DB +11.5 MB,
+   no OOM (Windows laptop; MySQL prod numbers still unmeasured).
+
+## Iteration 13 (previous commit)
 
 21. **Per-owner private RAG + trend chart.** `visibility=private` requires
    `owner` (422 otherwise); first ingest wins for audience and owner;
