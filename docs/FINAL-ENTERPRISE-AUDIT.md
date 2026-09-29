@@ -15,7 +15,19 @@ Date: 2026-09-29 (UTC). Branch: `main`. Scope: master enterprise commands, itera
    `WebWorkflowTest` updated to act as owner + new non-owner 403 cases.
    Suite → **929 tests, 0 failures**.
 
-## Iteration 10 (this commit)
+## Iteration 11 (this commit)
+
+19. **AI cost dashboard** — the `ai_usage` ledger finally has a face:
+   engine `cost_tracking.cost_summary()` (totals + per-model + per-day over
+   1–365 days, Python-side aggregation so SQLite/MySQL agree, naive datetimes
+   treated as UTC, unpriced rows counted never zero-filled — the last a real
+   bug the new tests caught) at `GET /api/v1/ai/usage/summary`; Laravel
+   `AiCostService` + `AiCostController` + Tabler `aicost/index` (stats,
+   tables, engine-down empty state) + `GET /api/ai/usage/summary`; `Biaya
+   AI` sidebar entry; `docs/api.md` rows. Tests: engine
+   `test_cost_summary.py` (3), Laravel `AiCostTest` (6).
+
+## Iteration 10 (previous commit)
 
 18. **Alert center UI + API** — engine evaluation (every minute) finally has
    a surface: new `AlertService` (alerts/rules/catalog/events/ack/create/

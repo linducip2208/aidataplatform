@@ -71,6 +71,7 @@ Route::middleware('auth:sanctum')->group(function (): void {
     // they carry a tighter limit than the blanket one on the `api` group.
     Route::post('/agent/chat', [AgentController::class, 'store'])->middleware('throttle:expensive')->name('api.agent.chat');
     Route::get('/ai/usage', [AgentController::class, 'usage'])->name('api.ai.usage');
+    Route::get('/ai/usage/summary', [AgentController::class, 'usageSummary'])->name('api.ai.usage.summary');
     Route::post('/rag/query', [RagController::class, 'query'])->middleware('throttle:expensive')->name('api.rag.query');
 
     // Enterprise data catalog (reads: viewer+, writes: analyst+).

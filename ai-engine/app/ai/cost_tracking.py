@@ -41,7 +41,7 @@ turn continues with ``recorded=False``.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import DateTime, Float, Integer, JSON, String, Text
@@ -240,6 +240,87 @@ def _empty_totals() -> Dict[str, Any]:
     return {"turns": 0, "prompt_tokens": 0, "completion_tokens": 0,
             "total_tokens": 0, "estimated_cost_total": 0.0,
             "currency": CURRENCY, "unpriced_rows": 0}
+
+
+def cost_summary(db_session=None, days: int = 30) -> Dict[str, Any]:
+    """Aggregate the ledger for the cost dashboard: totals, per-model and
+    per-day breakdowns over the last ``days`` days.
+
+    Aggregated in Python over the newest 5000 rows (newest first, cut off at
+    the window) so the query stays dialect-free across SQLite/MySQL. Costs
+    are summed over priced rows only; unpriced rows are counted separately
+    and never zero-filled into the total.
+    """
+    try:
+        days = max(1, min(int(days), 365))
+    except (TypeError, ValueError):
+        days = 30
+    if db_session is None:
+        return {"days": days, "totals": _empty_totals(),
+                "by_model": [], "by_day": []}
+    try:
+        cutoff = _utcnow() - timedelta(days=days)
+        rows = (db_session.query(AIUsage)
+                .order_by(AIUsage.id.desc()).limit(5000).all())
+    except Exception as exc:
+        log.warning(f"cost summary read failed: {type(exc).__name__}")
+        return {"days": days, "totals": _empty_totals(),
+                "by_model": [], "by_day": []}
+    def _as_utc(value: Any) -> Optional[datetime]:
+        # SQLite returns naive datetimes, MySQL aware ones: treat a naive
+        # value as UTC so the window comparison never raises.
+        if value is None:
+            return None
+        try:
+            moment = value if isinstance(value, datetime) else None
+            if moment is None:
+                return None
+            return moment if moment.tzinfo is not None else moment.replace(tzinfo=timezone.utc)
+        except Exception:
+            return None
+
+    in_window = [r for r in rows
+                 if r.created_at is None or (_as_utc(r.created_at) or cutoff) >= cutoff]
+    totals = _empty_totals()
+    by_model: Dict[str, Dict[str, Any]] = {}
+    by_day: Dict[str, Dict[str, Any]] = {}
+    for r in in_window:
+        pt = int(r.prompt_tokens or 0)
+        ct = int(r.completion_tokens or 0)
+        totals["turns"] += 1
+        totals["prompt_tokens"] += pt
+        totals["completion_tokens"] += ct
+        totals["total_tokens"] += pt + ct
+        if r.estimated_cost is None:
+            totals["unpriced_rows"] += 1
+        else:
+            totals["estimated_cost_total"] += float(r.estimated_cost)
+        key = f"{r.provider or 'unknown'} / {r.model or 'unknown'}"
+        m = by_model.setdefault(key, {
+            "model": r.model or "", "provider": r.provider or "",
+            "turns": 0, "total_tokens": 0, "estimated_cost_total": 0.0,
+            "currency": r.currency or CURRENCY})
+        m["turns"] += 1
+        m["total_tokens"] += pt + ct
+        if r.estimated_cost is not None:
+            m["estimated_cost_total"] += float(r.estimated_cost)
+        day = r.created_at.date().isoformat() if r.created_at is not None else "unknown"
+        d = by_day.setdefault(day, {
+            "day": day, "turns": 0, "total_tokens": 0,
+            "estimated_cost_total": 0.0})
+        d["turns"] += 1
+        d["total_tokens"] += pt + ct
+        if r.estimated_cost is not None:
+            d["estimated_cost_total"] += float(r.estimated_cost)
+    totals["estimated_cost_total"] = round(totals["estimated_cost_total"], 8)
+    models = sorted(by_model.values(), key=lambda m: m["total_tokens"], reverse=True)
+    for m in models:
+        m["estimated_cost_total"] = round(m["estimated_cost_total"], 8)
+    days_list = sorted(by_day.values(), key=lambda d: d["day"])
+    for d in days_list:
+        d["estimated_cost_total"] = round(d["estimated_cost_total"], 8)
+    return {"days": days, "totals": totals,
+            "by_model": models, "by_day": days_list}
 
 
 def _sum_totals(rows: List[Dict[str, Any]]) -> Dict[str, Any]:

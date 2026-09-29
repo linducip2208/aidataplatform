@@ -6,6 +6,7 @@ use App\Exceptions\AiEngineException;
 use App\Http\Controllers\Controller;
 use App\Models\AuditLog;
 use App\Models\ChatThread;
+use App\Services\AiCostService;
 use App\Services\AiEngineClient;
 use App\Support\ApiResponse;
 use Illuminate\Http\Client\ConnectionException;
@@ -116,6 +117,15 @@ class AgentController extends Controller
     // rendered by `bootstrap/app.php` with `code: ai_engine_error`.
     // Suggested route (wired by master): `GET /api/ai/usage`.
     // ------------------------------------------------------------------
+
+    public function usageSummary(Request $request, AiCostService $costs): JsonResponse
+    {
+        $validated = $request->validate([
+            'days' => ['nullable', 'integer', 'min:1', 'max:365'],
+        ]);
+
+        return ApiResponse::data($costs->summary((int) ($validated['days'] ?? 30)));
+    }
 
     public function usage(Request $request): JsonResponse
     {

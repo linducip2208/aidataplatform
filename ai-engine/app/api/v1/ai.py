@@ -112,6 +112,20 @@ def usage(db: Session = Depends(get_db),
     return {"success": True, "data": UsageResponse(**data).model_dump()}
 
 
+@router.get("/ai/usage/summary")
+def usage_summary(db: Session = Depends(get_db),
+                  _: str = Depends(require_service_auth),
+                  days: int = Query(default=30)):
+    """Cost dashboard aggregation: totals plus per-model and per-day
+    breakdowns over the last ``days`` days (1-365). All numbers come from
+    the ``ai_usage`` ledger; estimates stay labelled and unpriced rows are
+    counted, never zero-filled.
+    """
+    from app.ai import cost_tracking
+
+    return {"success": True, "data": cost_tracking.cost_summary(db, days)}
+
+
 @router.post("/ai/sql/validate")
 def sql_validate(body: SqlValidateRequest,
                  _: str = Depends(require_service_auth)):

@@ -157,6 +157,7 @@ All accept `date_from`, `date_to`, `branch`, `category`, `granularity`
 |---|---|---|---|
 | POST | `/api/agent/chat` | bearer | `{message,conversation_id?}` → `data` carries `reply` **and** `answer` (same value), `conversation_id`, `evidence[]`, `steps` |
 | GET | `/api/ai/usage` | bearer | usage ledger proxy for `GET /api/v1/ai/usage`, `?conversation_id=` optional |
+| GET | `/api/ai/usage/summary` | bearer | cost dashboard proxy for `GET /api/v1/ai/usage/summary`, `?days=` 1-365 |
 | POST | `/api/rag/query` | bearer | `{question or query,top_k?}` → `{answer,citations[]}` |
 
 `reply` is kept as an alias of `answer` so older clients keep working.
@@ -233,6 +234,7 @@ envelope; `App\Services\AiEngineClient` has a method for each one.
 | POST | `/api/v1/ai/report` | key | `{period,branch,format}`; `format: "html"` returns raw HTML, not the envelope |
 | POST | `/api/v1/rag/ingest` | key | `{title,content,source,doc_type}`, synchronous |
 | POST | `/api/v1/rag/query` | key | `{query,top_k}` |
+| GET | `/api/v1/ai/usage/summary` | key | cost aggregation (`totals`, `by_model`, `by_day`), `?days=` 1-365 |
 | POST | `/api/v1/forecast` | key | `{history[],horizon,granularity}` |
 | POST | `/api/v1/customers/churn` | key | `{customers[]}` |
 | POST | `/api/v1/customers/segment` | key | `{customers[],n_clusters}` |

@@ -12,6 +12,7 @@
         ['route' => 'ml.index', 'pattern' => 'ml.*', 'label' => 'Pembelajaran mesin', 'icon' => 'brain'],
         ['route' => 'assistant.index', 'pattern' => 'assistant.*', 'label' => 'Asisten', 'icon' => 'message-chatbot'],
         ['route' => 'reports.index', 'pattern' => 'reports.*', 'label' => 'Laporan', 'icon' => 'report'],
+        ['route' => 'ai.usage', 'pattern' => 'ai.usage', 'label' => 'Biaya AI', 'icon' => 'coins'],
     ];
 
     $adminNav = [

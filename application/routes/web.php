@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Admin\AuditLogController;
 use App\Http\Controllers\Admin\UserController;
+use App\Http\Controllers\AiCostController;
 use App\Http\Controllers\AlertController;
 use App\Http\Controllers\AnalyticsController;
 use App\Http\Controllers\AssistantController;
@@ -47,6 +48,7 @@ Route::middleware('auth')->group(function (): void {
 
     Route::get('/quality', [QualityController::class, 'index'])->name('quality.index');
     Route::get('/alerts', [AlertController::class, 'index'])->name('alerts.index');
+    Route::get('/ai/usage', [AiCostController::class, 'index'])->name('ai.usage');
     Route::get('/analytics', [AnalyticsController::class, 'index'])->name('analytics.index');
     Route::get('/ml', [MlController::class, 'index'])->name('ml.index');
     Route::get('/reports', [ReportController::class, 'index'])->name('reports.index');
