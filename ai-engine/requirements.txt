@@ -63,6 +63,6 @@ prometheus-client>=0.20
 pypdf>=4.2
 python-docx>=1.1
 
-pytest>=8.0
+pytest>=9.1.1
 # Required by asyncio_mode = auto in pytest.ini, not by any import.
 pytest-asyncio>=0.23
