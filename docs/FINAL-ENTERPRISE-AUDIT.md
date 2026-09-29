@@ -15,7 +15,16 @@ Date: 2026-09-29 (UTC). Branch: `main`. Scope: master enterprise commands, itera
    `WebWorkflowTest` updated to act as owner + new non-owner 403 cases.
    Suite → **929 tests, 0 failures**.
 
-## Iteration 14 (this commit)
+## Iteration 15 (this commit)
+
+24. **Decision Center UI** — rekomendasi/scenario/audit kini punya wajah:
+   `DecisionCenterController` (daftar kasus, detail rekomendasi + bukti,
+   formulir rekomendasi, simulasi skenario inline termasuk bentuk
+   unsupported, audit keputusan manusia atas nama akun login — semua diaudit),
+   Tabler `decisions/*`, rute web + entri `Keputusan`, degradasi engine-down.
+   Tests `DecisionCenterTest` → **8 passed**.
+
+## Iteration 14 (previous commit)
 
 22. **AI budget enforcement** — `AI_MONTHLY_BUDGET_USD` (default 0 =
    disabled) with `ai.budget` middleware on the expensive token API

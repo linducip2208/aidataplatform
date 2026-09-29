@@ -10,6 +10,7 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DatasetController;
 use App\Http\Controllers\DatasetWorkflowController;
+use App\Http\Controllers\DecisionCenterController;
 use App\Http\Controllers\ImportController;
 use App\Http\Controllers\MlController;
 use App\Http\Controllers\ProfileController;
@@ -53,6 +54,8 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/ml', [MlController::class, 'index'])->name('ml.index');
     Route::get('/reports', [ReportController::class, 'index'])->name('reports.index');
     Route::get('/assistant', [AssistantController::class, 'index'])->name('assistant.index');
+    Route::get('/decisions', [DecisionCenterController::class, 'index'])->name('decisions.index');
+    Route::get('/decisions/{id}', [DecisionCenterController::class, 'show'])->whereNumber('id')->name('decisions.show');
     Route::get('/assistant/threads/{thread}', [AssistantController::class, 'show'])->name('assistant.threads.show');
 
     Route::middleware('role:admin,analyst')->group(function (): void {
@@ -65,6 +68,9 @@ Route::middleware('auth')->group(function (): void {
         Route::post('/ml/experiments', [MlController::class, 'createExperiment'])->name('ml.experiments.store');
         Route::post('/ml/batch-predict', [MlController::class, 'batchPredict'])->name('ml.batch-predict');
         Route::post('/assistant/threads', [AssistantController::class, 'store'])->name('assistant.store');
+        Route::post('/decisions/recommend', [DecisionCenterController::class, 'recommend'])->name('decisions.recommend');
+        Route::post('/decisions/scenarios/run', [DecisionCenterController::class, 'runScenario'])->name('decisions.scenarios.run');
+        Route::post('/decisions/{id}/audit', [DecisionCenterController::class, 'audit'])->whereNumber('id')->name('decisions.audit');
         Route::post('/alerts/{id}/ack', [AlertController::class, 'acknowledge'])->whereNumber('id')->name('alerts.ack');
         Route::post('/alerts/rules', [AlertController::class, 'storeRule'])->name('alerts.rules.store');
         Route::post('/alerts/rules/{id}/toggle', [AlertController::class, 'toggleRule'])->whereNumber('id')->name('alerts.rules.toggle');
