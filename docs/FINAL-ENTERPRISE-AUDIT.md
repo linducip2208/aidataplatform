@@ -15,7 +15,22 @@ Date: 2026-09-29 (UTC). Branch: `main`. Scope: master enterprise commands, itera
    `WebWorkflowTest` updated to act as owner + new non-owner 403 cases.
    Suite → **929 tests, 0 failures**.
 
-## Iteration 5 (this commit)
+## Iteration 6 (this commit)
+
+13. **Column-level lineage (real, from saved mappings)** — migration
+   `070000` adds `source_column`/`target_column` to `data_lineages`;
+   `DataLineage::recordColumnMapping()` writes one edge per mapped header
+   (`dataset:uuid.src → dataset:uuid.canonical`, replaced on re-mapping so
+   impact reads never blame stale columns); hooked into
+   `DatasetIngestionService::suggestMapping()` (the single mapping-write
+   path for web + API); graph/upstream/downstream edge payloads carry the
+   columns; new `GET /api/lineage/datasets/{uuid}/columns` (viewer-readable,
+   documented in `docs/api.md`). New `ColumnLineageTest` → **4 passed**.
+14. **Docs synced to code** — `docs/security.md` matrix + A8-03 marked fixed
+   (ownership iteration 5), `SecurityHeaders` wiring marked landed,
+   `GET /api/ai/usage` ownership row added.
+
+## Iteration 5 (previous commit)
 
 10. **Strict ownership, fail-closed** — legacy exception removed from
    `DatasetPolicy`; unowned rows are admin-only. `DatasetFactory::forUser()`

@@ -213,22 +213,24 @@ authed route (pinned by `SecurityEnterpriseTest`, `RoleMiddlewareTest`,
 | Capability | admin | analyst | viewer | inactive / guest |
 |---|---|---|---|---|
 | Read pages + token API (`datasets.index/show`, `dashboard`, `api.me`, …) | yes | yes | yes | no (403 `account_inactive` / redirect) |
-| Write datasets (`store`, `preview/mapping/quality/commit`, `destroy`) | yes | yes | no (403 `forbidden`) | no |
+| Write datasets (`store`, `preview/mapping/quality/commit`, `destroy`) | yes | own datasets only (403 otherwise) | no (403 `forbidden`) | no |
+| Catalog writes (versions/annotate/contracts) | yes | own datasets only (403 otherwise) | no (403 `forbidden`) | no |
 | Assistant threads (`assistant.*`, scoped to own) | own only | own only | own only | no |
 | `POST /api/agent/chat`, `POST /api/rag/query` (any active account) | yes | yes | yes | no |
+| `GET /api/ai/usage` with `conversation_id` | own conversation only (422 otherwise) | own conversation only (422 otherwise) | own conversation only (422 otherwise) | no |
 | Train models (`ml.train`) | yes | yes | no | no |
 | Promote models (`ml.promote`) | yes | no | no | no |
 | Manage users / read audit log (`admin.*`, `audit.index`) | yes | no | no | no |
 
-Row-level ownership is stricter than the role gate and is NOT yet enforced
-(see A8-03 below). The intended policy, defined in
+Row-level ownership is enforced on top of the role gate since iteration 5
+(A8-03 closed below). The policy, defined in
 `application/app/Policies/DatasetPolicy.php` (owner-or-admin for
 write/delete, global read) and
 `application/app/Policies/ChatThreadPolicy.php` (strictly owner-only —
 mirrors the existing `abort_unless(..., 404)` in `AssistantController`, so
 even admins get 404 on another account's thread), plus the pure
 `User::canDo(action, resource)` helper that restates the matrix without new
-grants. Master wiring (A8 must not edit the shared files):
+grants. Wiring (all landed):
 
 ```php
 // app/Providers/AppServiceProvider.php, inside boot():
@@ -283,15 +285,16 @@ also emits a structured `auth.failed` log (`reason=unconfigured|missing|invalid`
 |---|---|---|---|---|
 | A8-01 | High | `application/app/Http/Controllers/DatasetController.php:58` + `Api/DatasetController.php:57` | `max:` got the raw MB value (KB semantics) → effective cap ~500 KB, contradicting the documented 500 MB | **Fixed** (web, A8-owned). API mirror identical — flagged for master (A8-02 also covers it) |
 | A8-02 | High | `application/app/Http/Controllers/Api/DatasetController.php@store` (read-only for A8) | No double-extension / traversal filename screen; `sales.php.csv` accepted (201). Pinned as known-gap test | **Open** — port `DatasetController::unsafeFilenameReason()` + helpers into the API controller |
-| A8-03 | High | dataset controllers (web + API) | No per-row ownership check: any `analyst` can mutate/delete any dataset; any active user can read all | **Open** — policies defined (`Policies/*`); master must `$this->authorize()` them in mutating actions |
+| A8-03 | High | dataset controllers (web + API) | No per-row ownership check: any `analyst` can mutate/delete any dataset; any active user can read all | **Fixed** (iteration 5) — `Gate::policy` registered; `Gate::authorize('update'/'delete')` in all dataset write/delete paths; unowned rows admin-only with owner backfill migration |
 | A8-04 | Medium | `ai-engine/app/api/v1/models.py:90` (A5-owned) | Engine `GET /models` decorates versions with server-side `artifact_path`; Laravel strips it but direct engine callers see filesystem layout | **Open** — strip server-side or gate the route; Laravel already `Arr::except`s it |
 | A8-05 | Medium | `application/app/Models/Dataset.php:42` | `$fillable` is deliberately wide (server-owned columns mass-assignable); safe today only because no client key reaches `create()/update()` | **Accepted risk** — documented in the model; tightening needs service+seeder+factory conversion together |
 | A8-06 | Low | `application/app/Models/User.php:56` | `role()` falls back to `Viewer` on corrupt values (fail-open to viewer reads) | **Accepted risk** — behaviour frozen per task; `EnsureRole` strictness + `EnsureAccountActive` bound the blast radius |
 | A8-07 | Low | `application/config/sanctum.php:53` | `expiration => null`; expiry relies on per-token `expires_at` written at issue (`token_ttl_days`) | **Accepted** — all tokens are issued with expiry; no path mints non-expiring tokens |
 
 Fixed in this pass: A8-01 (web); `EnsureRole`/`EnsureAccountActive` denial
-audit logging (responses unchanged); `SecurityHeaders` (awaits master
-wiring); engine `auth.failed` audit hook (no secret values);
+audit logging (responses unchanged); `SecurityHeaders` (wired in
+`bootstrap/app.php`, iteration 1); A8-03 ownership (iteration 5);
+engine `auth.failed` audit hook (no secret values);
 `DatasetController` filename + size hardening; `PiiMask` + `User::canDo()`
 pure helpers (no behaviour change; account lockout deliberately NOT added —
 the 5/min login throttle already bounds guessing and lockout risked

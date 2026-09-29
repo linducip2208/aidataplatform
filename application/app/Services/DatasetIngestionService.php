@@ -6,6 +6,7 @@ use App\Enums\DatasetStatus;
 use App\Enums\QualityVerdict;
 use App\Exceptions\AiEngineException;
 use App\Models\AuditLog;
+use App\Models\DataLineage;
 use App\Models\Dataset;
 use App\Models\User;
 use Illuminate\Http\UploadedFile;
@@ -145,9 +146,19 @@ class DatasetIngestionService
             'status' => DatasetStatus::Mapped,
         ])->save();
 
+        // The saved mapping IS the column lineage of this dataset: every
+        // header that reaches the warehouse does so through exactly this
+        // map, so record it while it is current.
+        $lineageEdges = DataLineage::recordColumnMapping(
+            $dataset,
+            $mappings,
+            $dataset->import_job_id !== null ? (string) $dataset->import_job_id : null,
+        );
+
         AuditLog::record('dataset.mapping_applied', 'dataset', $dataset->getKey(), [
             'mappings' => $mappings,
             'template' => $saveAsTemplate,
+            'lineage_edges' => $lineageEdges,
         ]);
 
         return $mappings;

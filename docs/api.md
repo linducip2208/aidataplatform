@@ -180,7 +180,8 @@ All accept `date_from`, `date_to`, `branch`, `category`, `granularity`
 
 | Method | Path | Role | Notes |
 |---|---|---|---|
-| GET | `/api/lineage/datasets/{uuid}/graph` | admin, analyst, viewer | lineage graph both directions, `?depth=` 1-10 default 3 |
+| GET | `/api/lineage/datasets/{uuid}/graph` | admin, analyst, viewer | lineage graph both directions, `?depth=` 1-10 default 3; edges carry `source_column`/`target_column` when mapping-stage |
+| GET | `/api/lineage/datasets/{uuid}/columns` | admin, analyst, viewer | column mapping edges (`source_column` → `target_column`), refreshed on every mapping save |
 | GET | `/api/lineage/{nodeType}/{nodeId}/upstream` | admin, analyst, viewer | upstream traversal, `?depth=` 1-10 default 5 |
 | GET | `/api/lineage/{nodeType}/{nodeId}/downstream` | admin, analyst, viewer | downstream traversal, `?depth=` 1-10 default 5 |
 | POST | `/api/lineage` | admin, analyst | record one lineage edge; `201`, idempotent on identical edge |

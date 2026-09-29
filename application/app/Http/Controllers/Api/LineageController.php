@@ -42,6 +42,19 @@ class LineageController extends Controller
         return ApiResponse::data(DataLineage::downstream($nodeType, $nodeId, $depth));
     }
 
+    /**
+     * Column mapping of one dataset: which uploaded header became which
+     * canonical field, i.e. the answer to "if this header changes, which
+     * warehouse columns break".
+     */
+    public function columns(Dataset $dataset): JsonResponse
+    {
+        return ApiResponse::data([
+            'dataset_id' => $dataset->uuid,
+            'columns' => DataLineage::columnEdgesFor($dataset),
+        ]);
+    }
+
     public function store(Request $request): JsonResponse
     {
         $validated = $request->validate([

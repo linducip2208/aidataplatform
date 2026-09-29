@@ -81,6 +81,7 @@ Route::middleware('auth:sanctum')->group(function (): void {
         Route::get('/catalog/datasets/{dataset}/health', [CatalogController::class, 'health'])->name('api.catalog.health');
         Route::get('/schema-registry/datasets/{dataset}', [CatalogController::class, 'registry'])->name('api.schema-registry.show');
         Route::get('/lineage/datasets/{dataset}/graph', [LineageController::class, 'graph'])->name('api.lineage.graph');
+        Route::get('/lineage/datasets/{dataset}/columns', [LineageController::class, 'columns'])->name('api.lineage.columns');
         Route::get('/lineage/{nodeType}/{nodeId}/upstream', [LineageController::class, 'upstream'])->name('api.lineage.upstream');
         Route::get('/lineage/{nodeType}/{nodeId}/downstream', [LineageController::class, 'downstream'])->name('api.lineage.downstream');
     });

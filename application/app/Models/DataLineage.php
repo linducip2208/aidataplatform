@@ -12,6 +12,10 @@ use Illuminate\Database\Eloquent\Model;
  * every hop: `import_job:42 -> dataset:<uuid> -> table:fact_sales ->
  * model:churn:v3`. `source_id`/`target_id` are strings on purpose: dataset
  * uuids and engine integer ids share the same edge table.
+ *
+ * Column granularity rides on the same rows: a mapping-stage edge carries
+ * `source_column` (the uploaded header) and `target_column` (the canonical
+ * field it was mapped to). Node-level edges leave both null.
  */
 class DataLineage extends Model
 {
@@ -20,8 +24,10 @@ class DataLineage extends Model
     protected $fillable = [
         'source_type',
         'source_id',
+        'source_column',
         'target_type',
         'target_id',
+        'target_column',
         'transform',
         'run_reference',
     ];
@@ -65,6 +71,76 @@ class DataLineage extends Model
             ],
             [],
         );
+    }
+
+    /**
+     * Record the column mapping of a dataset as lineage edges.
+     *
+     * One edge per mapped header: `dataset:<uuid>.<source> ->
+     * dataset:<uuid>.<canonical>` with `transform = column_mapping`. The
+     * mapping form is the current state, so edges from a previous save that
+     * are no longer mapped are removed — otherwise impact analysis would
+     * blame columns the pipeline no longer reads. Returns the edge count.
+     */
+    public static function recordColumnMapping(Dataset $dataset, array $mappings, ?string $runReference = null): int
+    {
+        $query = static::query()
+            ->where('source_type', 'dataset')
+            ->where('source_id', $dataset->uuid)
+            ->where('target_type', 'dataset')
+            ->where('target_id', $dataset->uuid)
+            ->where('transform', 'column_mapping');
+
+        $query->delete();
+
+        $count = 0;
+
+        foreach ($mappings as $source => $target) {
+            $source = trim((string) $source);
+            $target = trim((string) $target);
+
+            if ($source === '' || $target === '') {
+                continue;
+            }
+
+            static::query()->create([
+                'source_type' => 'dataset',
+                'source_id' => $dataset->uuid,
+                'source_column' => $source,
+                'target_type' => 'dataset',
+                'target_id' => $dataset->uuid,
+                'target_column' => $target,
+                'transform' => 'column_mapping',
+                'run_reference' => $runReference,
+            ]);
+            $count++;
+        }
+
+        return $count;
+    }
+
+    /**
+     * Column edges touching one dataset, for the columns endpoint and for
+     * "what breaks if this header changes" impact reads.
+     *
+     * @return list<array{source_column: string, target_column: string, run_reference: ?string}>
+     */
+    public static function columnEdgesFor(Dataset $dataset): array
+    {
+        return static::query()
+            ->where('source_type', 'dataset')
+            ->where('source_id', $dataset->uuid)
+            ->where('target_type', 'dataset')
+            ->where('target_id', $dataset->uuid)
+            ->where('transform', 'column_mapping')
+            ->orderBy('source_column')
+            ->get()
+            ->map(static fn (self $edge): array => [
+                'source_column' => (string) $edge->source_column,
+                'target_column' => (string) $edge->target_column,
+                'run_reference' => $edge->run_reference,
+            ])
+            ->all();
     }
 
     /**
@@ -132,8 +208,10 @@ class DataLineage extends Model
                             'id' => $key,
                             'source_type' => $row->source_type,
                             'source_id' => $row->source_id,
+                            'source_column' => $row->source_column,
                             'target_type' => $row->target_type,
                             'target_id' => $row->target_id,
+                            'target_column' => $row->target_column,
                             'transform' => $row->transform,
                             'run_reference' => $row->run_reference,
                         ];
