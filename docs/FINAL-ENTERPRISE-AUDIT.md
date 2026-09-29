@@ -15,7 +15,18 @@ Date: 2026-09-29 (UTC). Branch: `main`. Scope: master enterprise commands, itera
    `WebWorkflowTest` updated to act as owner + new non-owner 403 cases.
    Suite → **929 tests, 0 failures**.
 
-## Iteration 11 (this commit)
+## Iteration 12 (this commit)
+
+20. **RAG document ACL** — visibility (`public`/`internal`/`confidential`)
+   in document `meta` (no schema change; pre-ACL docs stay `public`);
+   `POST /rag/ingest?visibility=` (422 on unknown, first-ingest wins);
+   `POST /rag/query?allow=` filters chunks **before scoring** with the hidden
+   count in `limitations`; Laravel maps role → allowlist on every proxied
+   query (viewer `public`, analyst +`internal`, admin pinned path). Tests:
+   engine `test_rag_acl.py` (5), Laravel `RagAclTest` (3). Per-owner private
+   docs tracked as known limitation. Docs (`rag.md` §7, `api.md`) updated.
+
+## Iteration 11 (previous commit)
 
 19. **AI cost dashboard** — the `ai_usage` ledger finally has a face:
    engine `cost_tracking.cost_summary()` (totals + per-model + per-day over

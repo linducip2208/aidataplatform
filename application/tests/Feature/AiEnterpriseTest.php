@@ -79,7 +79,10 @@ class AiEnterpriseTest extends TestCase
                 throw new ConnectionException('connection refused');
             }
 
-            $url = $request->url();
+            // Flags (`hybrid`, `rerank`, `allow`) ride as query params on the
+            // engine call, so match on the path: an exact-URL match would
+            // miss every call that carries them.
+            $url = (string) strtok($request->url(), '?');
 
             $payload = match (true) {
                 str_ends_with($url, '/api/v1/ai/chat') => $this->forcedChatResult ?? $this->chatResult(),

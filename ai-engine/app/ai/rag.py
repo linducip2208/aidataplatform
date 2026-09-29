@@ -41,6 +41,16 @@ CHUNK_OVERLAP = 120
 SCAN_LIMIT = 2000
 MAX_TOP_K = 20
 DEFAULT_TOP_K = 5
+
+# Document visibility levels, least to most restricted. Stored in the
+# document's ``meta`` dict (no schema change): old documents without the key
+# read back as ``public``. Laravel maps the caller's role to the allowed set
+# and sends it on every query; the engine enforces it *before* scoring so an
+# unauthorized chunk can never enter the context, citations, or evidence.
+VISIBILITY_PUBLIC = "public"
+VISIBILITY_INTERNAL = "internal"
+VISIBILITY_CONFIDENTIAL = "confidential"
+VISIBILITIES = (VISIBILITY_PUBLIC, VISIBILITY_INTERNAL, VISIBILITY_CONFIDENTIAL)
 MAX_INGEST_CHARS = 2_000_000
 MAX_CHUNKS = 1000
 MAX_TITLE_CHARS = 500
@@ -498,8 +508,31 @@ def _find_existing(db_session, source: str, title: str,
     return None, False, 0, 0
 
 
+def normalise_visibility(value: Any) -> str:
+    """Validate a visibility level, defaulting blanks to ``public``.
+
+    Raises ``ValueError`` on anything outside :data:`VISIBILITIES` so the
+    router can refuse it with a 422 instead of storing an unenforceable tag.
+    """
+    level = str(value if value is not None else "").strip().lower() or VISIBILITY_PUBLIC
+    if level not in VISIBILITIES:
+        raise ValueError(f"unknown visibility {value!r}; expected one of {', '.join(VISIBILITIES)}")
+    return level
+
+
+def doc_visibility(meta: Any) -> str:
+    """The effective visibility of a stored document. Documents written
+    before ACL existed carry no key and stay ``public`` (backward
+    compatible)."""
+    if isinstance(meta, dict):
+        level = str(meta.get("visibility") or "").strip().lower()
+        if level in VISIBILITIES:
+            return level
+    return VISIBILITY_PUBLIC
+
+
 def ingest_text(title: str, content: str, source: str = "api", doc_type: str = "txt",
-                db_session=None) -> Dict[str, Any]:
+                db_session=None, visibility: Any = VISIBILITY_PUBLIC) -> Dict[str, Any]:
     """Chunk, embed and store one document, replacing an identical earlier ingest.
 
     Returns ``{"document_id": int | None, "n_chunks": int, "n_embedded": int, "status":
@@ -520,6 +553,14 @@ def ingest_text(title: str, content: str, source: str = "api", doc_type: str = "
     never closes.
     """
     title = _clip(str(title or "").strip(), MAX_TITLE_CHARS) or "untitled"
+    try:
+        visibility = normalise_visibility(visibility)
+    except ValueError:
+        return {
+            "document_id": None, "n_chunks": 0, "n_embedded": 0, "status": "failed",
+            "truncated": False, "chunks_truncated": False, "embedding_dim": 0,
+            "column_dim": _vector_dim(), "error": "bad_visibility",
+        }
     source = _clip(str(source or "api").strip(), MAX_SOURCE_CHARS)
     doc_type = _clip(str(doc_type or "txt").strip().lower().lstrip("."), MAX_DOC_TYPE_CHARS) or "txt"
     body = str(content or "")
@@ -560,7 +601,8 @@ def ingest_text(title: str, content: str, source: str = "api", doc_type: str = "
         width = max((len(_as_vector(embeddings[i])) for i in range(min(len(embeddings), len(chunks)))),
                     default=0)
         meta = {"n_chunks": len(chunks), "content_sha256": digest, "truncated": truncated,
-                "chunks_truncated": chunks_truncated, "embedding_dim": width}
+                "chunks_truncated": chunks_truncated, "embedding_dim": width,
+                "visibility": visibility}
         if doc_id is None:
             doc = RagDocument(source=source, title=title, doc_type=doc_type, meta=meta)
             db_session.add(doc)
@@ -571,6 +613,11 @@ def ingest_text(title: str, content: str, source: str = "api", doc_type: str = "
             doc.title = title
             doc.source = source
             doc.doc_type = doc_type
+            # Visibility is set at first ingest and wins over later re-ingests:
+            # silently re-tagging a document's audience on a content update
+            # would be a privilege change disguised as a sync.
+            if isinstance(doc.meta, dict) and doc.meta.get("visibility") in VISIBILITIES:
+                meta["visibility"] = doc.meta["visibility"]
             doc.meta = meta
             db_session.query(RagChunk).filter(RagChunk.document_id == doc_id).delete(
                 synchronize_session=False)
@@ -636,7 +683,8 @@ def _grounded_answer(query_text: str, hits: List[Dict[str, Any]], note: str = ""
 
 
 def query(query_text: str, top_k: int = DEFAULT_TOP_K, db_session=None,
-          hybrid: bool = True, rerank: bool = True) -> Dict[str, Any]:
+          hybrid: bool = True, rerank: bool = True,
+          allowed_visibility: Any = None) -> Dict[str, Any]:
     """Retrieve the best matching chunks and ground an answer in them.
 
     Returns ``{"answer": str, "evidence": [...], "citations": [...],
@@ -650,6 +698,12 @@ def query(query_text: str, top_k: int = DEFAULT_TOP_K, db_session=None,
     (``None``/``None`` when the match is purely semantic). ``confidence`` is
     0..1 (0 when nothing matched); ``limitations`` names every degradation
     (keyword-only run, scan-window bound, rerank skipped).
+
+    Document ACL is enforced before scoring: ``allowed_visibility`` (a level,
+    a comma string, or a list; ``None`` means the legacy allow-all) drops
+    every chunk whose document visibility is not allowed, and the drop count
+    is reported in ``limitations``. Unauthorized chunks never reach scoring,
+    rerank, evidence, citations, or the answer.
 
     Retrieval is a hybrid of vector cosine and BM25-lite keyword scoring over
     the :data:`SCAN_LIMIT` newest chunks, fused as ``FUSION_ALPHA * vector +
@@ -687,12 +741,28 @@ def query(query_text: str, top_k: int = DEFAULT_TOP_K, db_session=None,
                 "confidence": 0.0,
                 "limitations": ["no database session: nothing was searched"]}
 
+    allowed: Optional[frozenset] = None
+    if allowed_visibility is not None:
+        if isinstance(allowed_visibility, str):
+            wanted = {v.strip().lower() for v in allowed_visibility.split(",")}
+        else:
+            try:
+                wanted = {str(v).strip().lower() for v in list(allowed_visibility)}
+            except TypeError:
+                wanted = set()
+        wanted = {v for v in wanted if v in VISIBILITIES}
+        if not wanted:
+            return {"answer": "Tidak ada tingkat visibilitas yang diizinkan untuk kueri ini.",
+                    "evidence": [], "citations": [], "chunks": [], "n_results": 0,
+                    "confidence": 0.0, "limitations": ["empty visibility allowlist"]}
+        allowed = frozenset(wanted)
+
     try:
         from app.database.models import RagChunk, RagDocument
 
         rows = (db_session.query(RagChunk.id, RagChunk.content, RagChunk.document_id,
                                  RagChunk.chunk_index, RagChunk.embedding, RagChunk.meta,
-                                 RagDocument.title, RagDocument.source)
+                                 RagDocument.title, RagDocument.source, RagDocument.meta)
                 .outerjoin(RagDocument, RagChunk.document_id == RagDocument.id)
                 .order_by(RagChunk.document_id.desc(), RagChunk.chunk_index)
                 .limit(SCAN_LIMIT).all())
@@ -700,6 +770,16 @@ def query(query_text: str, top_k: int = DEFAULT_TOP_K, db_session=None,
         return {"answer": "Basis data dokumen tidak dapat dibaca.", "citations": [],
                 "evidence": [], "chunks": [], "n_results": 0, "confidence": 0.0,
                 "limitations": ["document store unreadable"]}
+
+    acl_excluded = 0
+    if allowed is not None:
+        kept = []
+        for row in rows:
+            if doc_visibility(row[8]) in allowed:
+                kept.append(row)
+            else:
+                acl_excluded += 1
+        rows = kept
 
     q_emb: List[float] = []
     if question:
@@ -718,7 +798,7 @@ def query(query_text: str, top_k: int = DEFAULT_TOP_K, db_session=None,
 
     vector_scores: List[float] = []
     keyword_scores: List[float] = []
-    for i, (chunk_id, content, document_id, chunk_index, embedding, meta, title, source) in enumerate(rows):
+    for i, (chunk_id, content, document_id, chunk_index, embedding, meta, title, source, _doc_meta) in enumerate(rows):
         text = content or ""
         stored = _as_vector(embedding) if _comparable(meta, width) else []
         if stored and q_emb:
@@ -732,7 +812,7 @@ def query(query_text: str, top_k: int = DEFAULT_TOP_K, db_session=None,
     norm_keyword = _normalise(keyword_scores)
 
     scored: List[Dict[str, Any]] = []
-    for i, (chunk_id, content, document_id, chunk_index, embedding, meta, title, source) in enumerate(rows):
+    for i, (chunk_id, content, document_id, chunk_index, embedding, meta, title, source, _doc_meta) in enumerate(rows):
         text = content or ""
         if hybrid:
             fused = FUSION_ALPHA * norm_vector[i] + (1.0 - FUSION_ALPHA) * norm_keyword[i]
@@ -757,6 +837,9 @@ def query(query_text: str, top_k: int = DEFAULT_TOP_K, db_session=None,
     ranked = [row for row in scored if row["fused"] > MIN_SCORE][:limit]
 
     limitations: List[str] = []
+    if acl_excluded:
+        limitations.append(
+            f"{acl_excluded} chunk disembunyikan oleh ACL dokumen.")
     degraded = not bool(q_emb) and bool(question)
     if degraded:
         limitations.append("Embedding tidak tersedia, pencarian memakai kata kunci (BM25-lite).")

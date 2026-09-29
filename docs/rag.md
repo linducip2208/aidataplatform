@@ -167,5 +167,25 @@ the full content plus the score breakdown (`vector`, `keyword`, `fused`, `rerank
 `{answer, evidence[], citations[], chunks[], n_results, confidence, limitations}`.
 `confidence` is 0..1 (0 when nothing matched, capped at 0.6 on keyword-only degraded runs);
 `limitations` names each degradation: embedding outage, `SCAN_LIMIT` bound, disabled
-hybrid/rerank, or no chunk above threshold. Empty corpus is an explicit "no match" answer,
-never an invented one.
+hybrid/rerank, ACL-hidden chunks, or no chunk above threshold. Empty corpus is an explicit
+"no match" answer, never an invented one.
+
+## 7. Document ACL (enterprise)
+
+Documents carry a visibility level — `public`, `internal`, or `confidential` —
+stored in the document `meta` (no schema change; pre-ACL documents read back
+as `public`). Set it at ingest with `POST /api/v1/rag/ingest?visibility=...`
+(unknown values are 422; first ingest wins on re-ingest, so a content update
+can never silently re-tag the audience).
+
+Enforcement happens in the engine **before retrieval**: `POST
+/api/v1/rag/query?allow=public,internal` drops every chunk whose document is
+not allowed before scoring, so unauthorized text never reaches rerank,
+evidence, citations, or the answer. The hidden count is reported in
+`limitations`. Omitting `allow` keeps the legacy allow-all behaviour for
+direct engine callers.
+
+Laravel maps the caller on every proxied query and the caller never chooses:
+viewer → `public`, analyst → `public,internal`, admin → unfiltered pinned
+path. Per-owner private documents are not yet supported (the engine has no
+user identity); they are tracked as a known limitation, not silently allowed.

@@ -33,21 +33,36 @@ class RagController extends Controller
         $text = trim((string) (($validated['question'] ?? null) ?: ($validated['query'] ?? '')));
         $topK = (int) ($validated['top_k'] ?? 5);
 
+        // Document ACL, enforced in the engine before retrieval: the caller
+        // never chooses their own allowlist. Viewers see public documents,
+        // analysts add internal ones; admins keep the pinned `ragQuery()`
+        // path (byte-identical body, legacy allow-all).
+        $role = $request->user()->role()->value;
+        $allow = match ($role) {
+            'viewer' => 'public',
+            'analyst' => 'public,internal',
+            default => null,
+        };
+
         // Default path is byte-identical: the pinned `ragQuery()` body.
-        // `hybrid`/`rerank` ride as engine query params on an extended call
-        // (same body), only when the caller sent them explicitly.
-        if (! array_key_exists('hybrid', $validated) && ! array_key_exists('rerank', $validated)) {
+        // `hybrid`/`rerank`/`allow` ride as engine query params on an
+        // extended call (same body), whenever any of them applies.
+        $flags = [];
+        if ($allow !== null) {
+            $flags['allow'] = $allow;
+        }
+        if (array_key_exists('hybrid', $validated)) {
+            $flags['hybrid'] = $validated['hybrid'] ? 'true' : 'false';
+        }
+        if (array_key_exists('rerank', $validated)) {
+            $flags['rerank'] = $validated['rerank'] ? 'true' : 'false';
+        }
+
+        if ($flags === []) {
             $result = $engine->ragQuery($text, $topK);
         } else {
-            $flags = [];
-            if (array_key_exists('hybrid', $validated)) {
-                $flags['hybrid'] = $validated['hybrid'] ? 'true' : 'false';
-            }
-            if (array_key_exists('rerank', $validated)) {
-                $flags['rerank'] = $validated['rerank'] ? 'true' : 'false';
-            }
             $result = $this->enginePost(
-                '/rag/query'.($flags === [] ? '' : '?'.http_build_query($flags)),
+                '/rag/query?'.http_build_query($flags),
                 ['query' => $text, 'top_k' => $topK],
                 'rag.query'
             );
