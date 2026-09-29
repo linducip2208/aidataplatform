@@ -461,6 +461,34 @@ def _parse_revision(path: Path) -> tuple[dict[str, TableSpec], dict[str, TableSp
     return declared, created, len(_op_calls(tree, "create_table"))
 
 
+def _apply_column_additions(
+    tables: dict[str, TableSpec],
+) -> None:
+    """Merge ``op.add_column`` calls from later revisions into the table specs.
+
+    Revisions after 0001 alter tables instead of creating them (e.g. 0003
+    adds display columns to dim_product), so the per-revision ``created``
+    maps never see those columns. Only literal calls are understood; anything
+    fancier resolves to OPAQUE and is skipped rather than misread.
+    """
+    for path in REVISION_FILES:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=path.name)
+        env = _module_env(tree)
+        for call in _op_calls(tree, "add_column"):
+            if len(call.args) < 2 or not isinstance(call.args[0], ast.Constant):
+                continue
+            table = str(call.args[0].value)
+            column = _Evaluator(env, path.name).eval(call.args[1])
+            if table not in tables or not isinstance(column, Column):
+                continue
+            spec = tables[table]
+            tables[table] = TableSpec(
+                name=spec.name,
+                columns={**spec.columns, column.name: column},
+                origin=f"{spec.origin}+{path.name}:{call.lineno}",
+            )
+
+
 def _flatten(value: Any) -> list[Any]:
     if isinstance(value, list):
         out: list[Any] = []
@@ -528,6 +556,7 @@ REVISIONS = {path.name: _parse_revision(path) for path in REVISION_FILES}
 MIGRATION_TABLES: dict[str, TableSpec] = {}
 for _declared, _created, _calls in REVISIONS.values():
     MIGRATION_TABLES.update(_created)
+_apply_column_additions(MIGRATION_TABLES)
 LARAVEL_TABLES = _laravel_tables()
 DOC_TABLES = _doc_tables()
 

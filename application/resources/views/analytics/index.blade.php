@@ -394,7 +394,28 @@
                         @foreach ($abc as $row)
                             @php $grade = strtoupper((string) ($row['grade'] ?? 'C')); @endphp
                             <tr>
-                                <td class="fw-bold text-secondary">{{ $row['product'] ?? 'Tidak diketahui' }}</td>
+                                <td>
+                                    <div class="d-flex align-items-center gap-2">
+                                        @php
+                                            $productName = (string) ($row['product'] ?? 'Tidak diketahui');
+                                            $productImage = $row['image_url'] ?? null;
+                                            $productDescription = $row['description'] ?? null;
+                                        @endphp
+                                        @if (is_string($productImage) && $productImage !== '')
+                                            <span class="avatar avatar-sm bg-white border" aria-hidden="true">
+                                                <img src="{{ $productImage }}" alt="" loading="lazy" width="32" height="32">
+                                            </span>
+                                        @else
+                                            <span class="avatar avatar-sm bg-azure-lt" aria-hidden="true">{{ \Illuminate\Support\Str::upper(\Illuminate\Support\Str::substr($productName, 0, 1)) }}</span>
+                                        @endif
+                                        <div class="min-w-0">
+                                            <div class="fw-bold text-secondary">{{ $productName }}</div>
+                                            @if (is_string($productDescription) && $productDescription !== '')
+                                                <div class="small text-secondary text-truncate" style="max-width: 22rem;">{{ $productDescription }}</div>
+                                            @endif
+                                        </div>
+                                    </div>
+                                </td>
                                 <td class="text-end">{{ \Illuminate\Support\Number::currency((float) ($row['revenue'] ?? 0), in: 'idr', locale: 'id', precision: 0) }}</td>
                                 <td class="text-end">{{ \Illuminate\Support\Number::percentage((float) ($row['share_pct'] ?? 0), precision: 1, locale: 'id') }}</td>
                                 <td class="text-end">{{ \Illuminate\Support\Number::percentage((float) ($row['cumulative_pct'] ?? 0), precision: 1, locale: 'id') }}</td>

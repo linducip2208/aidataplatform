@@ -39,7 +39,7 @@ engine; the one exception is `dim_date`, whose natural key `date_key` is declare
 | Table | Columns | Natural-key index |
 |---|---|---|
 | `dim_customer` | `customer_code`, `customer_name`, `segment`, `city`, `extra` JSONB | `ix_dim_customer_customer_code` UNIQUE |
-| `dim_product` | `product_code`, `product_name`, `category`, `unit`, `cost_price`, `selling_price` | `ix_dim_product_product_code` UNIQUE |
+| `dim_product` | `product_code`, `product_name`, `category`, `unit`, `cost_price`, `selling_price`, `description`, `image_url` | `ix_dim_product_product_code` UNIQUE |
 | `dim_branch` | `branch_code`, `branch_name`, `city` | `ix_dim_branch_branch_code` UNIQUE |
 | `dim_supplier` | `supplier_code`, `supplier_name` | `ix_dim_supplier_supplier_code` UNIQUE |
 | `dim_warehouse` | `warehouse_code`, `warehouse_name` | `ix_dim_warehouse_warehouse_code` UNIQUE |

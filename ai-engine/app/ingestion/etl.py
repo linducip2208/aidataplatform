@@ -727,6 +727,28 @@ def _get_or_create(session, model, key_field: str, key_value: str, defaults: dic
     return row
 
 
+def _fill_product_catalog(prod) -> None:
+    """Fill an empty product description/image from the demo catalog.
+
+    Matched by ``product_name``; only fills fields that are still empty, so a
+    description or image that arrived with the data (or an earlier import) is
+    never overwritten by the catalog.
+    """
+    if prod is None:
+        return
+    if (prod.description or "") != "" and (prod.image_url or "") != "":
+        return
+    from app.analytics.product_catalog import lookup
+
+    meta = lookup(prod.product_name)
+    if not meta:
+        return
+    if not (prod.description or ""):
+        prod.description = meta["description"]
+    if not (prod.image_url or ""):
+        prod.image_url = meta["image_url"]
+
+
 def _purge_job_rows(session, dataset_type: str, import_job_id: Optional[int]) -> int:
     """Delete every fact row previously written by ``import_job_id``. This is the
     dedupe key that makes a re-run replace instead of double-count."""
@@ -858,6 +880,7 @@ def _load_warehouse(session, df: pd.DataFrame, dataset_type: str, import_job_id:
                                        "unit": _key(r.get("unit")) or "pcs",
                                        "cost_price": _num(r.get("cost_price")),
                                        "selling_price": _num(r.get("selling_price"))})
+                _fill_product_catalog(prod)
                 br = _get_or_create(session, DimBranch, "branch_code",
                                     _key(r.get("branch_code") or r.get("branch_name")) or "DEFAULT",
                                     {"branch_name": _key(r.get("branch_name")) or "DEFAULT"})
@@ -883,6 +906,7 @@ def _load_warehouse(session, df: pd.DataFrame, dataset_type: str, import_job_id:
                                        "unit": _key(r.get("unit")) or "pcs",
                                        "cost_price": _num(r.get("cost_price")),
                                        "selling_price": _num(r.get("selling_price"))})
+                _fill_product_catalog(prod)
                 wh = _get_or_create(session, DimWarehouse, "warehouse_code",
                                     _key(r.get("warehouse_code") or r.get("warehouse_name")) or "DEFAULT",
                                     {"warehouse_name": _key(r.get("warehouse_name")) or "DEFAULT"})
@@ -904,6 +928,7 @@ def _load_warehouse(session, df: pd.DataFrame, dataset_type: str, import_job_id:
                                        "category": _key(r.get("category")),
                                        "unit": _key(r.get("unit")) or "pcs",
                                        "cost_price": _num(r.get("cost"))})
+                _fill_product_catalog(prod)
                 session.add(FactPurchase(
                     purchase_date=_date(r.get("purchase_date")),
                     supplier_id=sup.id if sup else None,
@@ -932,9 +957,17 @@ def _load_warehouse(session, df: pd.DataFrame, dataset_type: str, import_job_id:
                 item["cost_price"] = _num(r.get("cost_price"))
                 item["selling_price"] = _num(r.get("selling_price"))
                 item["unit"] = _key(r.get("unit")) or "pcs"
+                # A products file may carry its own description/image_url
+                # columns; forward them only when non-empty so an absent
+                # column never wipes the catalog (or earlier) values.
+                for col in ("description", "image_url"):
+                    val = _key(r.get(col))
+                    if val:
+                        item[col] = val
                 prepared.append(item)
             written = _upsert_dim(session, DimProduct, "product_code", prepared,
-                                  ("product_name", "category", "unit", "cost_price", "selling_price"))
+                                  ("product_name", "category", "unit", "cost_price",
+                                   "selling_price", "description", "image_url"))
         session.commit()
         return written
     except Exception:

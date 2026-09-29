@@ -116,7 +116,7 @@ and `failed` (validation rejected the file, or the task exhausted its retries).
 | GET | `/api/analytics/kpi` | `POST /api/v1/analytics/kpi` |
 | GET | `/api/analytics/trend` | `POST /api/v1/analytics/trend` |
 | GET | `/api/analytics/rfm` | `POST /api/v1/analytics/rfm` |
-| GET | `/api/analytics/abc` | `POST /api/v1/analytics/abc` |
+| GET | `/api/analytics/abc` | `POST /api/v1/analytics/abc` (rows carry additive `description` + `image_url` from `dim_product`, `null` when unknown) |
 | GET | `/api/analytics/cohort` | `POST /api/v1/analytics/cohort` |
 | GET | `/api/analytics/branches` | `GET /api/v1/analytics/branches` |
 | GET | `/api/analytics/finance` | `GET /api/v1/analytics/finance` |

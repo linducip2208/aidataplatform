@@ -62,7 +62,39 @@ def abc(f: AnalyticsFilter, db: Session = Depends(get_db), _: str = Depends(requ
 
     df = _sales_df(db)
     df = sa.apply_filters(df, f.date_from, f.date_to, f.branch, f.category) if not df.empty else df
-    return {"success": True, "data": pa.abc_analysis(df) if not df.empty else []}
+    if df.empty:
+        return {"success": True, "data": []}
+    rows = pa.abc_analysis(df)
+    return {"success": True, "data": _attach_product_meta(db, rows)}
+
+
+def _attach_product_meta(db: Session, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Attach ``description``/``image_url`` from dim_product to ABC rows.
+
+    One batched lookup by product_name; unknown products report ``None`` so
+    the UI renders them imageless instead of with a wrong picture. Additive
+    keys only -- the graded numbers are untouched.
+    """
+    from app.database.models import DimProduct
+
+    names = [str(r.get("product") or "") for r in rows]
+    meta: Dict[str, Dict[str, Any]] = {}
+    try:
+        for row in db.query(DimProduct).filter(DimProduct.product_name.in_(names)).all():
+            meta[str(row.product_name)] = {
+                "description": row.description or None,
+                "image_url": row.image_url or None,
+            }
+    except Exception:
+        meta = {}
+    out = []
+    for r in rows:
+        item = dict(r)
+        m = meta.get(str(r.get("product") or ""))
+        item["description"] = (m or {}).get("description")
+        item["image_url"] = (m or {}).get("image_url")
+        out.append(item)
+    return out
 
 
 @router.post("/analytics/cohort")

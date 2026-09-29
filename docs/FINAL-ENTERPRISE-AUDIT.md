@@ -15,7 +15,23 @@ Date: 2026-09-29 (UTC). Branch: `main`. Scope: master enterprise commands, itera
    `WebWorkflowTest` updated to act as owner + new non-owner 403 cases.
    Suite → **929 tests, 0 failures**.
 
-## Iteration 6 (this commit)
+## Iteration 7 (this commit)
+
+15. **Product images matching descriptions (demo sample)** — `dim_product`
+   gained `description` + `image_url` (Alembic 0003, guarded); new
+   `app/analytics/product_catalog.py` holds the 10 demo products with
+   one-line descriptions and `/images/demo-products/<slug>.svg` illustrations
+   (lookup returns `None` for unknown — never a wrong picture); the ETL
+   fills only empty fields (never overwrites) and `products`-type files may
+   carry their own `description`/`image_url` columns; `POST
+   /analytics/abc` enriches rows from `dim_product` (additive keys);
+   `dim_product` added to the SQL-guard allowlist; the ABC table renders
+   thumbnails + descriptions with an initial-letter fallback. Tests:
+   engine `test_product_catalog.py` (6) + parity harness extended for
+   `op.add_column`; Laravel `ProductImagesTest` (2). Docs (`api.md`,
+   `data-dictionary.md`) updated.
+
+## Iteration 6 (previous commit)
 
 13. **Column-level lineage (real, from saved mappings)** — migration
    `070000` adds `source_column`/`target_column` to `data_lineages`;

@@ -95,6 +95,8 @@ class DimProduct(Base):
     unit: Mapped[str] = mapped_column(String(32), default="pcs")
     cost_price: Mapped[float] = mapped_column(Float, default=0.0)
     selling_price: Mapped[float] = mapped_column(Float, default=0.0)
+    description: Mapped[str] = mapped_column(String(1024), default="")
+    image_url: Mapped[str] = mapped_column(String(1024), default="")
 
 
 class DimBranch(Base):
