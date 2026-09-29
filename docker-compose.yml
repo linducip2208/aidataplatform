@@ -157,9 +157,10 @@ services:
     expose:
       - "8000"
     ports:
-      # Published for tests/run.sh (BASE_LARAVEL). This path bypasses nginx, so
-      # it is not covered by the /ai-api prefix handling.
-      - "${LARAVEL_PORT:-8080}:8000"
+      # Published for tests/run.sh (BASE_LARAVEL). Loopback only: this path
+      # bypasses nginx, so on 0.0.0.0 it would expose the app's own port to
+      # every interface, not just the machine.
+      - "127.0.0.1:${LARAVEL_PORT:-8080}:8000"
     healthcheck:
       # /up only proves the framework booted, so the Vite manifest and the
       # migration marker are checked too. The entrypoint writes the marker when
@@ -317,8 +318,10 @@ services:
     expose:
       - "8000"
     ports:
-      # Published for tests/run.sh (BASE_AI). Not intended for a public host.
-      - "${FASTAPI_PORT:-8001}:8000"
+      # Published for tests/run.sh (BASE_AI). Loopback only, and not intended
+      # for a public host: this port serves the whole engine API, which nginx
+      # otherwise keeps behind the cleared service-key header.
+      - "127.0.0.1:${FASTAPI_PORT:-8001}:8000"
     healthcheck:
       # Probes readiness and checks the reported verdict, not the status code:
       # /api/v1/readiness answers 200 whether or not it is ready, and

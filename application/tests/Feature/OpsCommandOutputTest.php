@@ -593,7 +593,12 @@ class OpsCommandOutputTest extends TestCase
 
         $this->assertSame(1, $exitCode, 'One row we could not check is still a failed run.');
         $this->assertStringContainsString(
-            'Quality pass: 4 candidate(s), 3 refreshed, 1 quarantined, 0 dispatched, 1 failed.',
+            // The quarantined tally counts rows whose *verdict* is quarantine.
+            // A committed row keeps its status now that `runQuality()` no longer
+            // quarantines a row whose data is already in the warehouse, so the
+            // sweep counts it as refreshed with a failing verdict. The verdict
+            // is still recorded and the row is still reported below.
+            'Quality pass: 4 candidate(s), 3 refreshed, 0 quarantined, 0 dispatched, 1 failed.',
             $output,
         );
 

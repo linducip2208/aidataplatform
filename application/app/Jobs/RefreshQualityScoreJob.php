@@ -55,13 +55,14 @@ class RefreshQualityScoreJob implements ShouldQueue
     /**
      * Re-check one committed dataset.
      *
-     * There is deliberately no status restore here. `runQuality()` owns the
-     * transition: a re-check that passes leaves a terminal status alone, and a
-     * re-check that fails quarantines it, which is the correct outcome — the
-     * warehouse row is now suspect and the quality page must say so. An earlier
-     * version undid a `uploaded` transition here, which was both dead code once
-     * the service grew its own guard and asymmetric, since it never restored a
-     * quarantine.
+     * There is deliberately no status transition here. `runQuality()` owns the
+     * outcome: a terminal status is left alone on both pass and fail, because
+     * the rows are already in the warehouse and the re-check entry points only
+     * look at non-terminal rows — a quarantine here would strand the row with
+     * no path back. The refreshed score and verdict still surface the problem
+     * on the quality page. An earlier version undid an `uploaded` transition
+     * here, which was both dead code once the service grew its own guard and
+     * asymmetric, since it never restored a quarantine.
      *
      * @return array{score: float, verdict: string, status: string}
      */

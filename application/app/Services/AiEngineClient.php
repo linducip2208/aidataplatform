@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Exceptions\AiEngineException;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
@@ -486,12 +487,22 @@ class AiEngineClient
             ->timeout($timeout ?? $this->timeout)
             // Retried only for transport failures and 5xx/429. `retry()` with a
             // `when` callback otherwise re-sent 401, 404 and 422, which doubled
-            // every non-retryable failure and logged it twice.
+            // every non-retryable failure and logged it twice. Note the
+            // callback signature: `when` receives the exception, never the
+            // response. A failed response arrives as a `RequestException`
+            // carrying `->response`, so the status has to be read from there.
             ->retry(
                 times: 2,
                 sleepMilliseconds: 250,
-                when: fn ($exception, $request) => $exception instanceof ConnectionException
-                    || ($request instanceof Response && ($request->serverError() || $request->status() === 429)),
+                when: function (Throwable $exception): bool {
+                    if ($exception instanceof ConnectionException) {
+                        return true;
+                    }
+                    $response = $exception instanceof RequestException ? $exception->response : null;
+
+                    return $response instanceof Response
+                        && ($response->serverError() || $response->status() === 429);
+                },
                 throw: false,
             );
     }

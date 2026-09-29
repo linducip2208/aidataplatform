@@ -308,10 +308,15 @@ class WebWorkflowTest extends TestCase
         $this->assertSame('uploaded', $dataset->status->value);
         $this->assertSame(42, $dataset->import_job_id);
 
-        Http::assertSent(
-            fn (ClientRequest $r): bool => str_ends_with($r->url(), '/api/v1/imports/upload')
-                && ($r['dataset_type'] ?? null) === 'sales'
-        );
+        Http::assertSent(function (ClientRequest $r): bool {
+            // The upload is multipart, and `ClientRequest::data()` only decodes
+            // url-encoded and JSON bodies, so the `dataset_type` field is
+            // asserted against the raw multipart body instead of `$r[...]`.
+            return str_ends_with($r->url(), '/api/v1/imports/upload')
+                && str_contains($r->body(), 'name="dataset_type"')
+                && str_contains($r->body(), 'sales')
+                && str_contains($r->body(), 'penjualan.csv');
+        });
     }
 
     // ------------------------------------------------------------------

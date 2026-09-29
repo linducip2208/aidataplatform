@@ -347,10 +347,7 @@ def ingest_text(title: str, content: str, source: str = "api", doc_type: str = "
         width = max((len(_as_vector(embeddings[i])) for i in range(min(len(embeddings), len(chunks)))),
                     default=0)
         meta = {"n_chunks": len(chunks), "content_sha256": digest, "truncated": truncated,
-                "chunks_truncated": chunks_truncated, "embedding_dim": width,
-                "n_embedded": sum(1 for i in range(len(chunks))
-                                  if i < len(embeddings) and any(
-                                      _as_vector(embeddings[i])))}
+                "chunks_truncated": chunks_truncated, "embedding_dim": width}
         if doc_id is None:
             doc = RagDocument(source=source, title=title, doc_type=doc_type, meta=meta)
             db_session.add(doc)
@@ -372,6 +369,7 @@ def ingest_text(title: str, content: str, source: str = "api", doc_type: str = "
             n_embedded += 1 if value is not None else 0
             db_session.add(RagChunk(document_id=doc_id, chunk_index=i, content=ch,
                                     embedding=value, meta={"embedding_dim": chunk_width}))
+        doc.meta = {**meta, "n_embedded": n_embedded}
         db_session.commit()
     except Exception:
         try:

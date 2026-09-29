@@ -40,8 +40,6 @@ class SeedDataIntegrityTest extends TestCase
      */
     private static array $written = [];
 
-    private static bool $listenersRegistered = false;
-
     /**
      * @var array<class-string<Model>, string>
      */
@@ -428,15 +426,15 @@ class SeedDataIntegrityTest extends TestCase
     /**
      * Snapshot the columns the seeders persist, straight off the models, so this
      * test never has to restate (and drift along with) the seeder definitions.
+     *
+     * Registered on every `setUp`, not once per process: the framework swaps
+     * the model event dispatcher between tests, so a register-once listener
+     * only observes the first test and every later snapshot passes vacuously.
+     * Re-registering is safe — each test gets a fresh dispatcher, so listeners
+     * never accumulate.
      */
     private function recordWrittenColumns(): void
     {
-        if (self::$listenersRegistered) {
-            return;
-        }
-
-        self::$listenersRegistered = true;
-
         foreach (self::SEEDED_TABLES as $model => $table) {
             $model::saving(function (Model $instance) use ($table): void {
                 foreach (array_keys($instance->getAttributes()) as $column) {

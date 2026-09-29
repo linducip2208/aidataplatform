@@ -137,7 +137,7 @@ def test_a_target_outside_the_canonical_list_is_refused_entirely():
 def test_unknown_column_is_left_untargeted():
     """An unrecognised header must come back unmapped, not guessed at."""
     s = _by_source(suggest_mapping(["Kolom Misterius", "Catatan"], "sales"))
-    for col in ("Kolom Misterios", "Catatan"):
+    for col in ("Kolom Misterius", "Catatan"):
         assert s[col]["target_field"] is None, col
         assert s[col]["method"] == "none", col
         assert s[col]["confidence"] == 0.0, col

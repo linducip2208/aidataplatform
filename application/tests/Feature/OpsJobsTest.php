@@ -247,7 +247,7 @@ class OpsJobsTest extends TestCase
         ]);
     }
 
-    public function test_a_poor_recheck_score_does_quarantine_an_already_committed_dataset(): void
+    public function test_a_poor_recheck_score_is_recorded_without_walking_a_committed_dataset(): void
     {
         $this->qualityScore = 0.12;
 
@@ -259,12 +259,12 @@ class OpsJobsTest extends TestCase
 
         $this->assertSame(0.12, (float) $fresh->quality_score);
         $this->assertSame('quarantine', $fresh->quality_verdict);
-        // Pinned deliberately: a committed row is only preserved by
-        // `runQuality()` while the re-check passes. The nightly sweep can move a
-        // dataset out of the committed mirror if the engine starts reporting a
-        // bad score for it, and `RefreshQualityScoreJob::refresh()` only
-        // restores `uploaded`, never `quarantined`.
-        $this->assertSame(DatasetStatus::Quarantined, $fresh->status());
+        // Pinned deliberately: the rows are already in the warehouse, and both
+        // re-check entry points only look at non-terminal rows, so quarantining
+        // here would strand a committed row permanently with no path back.
+        // `runQuality()` keeps the terminal status and the recorded verdict
+        // and score still surface the problem on the quality page.
+        $this->assertSame(DatasetStatus::Committed, $fresh->status());
     }
 
     protected function qualityAuditCountFor(Dataset $dataset): int
