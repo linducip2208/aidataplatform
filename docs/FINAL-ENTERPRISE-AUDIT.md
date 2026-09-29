@@ -15,7 +15,17 @@ Date: 2026-09-29 (UTC). Branch: `main`. Scope: master enterprise commands, itera
    `WebWorkflowTest` updated to act as owner + new non-owner 403 cases.
    Suite → **929 tests, 0 failures**.
 
-## Iteration 9 (this commit)
+## Iteration 10 (this commit)
+
+18. **Alert center UI + API** — engine evaluation (every minute) finally has
+   a surface: new `AlertService` (alerts/rules/catalog/events/ack/create/
+   toggle), web `AlertController` (filterable list, acknowledge, rule create
+   + active toggle, engine-down empty state, audit-logged), token API
+   (`GET /api/alerts|/rules|/{id}/events`, `POST /{id}/ack|/rules` with
+   analyst+ gates), Tabler `alerts/index.blade.php`, `Peringatan` sidebar
+   entry, `docs/api.md` rows. New `AlertCenterTest` → **9 passed**.
+
+## Iteration 9 (previous commit)
 
 17. **Semantic layer v1 (business glossary)** — new
    `app/semantic/glossary.py` with 11 certified metric definitions grounded

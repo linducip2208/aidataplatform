@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AgentController;
+use App\Http\Controllers\Api\AlertController;
 use App\Http\Controllers\Api\AnalyticsController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CatalogController;
@@ -102,6 +103,16 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::middleware('role:admin,analyst')->group(function (): void {
         Route::post('/quality/rules', [QualityController::class, 'storeRule'])->name('api.quality.rules.store');
         Route::post('/quality/evaluate', [QualityController::class, 'evaluate'])->name('api.quality.evaluate');
+    });
+
+    // Alert center (reads: any authenticated, writes: analyst+).
+    Route::get('/alerts', [AlertController::class, 'index'])->name('api.alerts.index');
+    Route::get('/alerts/rules', [AlertController::class, 'rules'])->name('api.alerts.rules');
+    Route::get('/alerts/{id}/events', [AlertController::class, 'events'])->whereNumber('id')->name('api.alerts.events');
+
+    Route::middleware('role:admin,analyst')->group(function (): void {
+        Route::post('/alerts/{id}/ack', [AlertController::class, 'acknowledge'])->whereNumber('id')->name('api.alerts.ack');
+        Route::post('/alerts/rules', [AlertController::class, 'storeRule'])->name('api.alerts.rules.store');
     });
 
     // AI decision engine (reads: any authenticated, writes: analyst+).

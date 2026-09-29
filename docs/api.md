@@ -207,6 +207,16 @@ All accept `date_from`, `date_to`, `branch`, `category`, `granularity`
 | POST | `/api/decisions/scenarios/run` | admin, analyst | compute-only scenario; unsupported shapes pass through untouched |
 | POST | `/api/decisions/{id}/audit` | admin, analyst | append a human decision audit row; `201` |
 
+## Alert center (Laravel proxies the engine)
+
+| Method | Path | Role | Notes |
+|---|---|---|---|
+| GET | `/api/alerts` | any | newest first; `?status=open\|acknowledged\|resolved`, `?rule_id=`, `?limit=` 1-200; read-only |
+| GET | `/api/alerts/rules` | any | every rule oldest first; read-only |
+| GET | `/api/alerts/{id}/events` | any | the alert's history oldest first; read-only |
+| POST | `/api/alerts/{id}/ack` | admin, analyst | acknowledge (not resolve); `404` with `not_found` when unknown |
+| POST | `/api/alerts/rules` | admin, analyst | create a rule; `201` |
+
 ## Engine endpoints with no Laravel proxy
 
 Published for completeness. All take the service key and return the standard

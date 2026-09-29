@@ -6,6 +6,7 @@
         ['route' => 'datasets.index', 'pattern' => 'datasets.*', 'label' => 'Kumpulan data', 'icon' => 'database'],
         ['route' => 'imports.index', 'pattern' => 'imports.*', 'label' => 'Impor', 'icon' => 'upload'],
         ['route' => 'quality.index', 'pattern' => 'quality.*', 'label' => 'Kualitas', 'icon' => 'checkup-list'],
+        ['route' => 'alerts.index', 'pattern' => 'alerts.*', 'label' => 'Peringatan', 'icon' => 'bell'],
         ['heading' => 'Analitik & AI'],
         ['route' => 'analytics.index', 'pattern' => 'analytics.*', 'label' => 'Analitik', 'icon' => 'chart-bar'],
         ['route' => 'ml.index', 'pattern' => 'ml.*', 'label' => 'Pembelajaran mesin', 'icon' => 'brain'],
