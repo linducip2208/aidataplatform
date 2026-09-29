@@ -64,9 +64,10 @@ class DeleteDatasetTest extends TestCase
 
     public function test_an_analyst_can_delete_a_dataset(): void
     {
-        $dataset = $this->storedDataset();
+        $analyst = User::factory()->analyst()->create();
+        $dataset = $this->storedDataset(['user_id' => $analyst->getKey()]);
 
-        $this->actingAs(User::factory()->analyst()->create())
+        $this->actingAs($analyst)
             ->delete(route('datasets.destroy', $dataset))
             ->assertRedirect(route('datasets.index'));
 
@@ -75,9 +76,10 @@ class DeleteDatasetTest extends TestCase
 
     public function test_deleting_a_dataset_is_audited(): void
     {
-        $dataset = $this->storedDataset();
+        $analyst = User::factory()->analyst()->create();
+        $dataset = $this->storedDataset(['user_id' => $analyst->getKey()]);
 
-        $this->actingAs(User::factory()->analyst()->create())
+        $this->actingAs($analyst)
             ->delete(route('datasets.destroy', $dataset));
 
         // Delete removes the row and the uploaded file with no undo, so the one
@@ -91,9 +93,10 @@ class DeleteDatasetTest extends TestCase
 
     public function test_the_api_delete_endpoint_returns_a_message_envelope(): void
     {
-        $dataset = $this->storedDataset();
+        $analyst = User::factory()->analyst()->create();
+        $dataset = $this->storedDataset(['user_id' => $analyst->getKey()]);
 
-        $this->actingAs(User::factory()->analyst()->create())
+        $this->actingAs($analyst)
             ->deleteJson(route('api.datasets.destroy', $dataset))
             ->assertOk()
             ->assertJsonPath('message', 'Dataset deleted.');

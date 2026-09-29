@@ -371,8 +371,9 @@ class ApiContractTest extends TestCase
 
         $produced['POST /api/ml/train'] = $response->getStatusCode();
 
-        $dataset = Dataset::factory()->create(['import_job_id' => 42]);
-        Sanctum::actingAs(User::factory()->analyst()->create());
+        $analyst = User::factory()->analyst()->create();
+        $dataset = Dataset::factory()->forUser($analyst)->create(['import_job_id' => 42]);
+        Sanctum::actingAs($analyst);
         Http::fake(['*/api/v1/imports/commit' => Http::response(['success' => true, 'data' => [
             'status' => 'queued',
         ]], 200)]);

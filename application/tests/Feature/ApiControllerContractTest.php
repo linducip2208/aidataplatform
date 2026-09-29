@@ -254,7 +254,7 @@ class ApiControllerContractTest extends TestCase
         $admin = User::factory()->admin()->create();
 
         $uploaded = $this->uploadDataset($analyst);
-        $profiled = Dataset::factory()->committed()->create(['import_job_id' => 4242]);
+        $profiled = Dataset::factory()->forUser($analyst)->committed()->create(['import_job_id' => 4242]);
 
         $responses = [
             'POST /api/login' => ['POST', '/api/login', [
@@ -436,8 +436,9 @@ class ApiControllerContractTest extends TestCase
 
     public function test_the_quality_payload_carries_exactly_the_documented_keys(): void
     {
-        Sanctum::actingAs(User::factory()->analyst()->create());
-        $dataset = $this->uploadDataset(User::factory()->analyst()->create());
+        $analyst = User::factory()->analyst()->create();
+        Sanctum::actingAs($analyst);
+        $dataset = $this->uploadDataset($analyst);
 
         $payload = $this->getJson('/api/datasets/'.$dataset->uuid.'/quality')->assertOk()->json('data');
 
@@ -452,7 +453,7 @@ class ApiControllerContractTest extends TestCase
     {
         $analyst = User::factory()->analyst()->create();
         Sanctum::actingAs($analyst);
-        $dataset = Dataset::factory()->create([
+        $dataset = Dataset::factory()->forUser($analyst)->create([
             'import_job_id' => 4242,
             'columns' => [['name' => 'transaction_date']],
         ]);
@@ -470,8 +471,9 @@ class ApiControllerContractTest extends TestCase
 
     public function test_the_commit_payload_carries_exactly_the_documented_keys_and_answers_202(): void
     {
-        Sanctum::actingAs(User::factory()->analyst()->create());
-        $dataset = Dataset::factory()->create(['import_job_id' => 4242]);
+        $analyst = User::factory()->analyst()->create();
+        Sanctum::actingAs($analyst);
+        $dataset = Dataset::factory()->forUser($analyst)->create(['import_job_id' => 4242]);
 
         $response = $this->postJson('/api/datasets/'.$dataset->uuid.'/commit', ['run_async' => true])->assertStatus(202);
 
@@ -607,8 +609,9 @@ class ApiControllerContractTest extends TestCase
 
     public function test_a_mapping_with_no_usable_column_is_a_422_keyed_by_mappings(): void
     {
-        Sanctum::actingAs(User::factory()->analyst()->create());
-        $dataset = Dataset::factory()->create(['import_job_id' => 4242]);
+        $analyst = User::factory()->analyst()->create();
+        Sanctum::actingAs($analyst);
+        $dataset = Dataset::factory()->forUser($analyst)->create(['import_job_id' => 4242]);
 
         $body = $this->postJson('/api/datasets/'.$dataset->uuid.'/mapping', [
             'mappings' => ['transaction_date' => '   '],

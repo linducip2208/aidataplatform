@@ -8,19 +8,18 @@ use App\Models\User;
 /**
  * Intended ownership policy for datasets.
  *
- * STATUS: ENFORCED on dataset write/delete paths since iteration 3.
+ * STATUS: STRICTLY ENFORCED since iteration 5 (fail-closed, no legacy exception).
  * `Api\DatasetController` (quality/mapping/commit/destroy),
  * `Api\CatalogController` (versions/annotate/contracts), the web
  * `DatasetWorkflowController` (preview/mapping/quality/commit) and the web
  * `DatasetController@destroy` call `Gate::authorize('update'|'delete')`.
  * Reads stay global (shared catalog). That closed AUDIT FINDING A8-03
- * (see `docs/security.md` §8) for owned datasets.
+ * (see `docs/security.md` §8).
  *
- * LEGACY RULE: rows with `user_id = null` (pre-ownership uploads, factory
- * rows in older tests) remain writable by any active analyst, exactly as
- * before — otherwise every historical row would lock overnight. All new
- * uploads carry `user_id` (`DatasetIngestionService::createFromUpload`), so
- * the owner check applies to everything created going forward.
+ * STRICT, fail-closed: rows with `user_id = null` are writable by admins
+ * only. The `backfill_dataset_owners` migration attributes pre-ownership
+ * rows to the earliest admin so no historical row locks overnight; all new
+ * uploads carry `user_id` (`DatasetIngestionService::createFromUpload`).
  *
  * Intended matrix (enforced once wired):
  *
@@ -72,11 +71,6 @@ class DatasetPolicy
 
         if ($user->role()->value !== 'analyst') {
             return false;
-        }
-
-        // Legacy rows without an owner stay writable by any analyst.
-        if ($dataset->user_id === null) {
-            return true;
         }
 
         return (int) $dataset->user_id === (int) $user->getKey();

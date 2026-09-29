@@ -5,6 +5,7 @@ namespace Database\Factories;
 use App\Enums\DatasetStatus;
 use App\Enums\QualityVerdict;
 use App\Models\Dataset;
+use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -38,6 +39,16 @@ class DatasetFactory extends Factory
                 ),
             ];
         });
+    }
+
+    /**
+     * Attribute the dataset to the given user as its owner.
+     */
+    public function forUser(User $user): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'user_id' => $user->getKey(),
+        ]);
     }
 
     /**

@@ -903,7 +903,7 @@ class DatasetLifecycleTest extends TestCase
     /** @param  array<string, mixed>  $attributes */
     protected function dataset(array $attributes = []): Dataset
     {
-        return Dataset::factory()->create(['import_job_id' => 42, ...$attributes]);
+        return Dataset::factory()->forUser($this->analyst)->create(['import_job_id' => 42, ...$attributes]);
     }
 
     protected function runQuality(Dataset $dataset): void

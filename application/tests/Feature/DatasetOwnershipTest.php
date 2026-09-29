@@ -81,11 +81,17 @@ class DatasetOwnershipTest extends TestCase
             ->assertOk();
     }
 
-    public function test_legacy_unowned_dataset_stays_writable_by_any_analyst(): void
+    public function test_unowned_dataset_is_admin_only_for_analysts(): void
     {
         $dataset = Dataset::factory()->create(['user_id' => null, 'import_job_id' => 42]);
-        Sanctum::actingAs(User::factory()->analyst()->create());
 
+        Sanctum::actingAs(User::factory()->analyst()->create());
+        $this->postJson(route('api.datasets.mapping', $dataset), ['mappings' => ['tanggal' => 'transaction_date']])
+            ->assertForbidden();
+        $this->deleteJson(route('api.datasets.destroy', $dataset))
+            ->assertForbidden();
+
+        Sanctum::actingAs(User::factory()->admin()->create());
         $this->postJson(route('api.datasets.mapping', $dataset), ['mappings' => ['tanggal' => 'transaction_date']])
             ->assertOk();
     }

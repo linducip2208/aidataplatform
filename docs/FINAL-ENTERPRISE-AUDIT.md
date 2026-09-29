@@ -15,7 +15,26 @@ Date: 2026-09-29 (UTC). Branch: `main`. Scope: master enterprise commands, itera
    `WebWorkflowTest` updated to act as owner + new non-owner 403 cases.
    Suite → **929 tests, 0 failures**.
 
-## Iteration 4 (this commit)
+## Iteration 5 (this commit)
+
+10. **Strict ownership, fail-closed** — legacy exception removed from
+   `DatasetPolicy`; unowned rows are admin-only. `DatasetFactory::forUser()`
+   added; 7 suites re-attributed datasets to their acting analyst
+   (Catalog, DeleteDataset, ErrorHandling, DatasetLifecycle, ApiContract,
+   ApiControllerContract); `DatasetOwnershipTest` legacy case replaced with
+   unowned→403-for-analyst + admin-OK. New migration
+   `2026_09_30_060000_backfill_dataset_owners` attributes pre-ownership rows
+   to the earliest admin (idempotent, no-op without admin). Suite → **929
+   tests, 0 failures**.
+11. **Dead-code audit** — zero `TODO/FIXME/NotImplemented` in prod code;
+   every `placeholder|dummy` hit is the placeholder-secret rejection feature,
+   connector `{offset}/{limit}` syntax, or PII handling. No action needed.
+12. **Measured benchmark (not a claim)** — 100.000-row sales CSV through
+   `run_etl` (chunked, 20K/chunk): **56.2 s, ~1.779 rows/s** on Windows +
+   SQLite file DB, DB +3.7 MB, no OOM. Environment-limited (not MySQL prod);
+   1M/10M/50M+ unmeasured — no scalability claim beyond this point.
+
+## Iteration 4 (previous commit)
 
 9. **Tabler UI standardization** — `@tabler/core@1.6.1` via npm (Vite-built,
    no CDN): `resources/css/app.css` imports Tabler + keeps the test-pinned

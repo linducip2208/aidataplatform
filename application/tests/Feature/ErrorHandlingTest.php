@@ -28,6 +28,7 @@ class ErrorHandlingTest extends TestCase
     protected function dataset(): Dataset
     {
         return Dataset::create([
+            'user_id' => $this->analyst->getKey(),
             'uuid' => (string) Str::uuid(),
             'name' => 'Penjualan',
             'dataset_type' => 'sales',

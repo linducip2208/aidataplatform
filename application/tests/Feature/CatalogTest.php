@@ -53,8 +53,9 @@ class CatalogTest extends TestCase
 
     public function test_registering_versions_snapshots_schema_and_increments(): void
     {
-        Sanctum::actingAs($this->analyst());
-        $dataset = $this->dataset();
+        $analyst = $this->analyst();
+        Sanctum::actingAs($analyst);
+        $dataset = $this->dataset(['user_id' => $analyst->getKey()]);
 
         $this->postJson('/api/catalog/datasets/'.$dataset->uuid.'/versions', ['notes' => 'initial snapshot'])
             ->assertCreated()
@@ -94,8 +95,9 @@ class CatalogTest extends TestCase
 
     public function test_column_annotation_updates_description_sensitivity_and_pii(): void
     {
-        Sanctum::actingAs($this->analyst());
-        $dataset = $this->dataset();
+        $analyst = $this->analyst();
+        Sanctum::actingAs($analyst);
+        $dataset = $this->dataset(['user_id' => $analyst->getKey()]);
         app(CatalogService::class)->registerVersion($dataset);
 
         $this->postJson('/api/catalog/datasets/'.$dataset->uuid.'/columns/kode_pelanggan/annotate', [
@@ -124,8 +126,9 @@ class CatalogTest extends TestCase
 
     public function test_column_annotation_rejects_unknown_sensitivity_and_unknown_column(): void
     {
-        Sanctum::actingAs($this->analyst());
-        $dataset = $this->dataset();
+        $analyst = $this->analyst();
+        Sanctum::actingAs($analyst);
+        $dataset = $this->dataset(['user_id' => $analyst->getKey()]);
         app(CatalogService::class)->registerVersion($dataset);
 
         $this->postJson('/api/catalog/datasets/'.$dataset->uuid.'/columns/kode_pelanggan/annotate', [
@@ -153,8 +156,9 @@ class CatalogTest extends TestCase
 
     public function test_schema_drift_detects_added_removed_and_type_changed_columns(): void
     {
-        Sanctum::actingAs($this->analyst());
-        $dataset = $this->dataset();
+        $analyst = $this->analyst();
+        Sanctum::actingAs($analyst);
+        $dataset = $this->dataset(['user_id' => $analyst->getKey()]);
         app(CatalogService::class)->registerVersion($dataset);
 
         $evolved = collect($dataset->columns)->map(function (array $column): array {
@@ -194,8 +198,9 @@ class CatalogTest extends TestCase
 
     public function test_contract_upsert_and_freshness_evaluation(): void
     {
-        Sanctum::actingAs($this->analyst());
-        $dataset = $this->dataset(['committed_at' => now(), 'quality_score' => 0.9, 'quality_verdict' => 'pass']);
+        $analyst = $this->analyst();
+        Sanctum::actingAs($analyst);
+        $dataset = $this->dataset(['user_id' => $analyst->getKey(), 'committed_at' => now(), 'quality_score' => 0.9, 'quality_verdict' => 'pass']);
 
         $this->postJson('/api/catalog/datasets/'.$dataset->uuid.'/contracts', [
             'owner' => 'data-platform@example.co.id',
@@ -225,8 +230,9 @@ class CatalogTest extends TestCase
 
     public function test_contract_rejects_invalid_threshold(): void
     {
-        Sanctum::actingAs($this->analyst());
-        $dataset = $this->dataset();
+        $analyst = $this->analyst();
+        Sanctum::actingAs($analyst);
+        $dataset = $this->dataset(['user_id' => $analyst->getKey()]);
 
         $this->postJson('/api/catalog/datasets/'.$dataset->uuid.'/contracts', [
             'owner' => 'data-platform@example.co.id',
@@ -260,7 +266,7 @@ class CatalogTest extends TestCase
     public function test_catalog_mutations_write_audit_logs(): void
     {
         Sanctum::actingAs($analyst = $this->analyst());
-        $dataset = $this->dataset();
+        $dataset = $this->dataset(['user_id' => $analyst->getKey()]);
 
         $this->postJson('/api/catalog/datasets/'.$dataset->uuid.'/versions', []);
         $this->postJson('/api/catalog/datasets/'.$dataset->uuid.'/columns/tanggal/annotate', [
