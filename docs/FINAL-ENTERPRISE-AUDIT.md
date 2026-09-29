@@ -15,7 +15,18 @@ Date: 2026-09-29 (UTC). Branch: `main`. Scope: master enterprise commands, itera
    `WebWorkflowTest` updated to act as owner + new non-owner 403 cases.
    Suite → **929 tests, 0 failures**.
 
-## Iteration 8 (this commit)
+## Iteration 9 (this commit)
+
+17. **Semantic layer v1 (business glossary)** — new
+   `app/semantic/glossary.py` with 11 certified metric definitions grounded
+   in the producing functions (`sales_kpi`, `finance_summary`); conservative
+   alias matching (unknown words match nothing); wired into the agent prompt
+   as a `glossary` evidence block and into Text-to-SQL generation (no new
+   LLM calls, grounding-check semantics unchanged); published read-only at
+   `GET /api/v1/semantic/metrics` and documented in `docs/api.md`. New
+   `test_semantic_layer.py` → **6 passed**.
+
+## Iteration 8 (previous commit)
 
 16. **Migration proof** — new `test_migration_0003.py` runs the real
    `alembic upgrade head` twice on a scratch database (second boot must not

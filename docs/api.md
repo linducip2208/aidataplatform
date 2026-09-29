@@ -229,6 +229,7 @@ envelope; `App\Services\AiEngineClient` has a method for each one.
 | POST | `/api/v1/inventory/health` | key | `{}` |
 | POST | `/api/v1/anomaly/detect` | key | `{series[],sensitivity}` |
 | POST | `/api/v1/recommend` | key | `{customer_id,product_id,top_k}` |
+| GET | `/api/v1/semantic/metrics` | key | certified metric glossary (`version`, `metrics[]` with `definition`/`formula`/`source`), read-only |
 | POST | `/api/v1/decision/recommend` | key | `{subject}` → compute plus persist a case |
 | GET | `/api/v1/decision/cases` | key | read-only case headers |
 | GET | `/api/v1/decision/cases/{case_id}` | key | read-only case detail |
