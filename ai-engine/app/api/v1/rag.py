@@ -51,7 +51,8 @@ def ingest(body: RagIngestRequest, db: Session = Depends(get_db),
 
 @router.post("/rag/query")
 def query(body: RagQueryRequest, db: Session = Depends(get_db),
-          _: str = Depends(require_service_auth)):
+          _: str = Depends(require_service_auth),
+          hybrid: bool = True, rerank: bool = True):
     from app.ai import rag as rag_mod
 
     if len(body.query) > MAX_QUERY_CHARS:
@@ -64,4 +65,9 @@ def query(body: RagQueryRequest, db: Session = Depends(get_db),
             resolution="Potong pertanyaan, lalu ulangi.",
             details={"field": "query", "max_chars": MAX_QUERY_CHARS}))
 
-    return {"success": True, "data": rag_mod.query(body.query, body.top_k, db)}
+    # `hybrid`/`rerank` ride as query params so `RagQueryRequest` stays
+    # frozen (`tests/test_schemas.py` pins its exact field set). Response is
+    # the shaped answer (answer/evidence/citations/confidence/limitations)
+    # with the legacy `chunks`/`n_results` keys preserved for older clients.
+    return {"success": True, "data": rag_mod.query(
+        body.query, body.top_k, db, hybrid=hybrid, rerank=rerank)}

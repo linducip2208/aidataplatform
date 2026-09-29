@@ -121,3 +121,50 @@ that document's chunks in place, and delete the `rag_documents` rows you want go
   `POST /api/rag/query` return the same grounded `answer` plus `citations`; the assistant
   (`POST /api/agent/chat`) is a separate path that grounds itself in the warehouse through
   tools rather than in the corpus. See `ai-agent.md`.
+
+## 6. Hybrid search, rerank, citations (enterprise)
+
+Retrieval is a hybrid of two signals over the same `SCAN_LIMIT` candidate set, fused after
+per-set max-normalisation as `0.65 * vector + 0.35 * keyword`:
+
+- **vector**: cosine between the query embedding and the stored chunk embedding (0 when
+  either side has no usable vector, e.g. a chunk indexed by a different model dimension).
+- **keyword**: BM25-lite over chunk text — saturated tf (`k1 = 1.2`), smoothed idf computed
+  over the scanned set (no index needed), length-normalised (`b = 0.75`).
+
+`POST /api/v1/rag/query` accepts `?hybrid=true|false` (default `true`) and
+`?rerank=true|false` (default `true`); Laravel's `POST /api/rag/query` accepts the same two
+as optional booleans and forwards them as engine query params. `hybrid=false` restores the
+legacy vector-only path (normalised cosine plus the historical `+0.05` verbatim boost).
+
+**Rerank** is a deterministic, cross-encoder-free re-score that only reorders — it never
+adds or drops a candidate:
+
+```
+rerank = 0.55 * fused + 0.25 * term_coverage + 0.15 * exact_phrase + 0.05 * length_prior
+```
+
+`term_coverage` is the fraction of distinct query terms in the chunk, `exact_phrase` is 1.0
+for the verbatim query (0.4 for a 4-word run), `length_prior` peaks at 600 characters. A
+real cross-encoder is used only if one is already installed in the image (none is; no model
+is ever downloaded at runtime) — checked by import, no pip installs. `rerank=false` keeps
+the fused order and says so in `limitations`.
+
+**Citations** carry chunk ids plus source/title plus verifiable char offsets:
+
+```json
+{"chunk_id": 9, "document_id": 5, "chunk_index": 1, "source": "handbook.pdf",
+ "title": "Panduan refund", "score": 0.87, "char_start": 0, "char_end": 6}
+```
+
+`content[char_start:char_end]` is the earliest verbatim query-term hit in the chunk;
+`char_start`/`char_end` are `null` when the match is purely semantic. `evidence[]` rows add
+the full content plus the score breakdown (`vector`, `keyword`, `fused`, `rerank`,
+`features`); `chunks` remains as the legacy alias of the compact hit list.
+
+**Answer shaping.** Every query returns
+`{answer, evidence[], citations[], chunks[], n_results, confidence, limitations}`.
+`confidence` is 0..1 (0 when nothing matched, capped at 0.6 on keyword-only degraded runs);
+`limitations` names each degradation: embedding outage, `SCAN_LIMIT` bound, disabled
+hybrid/rerank, or no chunk above threshold. Empty corpus is an explicit "no match" answer,
+never an invented one.

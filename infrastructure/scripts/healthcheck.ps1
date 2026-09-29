@@ -200,6 +200,30 @@ try {
         default       { Bad "engine /api/v1/health" "http=$($script:pcCode) body=$(Shorten $script:pcBody)" }
     }
 
+    # -- [4b] engine liveness (mirrors healthcheck.sh) ---------------------------
+    # Trivial by design (no DB, no Redis): health failing + liveness passing
+    # means a dependency is down, not the process.
+    Write-Host "-- [4b] engine (GET /api/v1/liveness) --"
+    $livePy = 'import sys, urllib.request
+try:
+    raw = urllib.request.urlopen("http://localhost:8000/api/v1/liveness", timeout=10).read().decode("utf-8", "replace")
+except Exception as exc:
+    print("UNREACHABLE:" + type(exc).__name__)
+    sys.exit(0)
+print("BODY:" + raw[:200])'
+    $liveOut = @(& docker compose exec -T fastapi python -c $livePy 2>&1)
+    $liveRc = $LASTEXITCODE
+    $liveText = ($liveOut -join "`n")
+    if ($liveRc -ne 0) {
+        Bad "engine /api/v1/liveness" "probe could not run: $(Shorten $liveText)"
+    } elseif ($liveText -match "UNREACHABLE:") {
+        Bad "engine /api/v1/liveness" "the engine did not answer: $(Shorten $liveText)"
+    } elseif ($liveText -match '"alive"') {
+        Ok "engine /api/v1/liveness alive"
+    } else {
+        Bad "engine /api/v1/liveness" "unexpected body: $(Shorten $liveText)"
+    }
+
     # -- [5] engine readiness -------------------------------------------------
     # /api/v1/readiness answers 200 even when the database is unreachable
     # (ai-engine/app/api/v1/health.py returns a plain dict), so the code proves

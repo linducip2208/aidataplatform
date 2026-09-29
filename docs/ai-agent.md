@@ -156,3 +156,78 @@ copy; the engine's `ai_conversations` rows and their messages stay.
 - `POST /api/v1/ai/report` (service key) renders an executive summary with
   `{period, branch, format}`; `format: "html"` returns raw HTML instead of the JSON envelope.
   Laravel has no route for it — the **Reports** UI page calls the engine's tool path instead.
+
+## 8. Response contract
+
+`POST /api/v1/ai/chat` returns the legacy keys plus additive enterprise keys:
+
+```json
+{"answer": "...", "conversation_id": 12, "evidence": [...], "steps": 4,
+ "data_sources": ["fact_sales"], "metrics": {"steps": 4, "degraded": false,
+ "provider": "openrouter", "model": "anthropic/claude-3.5-sonnet",
+ "template": "assistant.v2", "template_fallback": false, "fallback_steps": []},
+ "confidence": 1.0, "limitations": [], "usage": {"recorded": true, "...": "..."},
+ "template": "assistant.v2"}
+```
+
+ANSWER / EVIDENCE / SOURCES (`data_sources`) / METRICS / CONFIDENCE / LIMITATIONS:
+`confidence` is the share of evidence rows with real data; `limitations` names every
+empty/failed source, unverified number, template fallback and offline degradation. Laravel's
+`POST /api/agent/chat` keeps the documented `{reply, answer, conversation_id, evidence,
+steps}` shape byte-identical; the extra keys are consumed server-side (usage is persisted
+on the assistant message, see §11).
+
+## 9. Prompt templates
+
+System prompts live in a code-side versioned registry (`PROMPT_TEMPLATES` in
+`ai-engine/app/ai/agent.py`): `assistant.v1` (the historical prompt, default),
+`assistant.v2` (stricter: per-number source citation plus a closing confidence line), and
+`sql.v1` (JSON-only SELECT generation). Select via `POST /api/v1/ai/chat?template=<key>`
+or `{"context": {"template": "<key>"}}`; Laravel accepts `template` on both
+`POST /api/agent/chat` and the assistant web form and forwards it inside `context`.
+Unknown keys fall back to `assistant.v1` and report `metrics.template_fallback: true`
+instead of failing the turn.
+
+## 10. SQL guardrails
+
+The agent runs user-supplied or generated SELECTs through `app/ai/sql_guard.py`
+(`validate_sql`) before the new `query_sql` tool executes them — and the execute path
+re-validates, so a refused statement is never run:
+
+1. exactly one statement (no stacked queries; `;` inside quotes/comments is data);
+2. SELECT-only (`SELECT` or `WITH ... SELECT`; `EXPLAIN`/`PRAGMA`/writes refused);
+3. no write/DDL keywords (`INSERT/UPDATE/DELETE/DROP/...`, `INTO OUTFILE`, `LOAD DATA`);
+4. table allowlist — `fact_*`/`dim_*` warehouse tables only (`users`, `ai_messages`,
+   `rag_chunks`, unknown names refused);
+5. LIMIT enforcement — missing LIMIT gets 200, anything above 5000 is clamped, and the
+   rewrite is flagged via `limit_enforced`.
+
+Execution runs read-only (rollback-only transaction, best-effort `SET TRANSACTION READ
+ONLY` on PostgreSQL); the serving role should additionally hold only SELECT grants.
+`POST /api/v1/ai/sql/validate` checks a statement without executing it
+(`{allowed, reason, normalized_sql, limit, limit_enforced, tables, note}`). NL-to-SQL
+generation (`generate_sql`) sees only the allowlisted schema snapshot and its candidate is
+validated before return — generation never executes.
+
+## 11. Providers, fallback, cost tracking
+
+**Providers.** `llm.resolve_provider()` maps `LLM_PROVIDER` onto the registry
+(`openai-compatible` / `openrouter` / `offline`); unknown values degrade to offline.
+`chat_with_fallback(messages, primary, fallback)` tries primary → fallback → offline,
+logging each step and recording `raw.fallback_steps`. Structured outputs pass
+`validate_structured` (JSON-shape check for required keys); a miss degrades instead of
+returning a half-shaped object.
+
+**Hallucination mitigation.** A model synthesis over zero real evidence rows is replaced
+by the canonical insufficient-data answer (`Data belum tersedia: tidak ada evidence ...`),
+never invented numbers; numbers in a grounded answer are checked against the evidence
+text and stragglers surface in `limitations`.
+
+**Cost tracking.** Every turn appends one `ai_usage` ledger row (engine DB): per-model
+prompt/completion tokens (provider `usage` block when available, else a labelled
+`chars/4` heuristic) and estimated USD cost from the `MODEL_RATES` snapshot. Unknown
+models record `estimated_cost: null` with an explicit note instead of a guessed price.
+`GET /api/v1/ai/usage?conversation_id=` returns rows plus totals (unpriced rows counted,
+never zero-filled); Laravel proxies it as `GET /api/ai/usage` and persists each turn's
+`usage` summary on the assistant message's `meta` JSON column (never merged into
+`evidence`).

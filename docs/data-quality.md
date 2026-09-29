@@ -118,3 +118,111 @@ misconfigured engine is reported once rather than once per dataset.
 - New rules belong in `run_quality_checks`. Keep the return shape — `score`, `breakdown`,
   `issues`, `passed` — because `data-quality` readers and `DatasetIngestionService` both
   depend on it.
+
+## 7. Enterprise rule engine (`ai-engine/app/quality/`)
+
+The four checks above stay the import-time profiler. The enterprise layer adds
+*configurable* rules on top, without touching `app/ingestion/quality.py`:
+
+- `rules.py` — `evaluate(df, rules)` with 15 rule types; `validate_rule()`
+  rejects unknown types and bad params with a field-naming error.
+- `profiles.py` — named bundles (`sales_strict`, `inventory_standard`,
+  `customers_pii_aware`); `validate_profile()` enforces unique rule ids.
+- `history.py` — persists runs + per-rule findings, serves history/trend.
+- `pii.py` — regex detection + masking, stdlib only.
+- `models.py` — `quality_rules`, `quality_runs`, `quality_findings` on the
+  shared `Base` (DDL spec for master: `quality_rules(id, name UNIQUE,
+  dataset_type, column NULL, rule_type, params JSON, severity, active)` /
+  `quality_runs(id, dataset_ref NULL INDEX, job_id NULL, profile NULL,
+  scores JSON, verdict, created_at)` / `quality_findings(id,
+  run_id FK→quality_runs.id, rule_id VARCHAR NULL, column NULL, sample JSON,
+  count)`).
+
+### 7.1 Rule catalog
+
+Each rule is `{id, column, type, params, severity error|warn}`. `column` may be
+`null` only for `duplicate` (whole-row), dataset-level `completeness`, and
+`schema_drift`.
+
+| Type | Params | Fails when |
+|---|---|---|
+| `required` | — | null or blank string (both dtypes handled) |
+| `nullable` | `max_null_ratio` (0–1, default 1.0) | null ratio above the cap |
+| `unique` | — | value occurs more than once (all copies counted) |
+| `duplicate` | `columns` (list or null = whole row) | extra copies beyond the first |
+| `regex` | `pattern` (required, must compile) | non-null value does not fullmatch |
+| `range` | `min`/`max` (≥1 required), `include_min`/`include_max` | outside bounds; unparseable non-null counts too |
+| `enum` | `allowed` (required, non-empty) | non-null value not in the set |
+| `datatype` | `dtype`: int\|float\|number\|string\|bool\|date\|datetime | non-null value does not coerce (nulls are `required`'s job) |
+| `referential` | `allowed_values` (required, non-empty) | non-null value outside the reference set |
+| `freshness` | `max_age_days` (>0), `reference` (ISO, default now UTC) | newest date older than the window; unparseable column fails shut |
+| `completeness` | `min_ratio` (default 0.9); column optional | column null ratio below `min_ratio`, or dataset null-cell ratio when columnless |
+| `consistency` | `max_outlier_ratio` (default 0.05) | 1.5×IQR outlier ratio above the cap (same formula as §2) |
+| `validity` | `check`: no_negative\|parse_date\|parse_number | check violated (unparseable non-null counts for `no_negative`) |
+| `schema_drift` | `expected_columns` (required), `allow_extra` (default false) | missing or (unless allowed) unexpected columns |
+| `anomaly_ref` | `sensitivity` (0.5–6.0, default 2.5), `max_anomaly_ratio` (default 0.05) | \|z\|-anomaly ratio above the cap; zero variance passes |
+
+Per-rule result: `{id, column, type, severity, passed, failure_count,
+sample_failures≤10}`. `score` is the mean of per-rule pass rates
+(`1 − failures/rows`, `1.0`/`0.0` for `schema_drift`), rounded to 4 decimals;
+an empty frame scores `0.0`. `column_scores` averages each column's rules
+(`__dataset__` for columnless rules). `verdict`: `fail` if any `error` rule
+failed, `warn` if only `warn` rules failed, else `pass`. `evaluate()` is
+deterministic — same frame + rules always gives the same bytes. Large frames
+stream through `ChunkAccumulator` / `evaluate_in_chunks(df, rules,
+chunksize)`, which reproduce the single-pass result exactly (global rules
+retain one column; chunks keep original index labels).
+
+### 7.2 Profiles
+
+`GET` the bundle, don't hand-roll it: `sales_strict` (required customer/
+product, non-negative quantity, parseable price, fresh date as warn,
+whole-row dupes as warn, branch allowlist as warn), `inventory_standard`,
+`customers_pii_aware` (required customer, email regex, segment enum, unique
+customer). Custom profiles go through the same `validate_profile()` —
+non-empty rules, unique ids, known types.
+
+### 7.3 History and trend
+
+`POST /quality/evaluate` persists a `quality_runs` row plus one
+`quality_findings` row per *failed* rule. `GET /quality/history?dataset_ref=`
+returns newest-first runs; with `dataset_ref` it also returns `trend`:
+oldest-first `{run_id, score, verdict, created_at}` points, `direction`
+(`improving`/`degrading`/`stable`, newest vs oldest, 1e-9 epsilon) and `delta`.
+`GET /quality/runs/{id}` returns one run with its findings, or 404.
+
+### 7.4 PII detection and masking
+
+`detect(df)` scans `email`, `phone` (`+62`/`0`…), `credit_card` (13–19 digits
+passing Luhn), `national_id` (16 digits) plus caller `extra_patterns`
+`{kind: regex}`. All-same-digit placeholders never match. Findings are
+`{column, kind, count, samples≤5}`. `mask_dataframe(df, strategy)` returns
+`(masked_frame, findings)` without mutating the input; only flagged columns
+are masked. Strategies: `email` (default, email-aware: `b***@example.com`,
+non-emails partially masked), `partial` (keep last 4), `full` (`*` × length),
+with a `per_column` override. Quarantine flow: run PII masking *before*
+evaluation on customer frames so the masked frame is what gets scored and
+stored — findings then reference masked samples only.
+
+### 7.5 POST/job semantics and quarantine
+
+Method contract, both services: GET is read-only (`/quality/rules`,
+`/quality/history`, `/quality/runs/{id}` never write — pinned by tests
+asserting unchanged row counts). Compute + persist is POST-only:
+`POST /quality/rules` stores a rule (409 on duplicate name, 422 on unknown
+type/bad params); `POST /quality/evaluate {dataset_ref?, job_id?, profile?,
+rules?, rows?}` runs the engine, persists run + findings, and returns scores.
+With inline `rows` it is synchronous; with `job_id` it re-reads the stored
+upload (`read_full`, same helper as the import profiler). Laravel mirrors the
+outcome onto `datasets.quality_score/quality_verdict/quality_checked_at` via
+`QualityService::evaluateViaEngine()` — engine `fail` → `quarantine`, anything
+else → `pass` — preserving terminal statuses exactly like `runQuality()`: a
+`committed` row keeps `committed` while recording the verdict, so a re-check
+can never strand warehouse rows. Long/periodic re-checks belong in jobs
+(`sync:quality` / `RefreshQualityScoreJob` pattern), never behind GET.
+
+Laravel surface (`/api/quality/*`, Sanctum; `QualityService` uses its own
+private HTTP helper from `config/ai_engine` — `AiEngineClient` stays
+master-owned): `GET rules` (filter `dataset_type/rule_type/active`),
+`POST rules` (validates `rule_type` against the 15-type allowlist),
+`POST evaluate` (validates, evaluates, mirrors), `GET history`, `GET runs/{id}`.

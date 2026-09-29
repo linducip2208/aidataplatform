@@ -37,9 +37,10 @@ REPO_URL="${REPO_URL:-}"
 # The services that write to the database. A restore or a schema migration
 # under these re-appends the new data over whatever was just applied.
 WRITERS="laravel laravel-queue laravel-schedule fastapi celery-worker celery-beat"
-# The services that carry a healthcheck in docker-compose.yml. The rest are
-# only required to be Up.
-HEALTHCHECKED="postgres redis laravel fastapi nginx"
+# The services that carry a healthcheck in docker-compose.yml. Queue, schedule,
+# worker and beat carry lightweight process-level probes (ps / /proc + python);
+# the rest are only required to be Up.
+HEALTHCHECKED="postgres redis laravel laravel-queue laravel-schedule fastapi celery-worker celery-beat nginx"
 
 step() { echo; echo "=== [$1/9] $2 ==="; }
 fatal() { echo; echo "FATAL: $*" >&2; echo "The previous version is still what is serving; nothing was torn down." >&2; exit "$EXIT_STEP_FAILED"; }
@@ -188,6 +189,31 @@ if grep -qE '^SERVICE_API_KEY=(change-me|changeme)?[[:space:]]*$' .env; then
 fi
 docker compose config --quiet || fatal "'docker compose config' rejected docker-compose.yml; the stack was not touched"
 
+# CELERY_QUEUES must stay a superset of every queue celery_app.py routes to
+# (ai-engine/app/workers/celery_app.py QUEUES + TASK_ROUTES): a task routed to
+# a queue the worker does not subscribe to is enqueued and never consumed,
+# which looks exactly like a stuck import. Compose's own default already
+# matches; this catches a root-.env override that dropped one. Fatal, because a
+# deploy that strands a queue is not a deploy.
+_required_queues="default imports quality ml agent rag"
+# Strip a surrounding double-quote pair and any spaces: values come from a
+# dotenv line (CELERY_QUEUES="a,b" or CELERY_QUEUES=a,b), never from a human.
+_effective_queues=$(grep -E '^CELERY_QUEUES=' .env 2>/dev/null | tail -n 1 | cut -d= -f2- | sed 's/^"//; s/"$//; s/ //g' || true)
+if [ -z "$_effective_queues" ]; then
+    _effective_queues=$(sed -n 's/.*\${CELERY_QUEUES:-\([^}]*\)}.*/\1/p' docker-compose.yml | head -n 1 | tr -d ' ')
+fi
+_missing_queues=""
+for _q in $_required_queues; do
+    case ",$_effective_queues," in
+        *",$_q,"*) ;;
+        *) _missing_queues="$_missing_queues $_q" ;;
+    esac
+done
+if [ -n "$_missing_queues" ]; then
+    fatal "CELERY_QUEUES='${_effective_queues:-<empty>}' is missing:${_missing_queues}. Every queue in (default imports quality ml agent rag) must be subscribed or its tasks stall. Fix CELERY_QUEUES in .env (a superset is fine) and re-run."
+fi
+echo "celery queues ok: $_effective_queues covers default,imports,quality,ml,agent,rag"
+
 # ---------------------------------------------------------------------------
 # wait_for_stack — "up" is not "serving". Returns non-zero as soon as a
 # healthchecked service goes unhealthy, rather than waiting out the full
@@ -265,6 +291,11 @@ step 8 "migrations + seed + verification"
 # Both the laravel container and the fastapi container migrate on start, and
 # both exit non-zero / log loudly on failure. These two commands are fatal here:
 # a deploy that leaves the schema behind the code is not a deploy.
+# `artisan migrate --force` covers every Laravel file in
+# application/database/migrations/ (users, datasets, chat, audit, catalog
+# 010000, quality 020000, query indexes 000001, perf indexes 050000); `alembic
+# upgrade head` covers the single revision master generates from the agents'
+# DDL specs at integration. Re-run `make migrate` explicitly after pulling.
 docker compose exec -T laravel php artisan migrate --force \
     || fatal "artisan migrate --force failed; see: docker compose logs laravel"
 docker compose exec -T fastapi alembic upgrade head \

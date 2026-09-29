@@ -5,7 +5,7 @@ COMPOSE ?= docker compose
 LARAVEL  ?= $(COMPOSE) exec laravel
 FASTAPI  ?= $(COMPOSE) exec fastapi
 
-.PHONY: up down restart ps logs build pull migrate seed fresh test test-laravel test-ai health backup restore lint format shell-laravel shell-ai docs clean
+.PHONY: up down restart ps logs build pull migrate seed fresh test test-laravel test-ai health backup restore snapshot verify verify-routing verify-env verify-contract lint format shell-laravel shell-ai docs clean
 
 up: ## Start all services detached
 	$(COMPOSE) up -d --build
@@ -57,6 +57,20 @@ backup: ## Backup postgres + datasets volume manifest
 
 restore: ## Restore (usage: make restore FILE=backups/aidata_YYYYmmdd_HHMMSS.sql.gz)
 	bash infrastructure/scripts/restore.sh "$(FILE)"
+
+snapshot: ## Snapshot datasets + models volumes into BACKUP_DIR (tar; DB dump is `make backup`)
+	bash -c 'set -eu; d="$${BACKUP_DIR:-./backups}"; mkdir -p "$$d"; ts="$$(date +%Y%m%d_%H%M%S)"; docker run --rm --volumes-from aidata-laravel -v "$$(pwd)/$$d:/bk" alpine tar czf "/bk/files_$$ts.tgz" /var/www/html/storage/app/datasets; docker run --rm --volumes-from aidata-fastapi -v "$$(pwd)/$$d:/bk" alpine tar czf "/bk/models_$$ts.tgz" /code/data/models; ls -lh "$$d"/files_$$ts.tgz "$$d"/models_$$ts.tgz'
+
+verify: verify-routing verify-env verify-contract ## Static checks that need no running stack
+
+verify-routing: ## Nginx/compose routing contract (static parse, no docker)
+	bash tests/verify-routing.sh
+
+verify-env: ## Env declare->inject->read traceability (static parse, no docker)
+	bash tests/verify-env.sh
+
+verify-contract: ## docs/api.md vs Laravel routes (needs php, no DB)
+	bash tests/verify-contract.sh
 
 lint: ## Lint (php + python hints)
 	$(LARAVEL) ./vendor/bin/pint --test || echo "[laravel] pint not installed - skipping"

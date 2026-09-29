@@ -25,8 +25,9 @@ from __future__ import annotations
 
 import hashlib
 import random
+import re
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
@@ -59,6 +60,44 @@ RETRYABLE_STATUS = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
 # finish_reason values that mean "the model declined", not "the model answered".
 REFUSAL_REASONS = frozenset({"content_filter"})
 ALLOWED_SCHEMES = frozenset({"http", "https"})
+
+# --- provider registry -------------------------------------------------------
+# Logical providers the engine knows how to talk to. "openai-compatible" and
+# "openrouter" are both OpenAI-compatible HTTP dialects resolved from settings;
+# "offline" is the degraded no-network provider, which never sends a request.
+# ``resolve_provider`` maps the free-form LLM_PROVIDER setting onto this
+# registry so an unknown value degrades to offline instead of raising.
+PROVIDERS = {
+    "openai-compatible": {"kind": "http", "auth": "bearer", "dialect": "openai"},
+    "openai": {"kind": "http", "auth": "bearer", "dialect": "openai"},
+    "openrouter": {"kind": "http", "auth": "bearer", "dialect": "openai",
+                   "extra_headers": ("HTTP-Referer", "X-Title")},
+    "offline": {"kind": "local", "auth": "none", "dialect": "none"},
+}
+
+# Canonical insufficient-data answer. Returned whenever a grounded synthesis
+# has no evidence to stand on: a missing number is always preferable to an
+# invented one, and every caller funnels through here so the wording is stable.
+INSUFFICIENT_DATA_ANSWER = (
+    "Data belum tersedia: tidak ada evidence yang mendukung jawaban atas "
+    "pertanyaan ini, sehingga tidak ada angka yang dapat ditampilkan.")
+_FALLBACK_PROVIDER_NOTE = "fallback"
+
+
+def resolve_provider(name: Any = None) -> str:
+    """Map a provider name onto the registry, defaulting to ``offline``.
+
+    Unknown, blank or non-string values resolve to ``"offline"`` rather than
+    raising, because provider resolution runs on the chat hot path where an
+    exception would turn a misconfigured (but answerable-from-data) turn into
+    a 500.
+    """
+    key = str(name if name is not None else settings.llm_provider or "").strip().lower()
+    if key in PROVIDERS:
+        return key
+    if key in ("oai", "open-ai"):
+        return "openai-compatible"
+    return "offline"
 
 
 def _api_key() -> str:
@@ -164,11 +203,14 @@ def _backoff(attempt: int, retry_after: float = 0.0) -> float:
     return min(MAX_BACKOFF_SECONDS, wait) * (0.5 + random.random() / 2)
 
 
-def _offline(message: str, error: str = "") -> Dict[str, Any]:
+def _offline(message: str, error: str = "", provider: str = "offline",
+             fallback_steps: Optional[List[str]] = None) -> Dict[str, Any]:
     """Return the offline completion shape with no provider text in it."""
-    raw: Dict[str, Any] = {"offline": True}
+    raw: Dict[str, Any] = {"offline": True, "provider": provider or "offline"}
     if error:
         raw["error"] = str(_scrub(error))
+    if fallback_steps:
+        raw["fallback_steps"] = list(fallback_steps)
     return {"content": message, "tool_calls": [], "raw": raw, "offline": True}
 
 
@@ -191,6 +233,7 @@ def _summary(data: Dict[str, Any], content: str) -> Dict[str, Any]:
         "content_chars": len(content),
         "usage": _scrub(usage) if isinstance(usage, dict) else {},
         "truncated": len(content) >= MAX_CONTENT_CHARS,
+        "provider": resolve_provider(),
     }
 
 
@@ -236,8 +279,9 @@ def _parse_completion(r: httpx.Response) -> Tuple[str, List[Any], Dict[str, Any]
 
 
 def chat(messages: List[Dict[str, str]], model: Optional[str] = None,
-         json_mode: bool = False, tools: Optional[List[Dict]] = None,
-         max_tokens: int = 1500, temperature: float = 0.2) -> Dict[str, Any]:
+          json_mode: bool = False, tools: Optional[List[Dict]] = None,
+          max_tokens: int = 1500, temperature: float = 0.2,
+          required_keys: Optional[Sequence[str]] = None) -> Dict[str, Any]:
     """Run one chat completion.
 
     Returns ``{"content": str, "tool_calls": list, "raw": dict, "offline": bool}``. When no
@@ -247,6 +291,11 @@ def chat(messages: List[Dict[str, str]], model: Optional[str] = None,
     completion, which are degradations rather than answers. The provider's error text is
     reduced to an exception type and HTTP status and lives only in ``raw["error"]`` and the
     log.
+
+    ``required_keys`` enables response validation for structured outputs: when given, the
+    content must parse as a JSON object containing every listed key, otherwise the
+    completion is treated as malformed and degrades to offline rather than handing a
+    half-shaped object to the caller.
     """
     mdl = model or settings.llm_model
     base = _base_url()
@@ -272,6 +321,12 @@ def chat(messages: List[Dict[str, str]], model: Optional[str] = None,
                 r = client.post(url, json=payload, headers=_headers())
                 r.raise_for_status()
                 content, tool_calls, summary = _parse_completion(r)
+                if required_keys:
+                    parsed, problem = validate_structured(content, required_keys)
+                    if parsed is None:
+                        last_err = f"malformed_response {problem}"
+                        log.error(f"llm chat attempt {attempt + 1}/{attempts} failed: {last_err}")
+                        return _offline(OFFLINE_NOTE, error=last_err)
                 return {"content": content, "tool_calls": tool_calls,
                         "raw": summary, "offline": False}
             except httpx.HTTPStatusError as exc:
@@ -298,6 +353,133 @@ def chat(messages: List[Dict[str, str]], model: Optional[str] = None,
                 break
             time.sleep(wait)
     return _offline(OFFLINE_NOTE, error=last_err)
+
+
+def chat_with_fallback(messages: List[Dict[str, str]],
+                       primary: Optional[str] = None,
+                       fallback: Optional[str] = None,
+                       **kwargs: Any) -> Dict[str, Any]:
+    """Run :func:`chat` on a primary→fallback→offline chain, logging each step.
+
+    ``primary`` defaults to the configured model; ``fallback`` defaults to the
+    same model (i.e. one more attempt through the normal retry loop) unless a
+    distinct fallback model is configured. Every step is logged at warning
+    level on failure, and the returned ``raw`` carries ``fallback_steps`` — the
+    ordered model names that were tried — so a degraded answer is auditable.
+    The final offline marker has ``provider: "offline"`` and content
+    :data:`OFFLINE_NOTE`, exactly like :func:`chat` on total failure.
+    """
+    from app.core.config import settings as _settings
+
+    steps: List[str] = []
+    first = primary or _settings.llm_model
+    second = fallback
+    for attempt_no, mdl in enumerate([m for m in (first, second) if m]):
+        steps.append(str(mdl))
+        try:
+            out = chat(messages, model=mdl, **kwargs)
+        except Exception as exc:
+            log.warning(f"llm fallback step {attempt_no + 1} ({mdl}) raised: "
+                        f"{type(exc).__name__}")
+            continue
+        if isinstance(out, dict) and not out.get("offline"):
+            raw = dict(out.get("raw") or {})
+            raw["fallback_steps"] = steps
+            out["raw"] = raw
+            return out
+        log.warning(f"llm fallback step {attempt_no + 1} ({mdl}) degraded: "
+                    f"{(out or {}).get('raw', {}).get('error', 'offline')}")
+    log.error(f"llm fallback chain exhausted after {len(steps)} step(s)")
+    return _offline(OFFLINE_NOTE, error="fallback_chain_exhausted",
+                    provider=_FALLBACK_PROVIDER_NOTE, fallback_steps=steps)
+
+
+def validate_structured(content: Any, required_keys: Sequence[str]) -> Tuple[Any, str]:
+    """JSON-shape check for structured (``json_mode``) outputs.
+
+    Returns ``(parsed, "")`` when ``content`` parses as a JSON object holding
+    every key in ``required_keys``, else ``(None, <reason>)`` where reason is
+    one of ``not_json``, ``not_object`` or ``missing_keys:<a,b>``. Fenced code
+    blocks are tolerated; anything else is the model's problem, reported — not
+    repaired — so a caller never acts on a guessed shape.
+    """
+    import json as _json
+    import re as _re
+
+    text = str(content or "").strip()
+    if text.startswith("```"):
+        text = _re.sub(r"^```[a-zA-Z]*\s*", "", text)
+        text = _re.sub(r"\s*```$", "", text).strip()
+    start, end = text.find("{"), text.rfind("}")
+    if start < 0 or end <= start:
+        return None, "not_json"
+    try:
+        parsed = _json.loads(text[start:end + 1])
+    except Exception:
+        return None, "not_json"
+    if not isinstance(parsed, dict):
+        return None, "not_object"
+    missing = [k for k in required_keys if k not in parsed]
+    if missing:
+        return None, "missing_keys:" + ",".join(missing)
+    return parsed, ""
+
+
+_NUMBER_RE = re.compile(
+    r"(?<![\w.])\d[\d.,]*(?:\s*%\s*%?)?(?![\w%])")
+
+
+def numbers_in(text: Any) -> List[str]:
+    """Return the number-like tokens in ``text``, normalised for comparison.
+
+    Thousands separators and surrounding whitespace are stripped so ``"1,250"``
+    and ``"1250"`` compare equal; a trailing ``%`` is kept because ``12`` and
+    ``12%`` are different claims. Deterministic and locale-free by design.
+    """
+    out: List[str] = []
+    for match in _NUMBER_RE.finditer(str(text or "")):
+        token = re.sub(r"[\s,]", "", match.group(0)).strip()
+        if token:
+            out.append(token)
+    return out
+
+
+def unverified_numbers(content: Any, evidence_texts: Sequence[Any]) -> List[str]:
+    """Return numbers in ``content`` that appear in none of ``evidence_texts``.
+
+    Comparison is substring on the normalised forms from :func:`numbers_in`.
+    An empty list means every figure the answer states was fetched, not
+    invented — the check the agent runs before it trusts a model synthesis.
+    """
+    corpus = " ".join(str(t or "") for t in evidence_texts)
+    normalised_corpus = re.sub(r"[\s,]", "", corpus)
+    return [n for n in numbers_in(content)
+            if re.sub(r"[\s,]", "", n) not in normalised_corpus]
+
+
+def refuse_no_evidence(query: Any = "") -> str:
+    """Return the canonical insufficient-data answer for an evidence-less turn."""
+    question = str(query or "").strip()
+    if question:
+        return (f"{INSUFFICIENT_DATA_ANSWER} (pertanyaan: "
+                f"{question[:200]})")
+    return INSUFFICIENT_DATA_ANSWER
+
+
+def ensure_grounded(content: Any, evidence_texts: Sequence[Any],
+                    query: Any = "") -> Tuple[str, bool, List[str]]:
+    """Enforce the no-evidence policy on a model synthesis.
+
+    Returns ``(answer, grounded, unverified)``. With no evidence at all the
+    answer is replaced by :func:`refuse_no_evidence` — never an invented
+    number. With evidence, numbers that cannot be found in it are reported in
+    ``unverified`` and the caller (the agent) decides; the text itself is left
+    untouched here so this function stays a pure check.
+    """
+    texts = [str(t or "") for t in evidence_texts if str(t or "").strip()]
+    if not texts:
+        return refuse_no_evidence(query), False, numbers_in(content)
+    return str(content or ""), True, unverified_numbers(content, texts)
 
 
 def embed(texts: List[str], model: Optional[str] = None) -> List[List[float]]:

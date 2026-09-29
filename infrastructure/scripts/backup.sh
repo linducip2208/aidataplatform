@@ -2,7 +2,14 @@
 # AIDataPlatform backup: Postgres dump (gzipped) plus a manifest of what is running.
 #
 # Usage: bash infrastructure/scripts/backup.sh
+#        bash infrastructure/scripts/backup.sh --verify-only <archive.sql.gz>
 # Output: <BACKUP_DIR>/aidata_YYYYmmdd_HHMMSS.sql.gz (+ .manifest.txt)
+#
+# --verify-only validates an EXISTING archive (gzip integrity, pg_dump header,
+# SQL presence) and exits without touching Docker or the database. Exit 0 means
+# "this file would be accepted by restore.sh"; exit 1 means "refused, with the
+# reason on stderr". It exists so a cron job or a drill can prove a stored
+# backup is still replayable without replaying it.
 #
 # Env: BACKUP_DIR, BACKUP_RETENTION_DAYS, BACKUP_S3_BUCKET, BACKUP_S3_PREFIX,
 #      VOLUME_PREFIX, POSTGRES_USER, POSTGRES_DB
@@ -24,9 +31,11 @@
 #    to be replayed over an existing database by restore.sh.
 #
 # EXIT CODES:
-#   0  an archive was written and verified (an S3 upload failure is a warning)
+#   0  an archive was written and verified (an S3 upload failure is a warning;
+#      --verify-only: the named archive passed every check)
 #   1  the backup failed - nothing valid was produced, and any partial file has
-#      been removed, so there is no archive to restore from
+#      been removed, so there is no archive to restore from (--verify-only: the
+#      named archive failed validation, with the reason on stderr)
 #   2  the backup could not be started: no docker, no Compose v2, or the
 #      postgres service is not running
 set -eu
@@ -61,6 +70,64 @@ discard() {
         *) echo "[backup] WARN: refusing to remove '$1'" >&2 ;;
     esac
 }
+
+# ---------------------------------------------------------------------------
+# --verify-only: validate an existing archive and stop. No docker, no database.
+# The four checks are the same ones a fresh dump passes in steps 2-3 below
+# (gzip integrity, decompress, pg_dump header, SQL present), so "verified" here
+# means restore.sh section 1 would accept this file.
+# ---------------------------------------------------------------------------
+VERIFY_ONLY=0
+VERIFY_FILE=""
+for _arg in "$@"
+do
+    case "$_arg" in
+        --verify-only) VERIFY_ONLY=1 ;;
+        -h | --help)
+            echo "Usage: bash infrastructure/scripts/backup.sh" >&2
+            echo "       bash infrastructure/scripts/backup.sh --verify-only <archive.sql.gz>" >&2
+            exit "$EXIT_OK"
+            ;;
+        -*) die "unknown option '$_arg'; only --verify-only is accepted" ;;
+        *)  VERIFY_FILE="$_arg" ;;
+    esac
+done
+if [ "$VERIFY_ONLY" -eq 1 ]; then
+    [ -n "$VERIFY_FILE" ] || die "usage: bash infrastructure/scripts/backup.sh --verify-only <archive.sql.gz>"
+    [ -f "$VERIFY_FILE" ] || die "file not found: $VERIFY_FILE"
+    [ -s "$VERIFY_FILE" ] || die "$VERIFY_FILE is empty; there is nothing to verify"
+    gzip -t "$VERIFY_FILE" 2>/dev/null || die "$VERIFY_FILE failed 'gzip -t' (truncated or not a gzip file)"
+    _vdir=${TMPDIR:-/tmp}
+    _vwork=$(mktemp -d "$_vdir/aidata-backup-verify.XXXXXX") || die "cannot create a scratch directory under '$_vdir'"
+    case "$_vwork" in
+        "$_vdir"/aidata-backup-verify.*) ;;
+        *) echo "[backup] FATAL: unexpected scratch path '$_vwork'" >&2; exit "$EXIT_FAIL" ;;
+    esac
+    _vsql="$_vwork/check.sql"
+    _vrc=0
+    gunzip -c "$VERIFY_FILE" > "$_vsql" 2>"$_vwork/gunzip.err" || _vrc=$?
+    if [ "$_vrc" -ne 0 ]; then
+        _verr=$(tr '\n' ' ' < "$_vwork/gunzip.err" 2>/dev/null | cut -c1-200)
+        rm -rf "$_vwork"
+        die "cannot decompress $VERIFY_FILE (gunzip exit $_vrc): $_verr"
+    fi
+    if ! grep -q 'PostgreSQL database dump' "$_vsql"; then
+        _vbytes=$(wc -c < "$_vsql" | tr -d ' ')
+        rm -rf "$_vwork"
+        die "$VERIFY_FILE decompressed to $_vbytes bytes with no 'PostgreSQL database dump' header; this is not a pg_dump output"
+    fi
+    if ! grep -qE '^(SET|CREATE|ALTER|COPY|DROP|LOCK|SELECT) ' "$_vsql"; then
+        rm -rf "$_vwork"
+        die "$VERIFY_FILE has the pg_dump header but no SQL statements; it looks truncated"
+    fi
+    _vbytes=$(wc -c < "$_vsql" | tr -d ' ')
+    _vtables=$(grep -c '^CREATE TABLE ' "$_vsql" || true)
+    _vcopy=$(grep -c '^COPY ' "$_vsql" || true)
+    rm -rf "$_vwork"
+    echo "[backup] RESULT=verified file=$VERIFY_FILE bytes_uncompressed=$_vbytes create_table=$_vtables copy_blocks=$_vcopy"
+    echo "[backup] note: the dump covers the database only; datasets/models files are NOT in it (volume snapshot, docs/backup-restore.md section 5)."
+    exit "$EXIT_OK"
+fi
 
 # ---------------------------------------------------------------------------
 # Preflight. "docker is missing" and "the database is not running" have to be
@@ -203,6 +270,11 @@ echo "[backup] volume manifest ..."
     _mo=$(docker compose exec -T fastapi du -sh /code/data/models 2>/dev/null | awk 'NR==1{print $1}') || _mo=""
     echo "datasets_size=${_ds:-unknown}"
     echo "models_size=${_mo:-unknown}"
+    # The dump covers the database ONLY. This line is the machine-readable
+    # version of that contract: anyone parsing the manifest must not mistake a
+    # valid dump for a complete backup. Files need `make snapshot` (a tar of the
+    # two volumes below) on the same schedule -- docs/backup-restore.md section 5.
+    echo "files_in_dump=no - datasets/models files are NOT in the dump; snapshot the volumes"
     echo "--- compose ps ---"
     docker compose ps -a --format '{{.Name}} {{.Status}}' 2>/dev/null || echo "(docker compose ps failed)"
 } > "$BACKUP_DIR/$MANIFEST" || warn "could not write $MANIFEST (the dump itself is valid)"

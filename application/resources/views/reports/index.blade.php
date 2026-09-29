@@ -133,5 +133,77 @@
                 @endif
             </x-card>
         </div>
+
+        <x-card class="mt-6" title="Laporan otomatis" description="Snapshot KPI terjadwal dari mesin AI (bi.snapshot_kpis).">
+            @php $autoSnapshots = $snapshots ?? []; @endphp
+            @if (($snapshotsAvailable ?? false) === false)
+                <x-empty-state
+                    title="Snapshot belum tersedia"
+                    description="Mesin AI tidak dapat dihubungi untuk daftar snapshot. Periksa layanan fastapi lalu muat ulang."
+                />
+            @elseif ($autoSnapshots === [])
+                <x-empty-state
+                    title="Belum ada snapshot terjadwal"
+                    description="Belum ada KPI yang di-snapshot. Jadwalkan bi.snapshot_kpis di Celery beat (lihat docs/bi.md)."
+                />
+            @else
+                <x-table-wrapper label="Snapshot KPI otomatis">
+                    <table class="app-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">KPI</th>
+                                <th scope="col" class="text-right">Nilai</th>
+                                <th scope="col" class="text-right">Target</th>
+                                <th scope="col">Status</th>
+                                <th scope="col">Periode</th>
+                                <th scope="col">Dihitung</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach ($autoSnapshots as $snap)
+                                @php
+                                    $sstatus = (string) ($snap['status'] ?? 'ok');
+                                    $svariant = $sstatus === 'crit' ? 'danger' : ($sstatus === 'warn' ? 'warning' : 'success');
+                                @endphp
+                                <tr>
+                                    <td class="font-medium text-slate-900">{{ $snap['kpi_name'] ?? 'Tidak diketahui' }}</td>
+                                    <td class="text-right tabular-nums">{{ number_format((float) ($snap['value'] ?? 0), 2, ',', '.') }}</td>
+                                    <td class="text-right tabular-nums">
+                                        @if (($snap['target'] ?? null) === null)
+                                            <span class="text-slate-400">—</span>
+                                        @else
+                                            {{ number_format((float) $snap['target'], 2, ',', '.') }}
+                                        @endif
+                                    </td>
+                                    <td><x-badge :variant="$svariant">{{ strtoupper($sstatus) }}</x-badge></td>
+                                    <td>{{ $snap['period'] ?? '—' }}</td>
+                                    <td class="text-slate-500">{{ $snap['computed_at'] ?? '—' }}</td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </x-table-wrapper>
+                <div class="mt-4 flex flex-wrap gap-2">
+                    <form method="POST" action="{{ url('/api/analytics/export') }}">
+                        @csrf
+                        <input type="hidden" name="format" value="csv">
+                        <input type="hidden" name="dataset" value="kpi">
+                        <button
+                            type="submit"
+                            class="inline-flex items-center justify-center rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                        >Unduh snapshot (CSV)</button>
+                    </form>
+                    <form method="POST" action="{{ url('/api/analytics/export') }}">
+                        @csrf
+                        <input type="hidden" name="format" value="xlsx">
+                        <input type="hidden" name="dataset" value="kpi">
+                        <button
+                            type="submit"
+                            class="inline-flex items-center justify-center rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                        >Unduh snapshot (XLSX)</button>
+                    </form>
+                </div>
+            @endif
+        </x-card>
     @endunless
 @endsection

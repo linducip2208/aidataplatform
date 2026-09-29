@@ -89,3 +89,65 @@ Until the approval table exists, the honest governance story is: an admin decide
 decision is recorded in `audit_logs` under `model.promoted` with the `version_id` and the
 target status, and nothing else is captured. Write the rationale somewhere durable; the
 platform will not.
+
+## 5. Rollback
+
+Recovery is no longer "promote the old version by hand":
+`POST /api/v1/models/{model_id}/rollback` (`app/ml/registry.py::rollback`)
+re-activates the most recent `ARCHIVED` predecessor of the serving version in
+one audited step. `ARCHIVED` stays terminal for `promote` by design, so this is
+the only path back — a broken version cannot be silently re-promoted, and a
+rollback with no serving version (or no archived predecessor) fails explicitly
+(`422 NO_ROLLBACK_TARGET`), never by re-pointing at the same version.
+
+The step writes three trail entries: a `lifecycle` transition for the retired
+version (`PRODUCTION → ARCHIVED`), a `lifecycle` transition for the restored
+one (`ARCHIVED → PRODUCTION`), and a `rollback` entry naming both version ids —
+plus the matching deployment transitions (old `SERVING → RETIRED`, new →
+`SERVING`). Laravel exposes it as `POST /api/ml/models/{modelId}/rollback`
+(admin only, 200) with a `model.rolled_back` audit row, and the Models page
+carries a rollback button with a note field next to the version history.
+
+## 6. Audit trail and deployment status
+
+Every promotion, retirement and rollback is recorded in `ml_model_events`
+(DDL owned by master; SQLAlchemy spec in `app/ml/registry.py::ModelEvent`):
+`{model_id, version_id, event_type, from_status, to_status, actor, note,
+created_at}` with `event_type` in `lifecycle | deployment | rollback`. The
+auto-retirement of a superseded production version writes its own `lifecycle`
+entry naming the replacing version — a predecessor never flips to `ARCHIVED`
+silently. Read the trail with `GET /api/v1/models/{model_id}/events` (Laravel:
+`GET /api/ml/models/{modelId}/events`, any authenticated role), which also
+reports the current deployment status of every version.
+
+Lifecycle (`DRAFT → TRAINING → VALIDATED → PRODUCTION → ARCHIVED`, plus
+`FAILED` and the `STAGED` label) says what reviewers decided; deployment says
+what is actually serving: `PENDING → STAGING → SERVING`, with `FAILED` and
+`RETIRED` as exits and one legal return (`FAILED → STAGING` for an explicit
+redeploy). New versions start `PENDING`; promoting to `PRODUCTION` moves the
+version to `SERVING`. The transition rules live in
+`app/ml/registry.py::DEPLOYMENT_TRANSITIONS` and are enforced by
+`set_deployment_status`, which refuses skips (e.g. `PENDING → SERVING`) with
+the allowed targets named. Complete per-version metadata — version string,
+training timestamp, dataset version, features, metrics, params, artifact path,
+lifecycle status, deployment status — is served by
+`GET /api/v1/models/{model_id}/detail` (Laravel:
+`GET /api/ml/models/{modelId}/detail`). Fields that predate provenance are
+`null`, which means "not recorded", never a back-fill. The legacy
+`GET /models/{model_id}` shape is unchanged.
+
+## 7. Promotion/rollback policy (admin)
+
+1. Compare before promoting: rank the candidate experiments on the validation
+   split (`POST …/experiments/{id}/compare`) and promote the measured winner,
+   not the newest version.
+2. Roll back on signal, not on suspicion: a rollback retires the serving
+   version, so it needs the same evidence bar as a promotion — degraded
+   metrics, missing/corrupt artifact, or a bad deploy note recorded on the
+   rollback entry.
+3. One serving version always: promotion auto-archives the predecessor and
+   rollback auto-archives the broken one; the trail shows exactly one `SERVING`
+   version per model at any time.
+4. The `note` is the rationale: `rollback` accepts an actor note and every
+   entry lands in `ml_model_events` plus Laravel's `audit_logs` — the two
+   together are the decision record §4 used to ask you to keep elsewhere.

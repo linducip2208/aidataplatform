@@ -47,6 +47,8 @@ TOOL_DEFS = [
                                       "parameters": {"type": "object", "properties": {}}}},
     {"type": "function", "function": {"name": "generate_report", "description": "Executive summary report",
                                       "parameters": {"type": "object", "properties": {"period": {"type": "string"}}}}},
+    {"type": "function", "function": {"name": "query_sql", "description": "Run a guarded read-only SELECT over the warehouse (validated by sql_guard, never destructive)",
+                                      "parameters": {"type": "object", "properties": {"sql": {"type": "string"}}}}},
 ]
 
 # --- limits -----------------------------------------------------------------
@@ -377,7 +379,67 @@ def execute_tool(name: str, args: Dict[str, Any], db_session=None) -> Dict[str, 
 
         period = str(args.get("period") or "weekly")
         return _result("reporting", executive_summary(db_session, period=period))
+    if name == "query_sql":
+        return execute_sql(str((args or {}).get("sql") or ""), db_session)
     return {"source": name, "data": {"error": f"unknown_tool: {_clip(name, 64)}", "empty": True}}
+
+
+def execute_sql(sql: str, db_session=None) -> Dict[str, Any]:
+    """Validate ``sql`` via :mod:`app.ai.sql_guard` and run it read-only.
+
+    The guardrail runs first and its verdict is final: a refused statement is
+    NEVER executed, and the refusal carries the explicit ``reason`` so the
+    caller can tell the user what was wrong instead of showing a blank. An
+    allowed statement runs inside a transaction that is rolled back (never
+    committed) and, on PostgreSQL, under ``SET TRANSACTION READ ONLY``
+    (best-effort). The result rows are capped at the validated ``LIMIT`` and
+    serialised through :func:`evidence_data`, so the outcome is one of the
+    three honest tool outcomes: real data, an empty marker, or an error.
+    """
+    from app.ai import sql_guard
+
+    validation = sql_guard.validate_sql(sql)
+    if not validation.get("allowed"):
+        return {"source": "sql",
+                "data": {"error": sql_guard.refusal_message(validation),
+                         "reason": str(validation.get("reason") or "refused"),
+                         "empty": True}}
+    if db_session is None:
+        return {"source": "sql", "data": {"error": "no database session", "empty": True}}
+    statement = str(validation.get("normalized_sql") or "")
+    limit = int(validation.get("limit") or sql_guard.DEFAULT_ROW_LIMIT)
+    try:
+        from sqlalchemy import text as _text
+
+        try:
+            dialect = getattr(getattr(db_session, "bind", None), "dialect", None)
+            dialect_name = getattr(dialect, "name", "") or ""
+        except Exception:
+            dialect_name = ""
+        if dialect_name.startswith("postgres"):
+            try:
+                db_session.execute(_text("SET TRANSACTION READ ONLY"))
+            except Exception:
+                pass
+        rows = db_session.execute(_text(statement)).fetchall()
+        db_session.rollback()  # a read must never commit, even by accident
+        keys = list(rows[0]._mapping.keys()) if rows else []
+        data = [{str(k): _jsonable(dict(r._mapping).get(k)) for k in keys}
+                for r in rows[:limit]]
+        if not data:
+            return {"source": "sql",
+                    "data": {"note": NO_DATA_NOTE, "empty": True,
+                             "sql": _clip(statement, TEXT_LIMIT)}}
+        return _result("sql", {"rows": data[:EVIDENCE_ROW_LIMIT],
+                               "count": len(data),
+                               "sql": _clip(statement, TEXT_LIMIT),
+                               "limit_enforced": bool(validation.get("limit_enforced"))})
+    except Exception as exc:
+        try:
+            db_session.rollback()
+        except Exception:
+            pass
+        raise ToolError(redact(exc)) from exc
 
 
 def failed_tool_result(name: str, exc: BaseException) -> Dict[str, Any]:

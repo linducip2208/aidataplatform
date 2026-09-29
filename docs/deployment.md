@@ -122,15 +122,46 @@ Keep `CELERY_QUEUES` a superset of the queues `celery_app.py` routes to: `import
 `transform_dataset` go to `imports`, `validate_dataset` to `quality`, the ML tasks to `ml`,
 `generate_ai_report` to `agent`, `generate_embeddings` to `rag` and `scheduled_data_sync` to
 `default`. A task routed to a queue the worker does not subscribe to is enqueued and never
-consumed, which looks exactly like a stuck import. Compose's default list already matches. The
-alert evaluation task has no route of its own and lands on `default`, which is why the
-per-minute `alert-evaluation` entry in the beat schedule runs without a queue change.
+consumed, which looks exactly like a stuck import. Compose's default list already matches, and
+`deploy-ubuntu24.sh` refuses to deploy when the effective `CELERY_QUEUES` (root `.env` override,
+else the compose default) is missing any of `default,imports,quality,ml,agent,rag` — a superset
+is fine, a subset is fatal. The alert evaluation task is routed explicitly to `agent`
+(`TASK_ROUTES` in `app/workers/celery_app.py`), so the per-minute `alert-evaluation` beat entry
+runs on the same queue as the AI reports, not on `default`.
 
 `CELERY_BEAT_SCHEDULER` must be `celery.beat.PersistentScheduler`. Compose's own default is
-`redbeat.RedBeatScheduler` and `redbeat` is not in `ai-engine/requirements.txt`, so with the
-variable unset the beat container crash-loops with "Cannot load the scheduler class" and the
-three scheduled entries (a nightly sync at 01:15, an hourly AI report, and the per-minute
-alert evaluation) never run.
+already that value; `redbeat` is not in `ai-engine/requirements.txt`, so switching the variable
+to `redbeat.RedBeatScheduler` crash-loops celery-beat with "Cannot load the scheduler class" and
+the three scheduled entries (a nightly sync at 01:15, an hourly AI report, and the per-minute
+alert evaluation) never run. The three entries live in `app/workers/celery_app.py`
+(`nightly-data-sync`, `hourly-ai-report`, `alert-evaluation`).
+
+Process supervision beyond `restart: unless-stopped`: `laravel-queue`, `laravel-schedule`,
+`celery-worker` and `celery-beat` now carry lightweight process-level healthchecks in
+`docker-compose.yml` (`ps` for the PHP services, `/proc` + `python` for the Celery ones — the
+images guarantee those tools, while `celery inspect ping` was rejected because it needs the
+broker on every probe). A wedged-but-alive worker still passes its probe; that case is observed
+as queue depth in Redis, never as health. `deploy-ubuntu24.sh` waits on all eight healthchecked
+services (`postgres redis laravel laravel-queue laravel-schedule fastapi celery-worker celery-beat
+nginx`); `prometheus`/`grafana` carry no healthcheck (their images guarantee no probe tool) and
+are only required to be Up. No hard `mem_limit`/`cpus` are set: a 500 MB upload plus ML training
+bursts legitimately exceed a modest static cap, and the leak control is `queue:work --max-time=3600`
+(hourly recycle) instead.
+
+Migrations run in two systems and both are fatal in the deploy script: `php artisan migrate
+--force` covers every Laravel file in `application/database/migrations/` (users, datasets, chat,
+audit, catalog `010000`, quality `020000`, query indexes `000001`, perf indexes `050000`), and
+`alembic upgrade head` covers the single revision master generates from the agents' DDL specs at
+integration. The Prometheus alert rules ride along untouched: `alert-rules.yml` is mounted
+read-only into the Prometheus container and evaluated via `rule_files` — after editing it, reload
+without restart (`curl -X POST http://localhost:9090/-/reload`), no rebuild needed.
+
+Static gates before any deploy (no running stack needed):
+
+```bash
+make verify            # verify-routing + verify-env + verify-contract
+make snapshot          # tar of the datasets + models volumes into BACKUP_DIR
+```
 
 ## 5. Applying updates
 

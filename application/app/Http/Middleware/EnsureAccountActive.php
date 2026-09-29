@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use Closure;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -20,6 +21,13 @@ class EnsureAccountActive
         $user = $request->user();
 
         if ($user !== null && ! $user->is_active) {
+            // Audit-only: the 403 below is unchanged.
+            Log::warning('auth.inactive_denied', [
+                'user_id' => $user->getKey(),
+                'route' => $request->path(),
+                'ip' => $request->ip(),
+            ]);
+
             if ($request->expectsJson()) {
                 return response()->json([
                     'message' => 'This account is deactivated.',

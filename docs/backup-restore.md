@@ -50,19 +50,29 @@ What the script does:
 `deploy-ubuntu24.sh` installs the cron entry: `0 2 * * *` as the `aidata` user, writing to
 `$APP_DIR/backups/cron.log`, rotated by logrotate.
 
-Verify a backup immediately — the script does not:
+Verify a backup immediately — the script validates its own output before renaming it into
+place (header + SQL + `gzip -t`), but re-proving a STORED file is a separate operation:
 
 ```bash
 ls -lh backups/
+bash infrastructure/scripts/backup.sh --verify-only backups/aidata_20260928_020000.sql.gz
+# or: bash infrastructure/scripts/restore.sh --verify-only backups/aidata_20260928_020000.sql.gz
+# both print RESULT=verified and exit 0; anything else is a refusal with the reason on stderr
 gzip -t backups/aidata_20260928_020000.sql.gz && echo "gzip ok"
 zcat backups/aidata_20260928_020000.sql.gz | grep -c 'CREATE TABLE'
 ```
+
+The manifest now carries a machine-readable `files_in_dump=no` line: the dump covers the
+database only, and a parser must not mistake a valid dump for a complete backup. Pair every
+dump with `make snapshot` (§5) on the same schedule.
 
 ## 3. Restore
 
 ```bash
 make restore FILE=backups/aidata_20260928_020000.sql.gz
 # or: bash infrastructure/scripts/restore.sh backups/aidata_20260928_020000.sql.gz
+# dry validation first (no docker, no DB, no prompt, exit 0 = would be accepted):
+bash infrastructure/scripts/restore.sh --verify-only backups/aidata_20260928_020000.sql.gz
 ```
 
 The script resolves the path, checks it exists, sources `.env` for the database name, asks for
@@ -112,6 +122,8 @@ WHERE table_name = 'audit_logs' ORDER BY ordinal_position;
 schedule as the database, and before any upgrade:
 
 ```bash
+make snapshot
+# equivalent, spelled out:
 docker run --rm --volumes-from aidata-laravel -v $(pwd)/backups:/bk alpine \
   tar czf /bk/files_$(date +%Y%m%d).tgz /var/www/html/storage/app/datasets
 

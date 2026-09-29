@@ -233,8 +233,41 @@ Actions emitted by the current code: `auth.api_login`, `auth.api_logout`, `auth.
 `PlatformHealth::LARAVEL_TABLES` checks 12 of them; it does not list
 `password_reset_tokens`.
 
-## 9. Conventions
+## 9. Data catalog (Laravel, migration `2026_09_30_010000_*`, owner A1)
 
+- `dataset_versions(id, dataset_id FK datasets.id cascadeOnDelete, version,
+  schema_snapshot JSON, schema_hash VARCHAR(64), row_count, created_by FK
+  users.id nullOnDelete, notes TEXT, timestamps)` — one row per registered
+  snapshot, numbered 1, 2, … per dataset. Unique `(dataset_id, version)`,
+  index on `dataset_id`.
+- `column_metadata(id, dataset_id FK datasets.id cascadeOnDelete, name,
+  dtype, nullable BOOLEAN, is_pii BOOLEAN, sensitivity VARCHAR(32) default
+  `internal` (`low|internal|confidential|restricted`), business_description
+  TEXT, distinct_count, null_pct FLOAT, min_value VARCHAR(191),
+  max_value VARCHAR(191), timestamps)` — the per-column registry.
+  `min_value`/`max_value` are strings so one column pair covers dates,
+  numbers and text. Unique `(dataset_id, name)`, index on `dataset_id`.
+  Table name is the literal `column_metadata` (declared via `$table` on the
+  model, not the pluralizer).
+- `data_lineages(id, source_type VARCHAR(64), source_id VARCHAR(191),
+  target_type VARCHAR(64), target_id VARCHAR(191), transform TEXT,
+  run_reference VARCHAR(191), timestamps)` — directed lineage edges. Ids are
+  strings so `import_job:42`, `dataset:<uuid>`, `table:fact_sales` and
+  `model:churn:v3` share one table. Indexed on `(source_type, source_id)`,
+  `(target_type, target_id)` and `run_reference`.
+- `data_contracts(id, dataset_id FK datasets.id cascadeOnDelete UNIQUE, owner
+  VARCHAR(191), schema_hash VARCHAR(64), freshness_sla_hours default 72,
+  quality_threshold FLOAT default `config('ai_engine.quality_threshold')`,
+  is_active BOOLEAN default `true`, timestamps)` — one row per dataset,
+  indexed on `is_active`.
+
+All four use `json` columns (text on sqlite, JSONB-equivalent on pgsql) and
+are created in a single migration so `RefreshDatabase` picks them up
+together. Catalog mutations emit `catalog.version_registered`,
+`catalog.column_annotated`, `catalog.lineage_recorded` and
+`catalog.contract_upserted` audit actions (see §7/`audit_logs`).
+
+## 10. Conventions
 - `dataset_id` and `import_job_id` thread the pipeline, but as plain integers without foreign
   keys across the service boundary.
 - Money and measures are `float` / `double precision` in the engine, not `numeric`. Do not

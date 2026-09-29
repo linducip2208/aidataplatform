@@ -52,6 +52,219 @@ MAX_CITATIONS_IN_PROMPT = 8
 EXCERPT_CHARS = 1200
 MIN_SCORE = 0.0
 
+# --- hybrid search + rerank ---------------------------------------------------
+# Retrieval fuses two signals over the same candidate chunks:
+#
+# * ``vector``: cosine between the query embedding and the stored chunk
+#   embedding (0 when either side has no usable vector).
+# * ``keyword``: BM25-lite over chunk text (saturated tf, smoothed idf,
+#   length-normalised), which needs no model and no index.
+#
+# Both are max-normalised over the candidate set and fused as
+# ``FUSION_ALPHA * vector + (1 - FUSION_ALPHA) * keyword``. The vector wins
+# ties on meaning; the keyword wins on exact terms (invoice numbers, product
+# codes) that embeddings blur together.
+FUSION_ALPHA = 0.65
+BM25_K1 = 1.2
+BM25_B = 0.75
+
+# Feature-based rerank weights (cross-encoder-free). No rerank model is
+# installed in this service (no torch/sentence-transformers — see
+# requirements.txt), so ordering is a deterministic re-score:
+# ``RERANK_WEIGHTS["fused"] * fused + ["coverage"] * term_coverage +
+# ["phrase"] * exact_phrase + ["length"] * length_prior``. Rerank only
+# reorders — it never adds, drops or rewrites a candidate.
+RERANK_WEIGHTS = {"fused": 0.55, "coverage": 0.25, "phrase": 0.15,
+                  "length": 0.05}
+RERANK_IDEAL_CHARS = 600
+
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+_PHRASE_BONUS_EXACT = 1.0
+_PHRASE_BONUS_PARTIAL = 0.4
+
+
+def _tokens(text: str) -> List[str]:
+    """Lowercase alphanumeric tokens; the unit BM25 and coverage share."""
+    return _TOKEN_RE.findall(str(text or "").lower())
+
+
+def _bm25_lite(query_terms: List[str], chunk_terms: List[str], chunk_len: int,
+               avg_len: float, doc_freq: Dict[str, int], n_docs: int) -> float:
+    """Saturated-tf, smoothed-idf, length-normalised keyword score.
+
+    ``doc_freq`` counts chunks containing each term over the scanned set, so
+    idf is corpus-relative without an index: a term in every chunk scores ~0,
+    a term in one chunk scores ~ln(n). Deterministic in the inputs.
+    """
+    if not query_terms or n_docs <= 0:
+        return 0.0
+    tf: Dict[str, int] = {}
+    for tok in chunk_terms:
+        tf[tok] = tf.get(tok, 0) + 1
+    norm_len = (chunk_len / avg_len) if avg_len > 0 else 1.0
+    score = 0.0
+    for term in set(query_terms):
+        freq = tf.get(term, 0)
+        if not freq:
+            continue
+        df = max(1, doc_freq.get(term, 1))
+        idf = math.log(1.0 + (n_docs - df + 0.5) / (df + 0.5))
+        denom = freq + BM25_K1 * (1.0 - BM25_B + BM25_B * norm_len)
+        score += idf * (freq * (BM25_K1 + 1.0)) / denom
+    return score
+
+
+def _normalise(scores: List[float]) -> List[float]:
+    """Scale to [0,1] by the maximum (negatives clamped to zero first).
+
+    Max- (not min-max) normalisation preserves absolute differences: a lone
+    candidate keeps its own score instead of collapsing to zero, so a
+    single-document corpus still retrieves, and uniformly weak sets stay weak
+    rather than being stretched to look certain. An all-zero set maps to all
+    zeros, which :data:`MIN_SCORE` then drops.
+    """
+    if not scores:
+        return []
+    clamped = [max(0.0, s) for s in scores]
+    high = max(clamped)
+    if high <= 0.0:
+        return [0.0 for _ in scores]
+    return [s / high for s in clamped]
+
+
+def _term_coverage(query_terms: List[str], chunk_set: set) -> float:
+    """Fraction of distinct query terms present in the chunk (0..1)."""
+    if not query_terms:
+        return 0.0
+    distinct = set(query_terms)
+    return sum(1 for t in distinct if t in chunk_set) / len(distinct)
+
+
+def _phrase_bonus(question: str, text_lower: str) -> float:
+    """1.0 for the verbatim query phrase, 0.4 for a long word-run, else 0."""
+    needle = re.sub(r"\s+", " ", str(question or "").lower()).strip()
+    if len(needle) >= 4 and needle in text_lower:
+        return _PHRASE_BONUS_EXACT
+    words = needle.split()
+    if len(words) >= 3:
+        run = " ".join(words[:4])
+        if run in text_lower:
+            return _PHRASE_BONUS_PARTIAL
+    return 0.0
+
+
+def _length_prior(chars: int) -> float:
+    """Peak at :data:`RERANK_IDEAL_CHARS`, decaying both ways (0..1).
+
+    Very short chunks rarely answer anything; very long ones dilute the
+    match. The prior is gentle on purpose — 5% of the rerank weight — so it
+    breaks ties rather than overriding evidence.
+    """
+    if chars <= 0:
+        return 0.0
+    ratio = chars / RERANK_IDEAL_CHARS
+    if ratio >= 1.0:
+        return 1.0 / ratio
+    return ratio
+
+
+def _rerank(question: str, query_terms: List[str],
+            scored: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Reorder ``scored`` with the feature weights in :data:`RERANK_WEIGHTS`.
+
+    Each row must carry ``fused`` and ``content``; gains ``rerank`` (the
+    re-score) and ``features`` (the four components, for auditability).
+    Stable-sorted, so equal re-scores keep their fused order: rerank is a
+    preference, not a shuffle.
+    """
+    out: List[Dict[str, Any]] = []
+    for row in scored:
+        text = str(row.get("content") or "")
+        text_lower = text.lower()
+        chunk_terms = _tokens(text)
+        coverage = _term_coverage(query_terms, set(chunk_terms))
+        phrase = _phrase_bonus(question, text_lower)
+        length = _length_prior(len(text))
+        score = (RERANK_WEIGHTS["fused"] * float(row.get("fused") or 0.0)
+                 + RERANK_WEIGHTS["coverage"] * coverage
+                 + RERANK_WEIGHTS["phrase"] * phrase
+                 + RERANK_WEIGHTS["length"] * length)
+        row = dict(row)
+        row["rerank"] = round(score, 6)
+        row["features"] = {"fused": round(float(row.get("fused") or 0.0), 6),
+                           "coverage": round(coverage, 4),
+                           "phrase": phrase, "length": round(length, 4)}
+        out.append(row)
+    out.sort(key=lambda r: r["rerank"], reverse=True)
+    return out
+
+
+def _maybe_cross_encoder_rerank(question: str,
+                                scored: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
+    """Use a cross-encoder rerank model only when one is already installed.
+
+    No model is installed in this service and none is ever downloaded here
+    (no network fetch, no pip install at runtime): when the import fails this
+    returns ``None`` and the caller keeps the feature-based order. The hook
+    exists so a future image with a model benefits without a code change.
+    """
+    try:
+        from sentence_transformers import CrossEncoder  # type: ignore
+    except Exception:
+        return None
+    try:
+        model = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+        pairs = [(question, str(r.get("content") or "")) for r in scored]
+        scores = model.predict(pairs)
+    except Exception:
+        return None
+    out = [dict(r) for r in scored]
+    for row, score in zip(out, scores):
+        try:
+            row["rerank"] = round(float(score), 6)
+            row["features"] = {**(row.get("features") or {}), "cross_encoder": True}
+        except Exception:
+            pass
+    out.sort(key=lambda r: float(r.get("rerank") or 0.0), reverse=True)
+    return out
+
+
+def _char_offsets(question: str, query_terms: List[str], text: str) -> Tuple[Any, Any]:
+    """Within-chunk char offsets of the earliest query-term hit.
+
+    Returns ``(char_start, char_end)`` into ``text`` such that
+    ``text[char_start:char_end].lower()`` is the matched term — verifiable by
+    the caller — or ``(None, None)`` when no query term occurs verbatim, in
+    which case the citation still stands on its vector score.
+    """
+    lowered = str(text or "").lower()
+    best: Optional[Tuple[int, int]] = None
+    for term in set(query_terms):
+        if len(term) < 2:
+            continue
+        pos = lowered.find(term)
+        if pos >= 0 and (best is None or pos < best[0]):
+            best = (pos, pos + len(term))
+    if best is None:
+        return None, None
+    return best
+
+
+def _confidence(top_score: float, coverage: float, n_hits: int,
+                degraded: bool) -> float:
+    """Deterministic 0..1 confidence for a shaped answer.
+
+    Anchored on the top fused/rerank score, pulled toward the query-term
+    coverage of that hit, zeroed when nothing matched, and capped at 0.6 on a
+    degraded (keyword-only) run so an offline answer never looks certain.
+    """
+    if n_hits <= 0:
+        return 0.0
+    value = 0.6 * max(0.0, min(1.0, top_score)) + 0.4 * max(0.0, min(1.0, coverage))
+    if degraded:
+        value = min(value, 0.6)
+    return round(value, 4)
+
 _SYSTEM_PROMPT = (
     "Kamu asisten analitik berbasis dokumen.\n"
     "Aturan:\n"
@@ -422,28 +635,45 @@ def _grounded_answer(query_text: str, hits: List[Dict[str, Any]], note: str = ""
     return "\n".join(lines)[:MAX_ANSWER_CHARS]
 
 
-def query(query_text: str, top_k: int = DEFAULT_TOP_K, db_session=None) -> Dict[str, Any]:
+def query(query_text: str, top_k: int = DEFAULT_TOP_K, db_session=None,
+          hybrid: bool = True, rerank: bool = True) -> Dict[str, Any]:
     """Retrieve the best matching chunks and ground an answer in them.
 
-    Returns ``{"answer": str, "citations": [...], "chunks": [...], "n_results": int}``.
-    Each citation is ``{"content": str, "score": float, "document_id": int, "chunk_index":
-    int}``; ``chunks`` is the same list under the alias the Laravel client also accepts.
+    Returns ``{"answer": str, "evidence": [...], "citations": [...],
+    "chunks": [...], "n_results": int, "confidence": float, "limitations":
+    [...]}``. ``chunks`` is the legacy alias of ``evidence`` that the Laravel
+    client also accepts; ``evidence`` rows carry the full content plus the
+    score breakdown (``vector``, ``keyword``, ``fused``, ``rerank``), while
+    ``citations`` are the compact references ``{"chunk_id", "document_id",
+    "chunk_index", "source", "title", "score", "char_start", "char_end"}``
+    with within-chunk character offsets of the earliest query-term hit
+    (``None``/``None`` when the match is purely semantic). ``confidence`` is
+    0..1 (0 when nothing matched); ``limitations`` names every degradation
+    (keyword-only run, scan-window bound, rerank skipped).
 
-    The scan is a bounded Python pass over the :data:`SCAN_LIMIT` newest chunks, newest
-    document first. The bound is the price of not having an ANN index: past it, older
-    chunks are simply not read, so the ordering is what keeps a freshly ingested document
-    inside the window instead of leaving that to the order the planner happens to emit.
-    The projection carries the five columns the scoring loop reads and nothing else, so
-    2000 rows arrive as five scalars rather than 2000 ORM instances. ``top_k`` is clamped
-    because this function is also called directly by the Celery task. The session is the
-    caller's: it is read here, never closed.
+    Retrieval is a hybrid of vector cosine and BM25-lite keyword scoring over
+    the :data:`SCAN_LIMIT` newest chunks, fused as ``FUSION_ALPHA * vector +
+    (1 - FUSION_ALPHA) * keyword`` after per-set min-max normalisation. With
+    ``hybrid=False`` the run is vector-only (plus the legacy ``+0.05``
+    verbatim boost); with ``rerank=False`` the fused order stands. Rerank is
+    the feature-based re-score in :data:`RERANK_WEIGHTS` unless a
+    cross-encoder is installed, in which case it is used instead — neither
+    path ever adds or drops a candidate.
 
-    A chunk is compared by cosine only when its recorded embedding width matches the query
-    vector's; one indexed by a different model, or written before the width was recorded,
-    falls back to keyword scoring instead of being ranked on unrelated dimensions. Chunks
-    that score zero are dropped, so a question matching nothing returns the "no match"
-    answer rather than an arbitrary document. With the embedding backend down the query
-    still returns this shape, degraded to keywords, and says so in the answer.
+    The scan is a bounded Python pass, newest document first: past the bound,
+    older chunks are simply not read. The projection carries the columns the
+    scoring loop reads plus the document title/source for citations, so rows
+    arrive as scalars rather than ORM instances. ``top_k`` is clamped because
+    this function is also called directly by the Celery task. The session is
+    the caller's: it is read here, never closed.
+
+    A chunk is compared by cosine only when its recorded embedding width
+    matches the query vector's; one indexed by a different model falls back
+    to keyword scoring instead of being ranked on unrelated dimensions.
+    Chunks that score zero are dropped, so a question matching nothing
+    returns the "no match" answer (confidence 0) rather than an arbitrary
+    document. With the embedding backend down the query still returns this
+    shape, degraded to keywords, and says so in the answer and limitations.
     """
     question = str(query_text or "").strip()
     try:
@@ -453,47 +683,124 @@ def query(query_text: str, top_k: int = DEFAULT_TOP_K, db_session=None) -> Dict[
     limit = max(1, min(MAX_TOP_K, limit))
     if db_session is None:
         return {"answer": "Tidak ada koneksi database, tidak ada dokumen yang dicari.",
-                "citations": [], "chunks": [], "n_results": 0}
+                "evidence": [], "citations": [], "chunks": [], "n_results": 0,
+                "confidence": 0.0,
+                "limitations": ["no database session: nothing was searched"]}
 
     try:
-        from app.database.models import RagChunk
+        from app.database.models import RagChunk, RagDocument
 
-        rows = (db_session.query(RagChunk.content, RagChunk.document_id,
-                                 RagChunk.chunk_index, RagChunk.embedding, RagChunk.meta)
+        rows = (db_session.query(RagChunk.id, RagChunk.content, RagChunk.document_id,
+                                 RagChunk.chunk_index, RagChunk.embedding, RagChunk.meta,
+                                 RagDocument.title, RagDocument.source)
+                .outerjoin(RagDocument, RagChunk.document_id == RagDocument.id)
                 .order_by(RagChunk.document_id.desc(), RagChunk.chunk_index)
                 .limit(SCAN_LIMIT).all())
     except Exception:
         return {"answer": "Basis data dokumen tidak dapat dibaca.", "citations": [],
-                "chunks": [], "n_results": 0}
+                "evidence": [], "chunks": [], "n_results": 0, "confidence": 0.0,
+                "limitations": ["document store unreadable"]}
 
     q_emb: List[float] = []
     if question:
         q_vectors = _embed([question])
         q_emb = _as_vector(q_vectors[0]) if q_vectors else []
     width = len(q_emb)
-    needle = question.lower()
-    scored: List[Tuple[float, Dict[str, Any]]] = []
-    for content, document_id, chunk_index, embedding, meta in rows:
+    query_terms = _tokens(question)
+    chunk_term_lists = [_tokens(content or "") for _, content, *_ in rows]
+    doc_freq: Dict[str, int] = {}
+    for terms in chunk_term_lists:
+        for term in set(terms):
+            doc_freq[term] = doc_freq.get(term, 0) + 1
+    avg_len = (sum(len(t) for t in chunk_term_lists) / len(chunk_term_lists)
+               if chunk_term_lists else 0.0)
+    n_docs = len(rows)
+
+    vector_scores: List[float] = []
+    keyword_scores: List[float] = []
+    for i, (chunk_id, content, document_id, chunk_index, embedding, meta, title, source) in enumerate(rows):
         text = content or ""
-        contains = bool(needle) and needle in text.lower()
         stored = _as_vector(embedding) if _comparable(meta, width) else []
         if stored and q_emb:
-            score = _cosine(stored[:width], q_emb)
-            if contains:
-                score += 0.05  # small keyword rerank on top of cosine
+            vector_scores.append(_cosine(stored[:width], q_emb))
         else:
-            score = 1.0 if contains else 0.0
-        scored.append((score, {"content": _clip(text, MAX_CITATION_CHARS),
-                               "score": round(float(score), 4),
-                               "document_id": document_id,
-                               "chunk_index": chunk_index}))
-    scored.sort(key=lambda pair: pair[0], reverse=True)
-    hits = [row for score, row in scored if score > MIN_SCORE][:limit]
+            vector_scores.append(0.0)
+        keyword_scores.append(_bm25_lite(query_terms, chunk_term_lists[i],
+                                         len(chunk_term_lists[i]), avg_len,
+                                         doc_freq, n_docs))
+    norm_vector = _normalise(vector_scores)
+    norm_keyword = _normalise(keyword_scores)
 
-    notes = []
-    if question and not q_emb:
-        notes.append("Embedding tidak tersedia, pencarian memakai pencocokan kata saja.")
+    scored: List[Dict[str, Any]] = []
+    for i, (chunk_id, content, document_id, chunk_index, embedding, meta, title, source) in enumerate(rows):
+        text = content or ""
+        if hybrid:
+            fused = FUSION_ALPHA * norm_vector[i] + (1.0 - FUSION_ALPHA) * norm_keyword[i]
+        else:
+            # Vector-only legacy path: normalised cosine plus the verbatim
+            # +0.05 boost this module historically applied on top of it.
+            fused = norm_vector[i]
+            if question and question.lower() in text.lower():
+                fused = norm_vector[i] + 0.05
+        start, end = _char_offsets(question, query_terms, text)
+        scored.append({
+            "chunk_id": chunk_id, "content": _clip(text, MAX_CITATION_CHARS),
+            "score": round(float(fused), 4), "fused": round(float(fused), 6),
+            "vector": round(float(vector_scores[i]), 6),
+            "keyword": round(float(keyword_scores[i]), 6),
+            "document_id": document_id, "chunk_index": chunk_index,
+            "source": _clip(str(source or ""), MAX_SOURCE_CHARS) or "api",
+            "title": _clip(str(title or ""), MAX_TITLE_CHARS) or "untitled",
+            "char_start": start, "char_end": end,
+        })
+    scored.sort(key=lambda row: row["fused"], reverse=True)
+    ranked = [row for row in scored if row["fused"] > MIN_SCORE][:limit]
+
+    limitations: List[str] = []
+    degraded = not bool(q_emb) and bool(question)
+    if degraded:
+        limitations.append("Embedding tidak tersedia, pencarian memakai kata kunci (BM25-lite).")
     if len(rows) >= SCAN_LIMIT:
-        notes.append(f"Pencarian hanya membaca {SCAN_LIMIT} chunk terbaru.")
-    return {"answer": _grounded_answer(question, hits, " ".join(notes)), "citations": hits,
-            "chunks": hits, "n_results": len(hits)}
+        limitations.append(f"Pencarian hanya membaca {SCAN_LIMIT} chunk terbaru.")
+    rerank_used = False
+    if rerank and ranked:
+        ce = _maybe_cross_encoder_rerank(question, ranked)
+        if ce is not None:
+            ranked = ce[:limit]
+            limitations.append("Rerank memakai model cross-encoder lokal.")
+        else:
+            ranked = _rerank(question, query_terms, ranked)[:limit]
+        rerank_used = True
+    for row in ranked:
+        row["score"] = round(float(row.get("rerank", row["fused"])), 4)
+
+    hits = [{"content": row["content"], "score": row["score"],
+             "document_id": row["document_id"], "chunk_index": row["chunk_index"]}
+            for row in ranked]
+    citations = [{"chunk_id": row["chunk_id"], "document_id": row["document_id"],
+                  "chunk_index": row["chunk_index"], "source": row["source"],
+                  "title": row["title"], "score": row["score"],
+                  "char_start": row["char_start"], "char_end": row["char_end"]}
+                 for row in ranked]
+    evidence = [{k: row[k] for k in ("chunk_id", "content", "score", "vector",
+                                    "keyword", "fused", "rerank", "features",
+                                    "document_id", "chunk_index", "source",
+                                    "title", "char_start", "char_end")
+                 if k in row} for row in ranked]
+    top_coverage = 0.0
+    if ranked:
+        top_coverage = _term_coverage(query_terms, set(_tokens(ranked[0].get("content") or "")))
+    confidence = _confidence(ranked[0]["score"] if ranked else 0.0,
+                             top_coverage, len(ranked), degraded)
+    if not ranked:
+        limitations.append("Tidak ada chunk yang cocok di atas ambang skor.")
+    if not rerank:
+        limitations.append("Rerank dinonaktifkan (permintaan eksplisit).")
+    if not hybrid:
+        limitations.append("Pencarian vektor saja (hybrid dinonaktifkan).")
+    _ = rerank_used
+
+    notes = " ".join(limitations)
+    return {"answer": _grounded_answer(question, hits, notes), "evidence": evidence,
+            "citations": citations, "chunks": hits, "n_results": len(ranked),
+            "confidence": confidence, "limitations": limitations}

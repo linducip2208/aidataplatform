@@ -39,6 +39,9 @@ dist/
 .docker/
 
 # --- Models / datasets (large artifacts, never commit) ---
+# NOTE: artifact dirs are anchored to the repo root (`/models/` etc.) so the
+# rule never matches source dirs like `application/app/Models/` (Eloquent
+# models must be committed; that mistake silently dropped six model files).
 *.pt
 *.bin
 *.onnx
@@ -47,10 +50,18 @@ dist/
 *.joblib
 *.parquet
 *.csv.gz
-data/
-datasets/
-models/
-backups/
+/data/
+/datasets/
+/models/
+/backups/
+# Runtime artifact dirs below the root (uploads, trained artifacts, local DBs).
+ai-engine/datasets/
+ai-engine/models/
+application/storage/app/datasets/
+# Local SQLite databases (dev/test scratch files, never commit).
+*.db
+*.sqlite
+*.sqlite3
 *.sql.gz
 *.dump
 

@@ -7,11 +7,14 @@ appends.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import re
+import time
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Dict, Iterator, Optional
+from typing import Callable, Dict, Iterator, List, Optional
 
 import pandas as pd
 from sqlalchemy import text
@@ -192,31 +195,70 @@ def run_etl(
     db_session=None,
     progress: ProgressCb = None,
     chunksize: int = 20000,
+    *,
+    resume: bool = True,
+    skip_duplicates: bool = True,
+    content_hash_dedup: bool = True,
 ) -> Dict:
     """Stream a file through mapping, cleaning, quality checks and the warehouse.
 
     Idempotent per ``import_job_id``: every row this job previously wrote is
-    deleted before the new rows land, so re-running the same job id replaces
-    rather than appends and revenue is never double-counted. Each chunk is
-    loaded in its own transaction, so a mid-file failure leaves the job
-    re-runnable instead of half-applied.
+    deleted before the new rows land on a *fresh* run, so re-running the same
+    job id replaces rather than appends and revenue is never double-counted.
+    Each chunk is loaded in its own transaction, so a mid-file failure leaves
+    the job re-runnable instead of half-applied.
+
+    Enterprise behaviour (all backward compatible — the historic return keys
+    are unchanged, new keys are additive):
+
+    * **Checkpoints / resume**: after every committed chunk a row is written
+      to ``import_checkpoints`` (``job_id, chunk_index, rows_done, state``)
+      bound to the file's SHA-256. Re-running the same job after a crash
+      skips ``done`` chunks and continues where it stopped. Pass
+      ``resume=False`` for a clean restart (stale checkpoints are cleared and
+      the job's rows are purged again).
+    * **Duplicate detection**: a content hash over
+      ``file bytes + dataset_type + mappings`` (``dedup_key``) is compared
+      against previously completed jobs. A different job id importing
+      identical content is skipped without writing rows. Row-level exact
+      duplicates inside one file are dropped by content hash and counted in
+      ``skipped_duplicate_rows``.
+    * **Dead-letter records**: malformed source lines collected by the reader
+      plus every row that fails the resilient row-by-row retry are persisted
+      to ``dead_letter_records`` with ``(job_id, row_index, raw, reason)``.
+    * **Cancel flag**: the job row's ``status == 'cancelled'`` (written by
+      ``POST /imports/{id}/cancel``) is checked at every chunk boundary; the
+      loop stops and the status is preserved.
+    * **Metrics**: ``rows/s, chunks, error rate`` are returned in ``metrics``
+      and merged into the persisted report.
 
     Returns the report dict {import_job_id, dataset_type, total_rows,
-    processed_rows, error_rows, quality, error_log}. Raises on an unsupported
-    dataset_type rather than silently loading nothing.
+    processed_rows, error_rows, quality, error_log, metrics,
+    skipped_duplicate_rows, dead_letter_count, resumed_from, cancelled,
+    file_hash}. Raises on an unsupported dataset_type rather than silently
+    loading nothing.
     """
-    from app.ingestion.reader import iter_chunks
+    from app.ingestion.reader import drain_malformed_rows, iter_chunks
 
     if dataset_type not in DATASET_TYPES:
         raise ValueError(f"Unsupported dataset_type: {dataset_type!r}. "
                          f"Expected one of {sorted(DATASET_TYPES)}.")
 
     mappings = mappings or {}
+    t0 = time.monotonic()
     total_processed = 0
     total_errors = 0
+    skipped_dupe_rows = 0
+    dead_count = 0
     error_log: list[dict] = []
     quality_reports: list[dict] = []
     quality_weights: list[int] = []
+    resumed_from: list[int] = []
+    cancelled = False
+    chunks_done = 0
+    chunks_skipped = 0
+    chunks_seen = 0
+    seen_hashes: set[str] = set()
 
     def emit(p: float, msg: str):
         if progress:
@@ -245,44 +287,188 @@ def run_etl(
         log.error(f"import_job {import_job_id} aborted at {stage}: {type(exc).__name__}")
         return message
 
+    # File identity binds checkpoints and duplicate detection to exact bytes.
+    file_hash = _file_sha256(file_path)
+    dedup_key = hashlib.sha256(
+        f"{file_hash}|{dataset_type}|{json.dumps(mappings, sort_keys=True)}".encode("utf-8")
+    ).hexdigest()
+
+    if db_session is not None:
+        try:
+            from app.ingestion.models import ensure_enterprise_tables
+
+            ensure_enterprise_tables(db_session)
+        except Exception:
+            pass
+
+    # --- content-hash duplicate skip: another completed job, same bytes, same
+    # --- dataset_type and mappings -> nothing new to load.
+    duplicate_of: Optional[int] = None
+    if skip_duplicates and db_session is not None and import_job_id is not None and file_hash:
+        duplicate_of = _find_duplicate_job(db_session, import_job_id, dedup_key)
+        if duplicate_of is not None:
+            note = {"skipped_duplicate": True, "duplicate_of": duplicate_of,
+                    "file_hash": file_hash, "dedup_key": dedup_key,
+                    "score": 1.0, "breakdown": {}, "issues": [], "passed": True}
+            try:
+                _update_job(db_session, import_job_id, status="done", progress=1.0,
+                            processed_rows=0, error_rows=0, total_rows=0,
+                            report=note, error_log=[])
+            except Exception:
+                pass
+            emit(1.0, "duplicate skipped")
+            elapsed = max(1e-6, time.monotonic() - t0)
+            return {
+                "import_job_id": import_job_id, "dataset_type": dataset_type,
+                "total_rows": 0, "processed_rows": 0, "error_rows": 0,
+                "quality": note, "error_log": [],
+                "metrics": _metrics(0, 0, 0, 0, 0, 0, elapsed),
+                "skipped_duplicate_rows": 0, "skipped_duplicate": True,
+                "duplicate_of": duplicate_of, "dead_letter_count": 0,
+                "resumed_from": [], "cancelled": False, "file_hash": file_hash,
+            }
+
     estimated_rows = _estimate_rows(file_path)
     emit(0.02, "transform")
 
-    chunks_seen = 0
+    # --- resume set: chunks already done for these exact bytes.
+    done_chunks: set[int] = set()
+    cumulative = 0
+    if db_session is not None and import_job_id is not None and resume and file_hash:
+        from app.ingestion import checkpoints as _cp
+
+        done_chunks = _cp.completed_chunks(db_session, import_job_id, file_hash)
+        cumulative = _cp.last_rows_done(db_session, import_job_id, file_hash)
+        resumed_from = sorted(done_chunks)
+        total_processed = int(cumulative)
+    fresh_start = not bool(done_chunks)
+
+    def _commit_checkpoint(idx: int, rows: int, state: str) -> None:
+        if db_session is None or import_job_id is None:
+            return
+        try:
+            from app.ingestion import checkpoints as _cp
+
+            _cp.save_checkpoint(db_session, import_job_id, idx, rows, state, file_hash)
+            db_session.commit()
+        except Exception:
+            try:
+                db_session.rollback()
+            except Exception:
+                pass
+
     try:
         with _serialise_job(db_session, import_job_id):
-            # The delete runs before any insert and unconditionally for this job,
-            # so a rerun that stages zero rows cannot leave last run's revenue
-            # behind. It is inside the advisory lock because a concurrent run of
-            # the same job would otherwise interleave its purge with these
-            # inserts and double every fact row.
-            if db_session is not None and dataset_type in FACT_DATASETS:
+            # Fresh runs purge first (idempotency); resumed runs keep the rows
+            # written by the completed chunks and only replay the rest.
+            if db_session is not None and dataset_type in FACT_DATASETS and fresh_start:
                 _purge_job_rows(db_session, dataset_type, import_job_id)
                 db_session.commit()
+            if db_session is not None and import_job_id is not None and not resume:
+                from app.ingestion import checkpoints as _cp
+
+                _cp.clear_checkpoints(db_session, import_job_id)
+                try:
+                    db_session.commit()
+                except Exception:
+                    pass
+
+            # Drain any stale malformed rows buffered before this run started.
+            drain_malformed_rows()
 
             try:
                 for chunk in iter_chunks(file_path, chunksize=chunksize):
+                    idx = chunks_seen
                     chunks_seen += 1
+                    if idx in done_chunks:
+                        # Resumed: rows already in the warehouse; count them so
+                        # progress stays monotonic without re-reading anything.
+                        chunks_skipped += 1
+                        if estimated_rows > 0:
+                            emit(0.05 + 0.65 * min(1.0, (total_processed) / estimated_rows),
+                                 f"resumed: skipped chunk {idx} ({total_processed} rows)")
+                        else:
+                            emit(0.05 + 0.65 * (1 - 1 / (chunks_seen + 1)),
+                                 f"resumed: skipped chunk {idx}")
+                        continue
+                    # Cancel flag is checked at every chunk boundary.
+                    if db_session is not None and import_job_id is not None:
+                        from app.ingestion import checkpoints as _cp
+
+                        if _cp.is_cancelled(db_session, import_job_id):
+                            cancelled = True
+                            break
                     n_rows = int(len(chunk))
                     try:
                         if mappings:
                             chunk = apply_mapping(chunk, mappings)
                         chunk = _clean(chunk)
+                        # Row-level content-hash dedup inside this import.
+                        if content_hash_dedup and not chunk.empty:
+                            chunk, n_dupes = _drop_seen_rows(chunk, seen_hashes)
+                            skipped_dupe_rows += n_dupes
+                        # Malformed source lines the reader skipped for this chunk.
+                        malformed = drain_malformed_rows()
+                        if db_session is not None and import_job_id is not None:
+                            from app.ingestion import checkpoints as _cp2
+
+                            for bad in malformed:
+                                _cp2.add_dead_letter(db_session, import_job_id, -1,
+                                                     {"line": str(bad.get("line", ""))[:2000],
+                                                      "source": str(bad.get("source", ""))[:500]},
+                                                     f"malformed_row: {bad.get('reason', 'bad_line')}",
+                                                     chunk_index=idx)
+                                dead_count += 1
+                            if malformed:
+                                try:
+                                    db_session.commit()
+                                except Exception:
+                                    pass
+                        n_rows = int(len(chunk))
+                        if n_rows == 0:
+                            # Chunk reduced to nothing by cleaning/dedup: still
+                            # checkpoint it so resume does not revisit it.
+                            _commit_checkpoint(idx, total_processed, "done")
+                            chunks_done += 1
+                            continue
+                        _commit_checkpoint(idx, total_processed, "started")
                         q = run_quality_checks(chunk, dataset_type)
                         quality_reports.append(q)
                         quality_weights.append(n_rows)
+                        written = 0
                         if db_session is not None:
-                            _load_warehouse(db_session, chunk, dataset_type, import_job_id)
-                        total_processed += n_rows
+                            base = total_processed
+                            written, row_dead = _load_chunk_resilient(
+                                db_session, chunk, dataset_type, import_job_id, idx, base)
+                            if row_dead and import_job_id is not None:
+                                from app.ingestion import checkpoints as _cp3
+
+                                for d in row_dead:
+                                    _cp3.add_dead_letter(db_session, import_job_id, d["row_index"],
+                                                         d["raw"], d["reason"],
+                                                         chunk_index=d.get("chunk_index", idx))
+                                    dead_count += 1
+                                try:
+                                    db_session.commit()
+                                except Exception:
+                                    pass
+                            total_errors += len(row_dead)
+                            if row_dead:
+                                error_log.append({"chunk": idx, "error": "row_load_failed",
+                                                  "dead_rows": len(row_dead)})
+                        total_processed += int(written) if db_session is not None else n_rows
+                        chunks_done += 1
+                        _commit_checkpoint(idx, total_processed, "done")
                     except Exception as exc:
                         total_errors += n_rows
-                        error_log.append({"chunk": chunks_seen - 1, "error": _safe_error(exc)})
-                        log.error(f"chunk {chunks_seen - 1} failed: {_safe_error(exc)}")
+                        error_log.append({"chunk": idx, "error": _safe_error(exc)})
+                        log.error(f"chunk {idx} failed: {_safe_error(exc)}")
                         if db_session is not None:
                             try:
                                 db_session.rollback()
                             except Exception:
                                 pass
+                        _commit_checkpoint(idx, total_processed, "failed")
                     if estimated_rows > 0:
                         emit(0.05 + 0.65 * min(1.0, total_processed / estimated_rows),
                              f"transformed {total_processed}/{estimated_rows} rows")
@@ -294,19 +480,55 @@ def run_etl(
     except Exception as exc:
         raise RuntimeError(abort("lock", exc)) from exc
 
-    quality_agg = _merge_quality(quality_reports, quality_weights)
+    # Leftover malformed lines buffered after the last chunk.
     if db_session is not None and import_job_id is not None:
-        _update_job(
-            db_session, import_job_id,
-            status="done_with_errors" if error_log else ("done" if total_processed else "failed"),
-            progress=1.0,
-            processed_rows=total_processed,
-            error_rows=total_errors,
-            total_rows=total_processed + total_errors,
-            report=quality_agg,
-            error_log=error_log[:200],
-        )
-    emit(1.0, "done")
+        try:
+            from app.ingestion import checkpoints as _cp4
+
+            for bad in drain_malformed_rows():
+                _cp4.add_dead_letter(db_session, import_job_id, -1,
+                                     {"line": str(bad.get("line", ""))[:2000]},
+                                     f"malformed_row: {bad.get('reason', 'bad_line')}",
+                                     chunk_index=chunks_seen)
+                dead_count += 1
+            db_session.commit()
+        except Exception:
+            pass
+
+    elapsed = max(1e-6, time.monotonic() - t0)
+    metrics = _metrics(total_processed, total_errors, chunks_seen, chunks_done,
+                       chunks_skipped, skipped_dupe_rows, elapsed)
+    metrics["dead_letter_count"] = int(dead_count)
+    metrics["cancelled"] = bool(cancelled)
+    quality_agg = _merge_quality(quality_reports, quality_weights)
+    quality_agg["file_hash"] = file_hash
+    quality_agg["dedup_key"] = dedup_key
+    quality_agg["ingestion_metrics"] = dict(metrics)
+    if db_session is not None and import_job_id is not None:
+        if cancelled:
+            _update_job(
+                db_session, import_job_id,
+                status="cancelled",
+                progress=round(min(1.0, total_processed / max(1, estimated_rows or total_processed)), 4)
+                if estimated_rows else 0.5,
+                processed_rows=total_processed,
+                error_rows=total_errors,
+                total_rows=total_processed + total_errors,
+                report=quality_agg,
+                error_log=error_log[:200],
+            )
+        else:
+            _update_job(
+                db_session, import_job_id,
+                status="done_with_errors" if error_log else ("done" if total_processed else "failed"),
+                progress=1.0,
+                processed_rows=total_processed,
+                error_rows=total_errors,
+                total_rows=total_processed + total_errors,
+                report=quality_agg,
+                error_log=error_log[:200],
+            )
+    emit(1.0, "cancelled" if cancelled else "done")
     return {
         "import_job_id": import_job_id,
         "dataset_type": dataset_type,
@@ -315,6 +537,145 @@ def run_etl(
         "error_rows": total_errors,
         "quality": quality_agg,
         "error_log": error_log[:200],
+        "metrics": metrics,
+        "skipped_duplicate_rows": skipped_dupe_rows,
+        "dead_letter_count": int(dead_count),
+        "resumed_from": resumed_from,
+        "cancelled": bool(cancelled),
+        "file_hash": file_hash,
+    }
+
+
+def _file_sha256(file_path: str | Path) -> str:
+    """Stream a file's SHA-256 without loading it. Returns "" when unreadable."""
+    try:
+        h = hashlib.sha256()
+        with open(Path(file_path), "rb") as fh:
+            for block in iter(lambda: fh.read(1 << 20), b""):
+                h.update(block)
+        return h.hexdigest()
+    except Exception:
+        return ""
+
+
+def _find_duplicate_job(db_session, import_job_id: int, dedup_key: str) -> Optional[int]:
+    """Another completed job with the same content key, or None.
+
+    The key binds file bytes + dataset_type + mappings, so a genuinely
+    re-uploaded file with different mappings is never treated as a duplicate.
+    Bounded: only the 500 most recent completed jobs are inspected.
+    """
+    if not dedup_key:
+        return None
+    try:
+        from app.database.models import ImportJob
+
+        rows = db_session.query(ImportJob)\
+            .filter(ImportJob.id != import_job_id,
+                    ImportJob.status.in_(["done", "succeeded", "done_with_errors"]))\
+            .order_by(ImportJob.id.desc()).limit(500).all()
+        for job in rows:
+            try:
+                if isinstance(job.report, dict) and job.report.get("dedup_key") == dedup_key:
+                    return int(job.id)
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return None
+
+
+def _row_hash(rec: dict) -> str:
+    """Canonical content hash of one cleaned record for within-file dedup."""
+    try:
+        items = sorted((str(k), repr(v)) for k, v in rec.items())
+        return hashlib.sha256(repr(items).encode("utf-8", "replace")).hexdigest()
+    except Exception:
+        return ""
+
+
+def _drop_seen_rows(chunk: pd.DataFrame, seen: set[str]):
+    """Drop exact-duplicate rows already seen in this import. Returns the
+    filtered frame and the dropped count."""
+    try:
+        records = chunk.to_dict("records")
+    except Exception:
+        return chunk, 0
+    keep: List[int] = []
+    dupes = 0
+    for i, rec in enumerate(records):
+        h = _row_hash(rec if isinstance(rec, dict) else {"v": str(rec)})
+        if h and h in seen:
+            dupes += 1
+            continue
+        if h:
+            seen.add(h)
+        keep.append(i)
+    if dupes and keep:
+        return chunk.iloc[keep].reset_index(drop=True), dupes
+    if dupes and not keep:
+        return chunk.iloc[0:0], dupes
+    return chunk, 0
+
+
+def _load_chunk_resilient(session, df: pd.DataFrame, dataset_type: str,
+                          import_job_id: Optional[int], chunk_index: int,
+                          base_row_index: int):
+    """Load one chunk; on chunk failure retry row-by-row so a single bad row
+    becomes a dead-letter record instead of failing ``len(df)`` rows.
+
+    Returns (rows_written, dead_letters). The fast path is one transaction per
+    chunk (unchanged behaviour); the row-by-row slow path runs only for chunks
+    that failed, each row in its own transaction.
+    """
+    try:
+        written = _load_warehouse(session, df, dataset_type, import_job_id)
+        return int(written), []
+    except Exception as chunk_exc:
+        try:
+            session.rollback()
+        except Exception:
+            pass
+        pending_exc = chunk_exc
+    try:
+        records = df.to_dict("records") if not df.empty else []
+    except Exception:
+        records = []
+    written = 0
+    dead: List[Dict] = []
+    for offset in range(len(records)):
+        single = df.iloc[offset:offset + 1]
+        try:
+            written += int(_load_warehouse(session, single, dataset_type, import_job_id))
+        except Exception as exc:
+            try:
+                session.rollback()
+            except Exception:
+                pass
+            rec = records[offset]
+            dead.append({"row_index": base_row_index + offset, "chunk_index": chunk_index,
+                         "raw": rec if isinstance(rec, dict) else {"value": str(rec)},
+                         "reason": f"row_load_failed: {_safe_error(exc)}"})
+    if not records and not dead:
+        # The failure was not row-scoped (e.g. connection loss): re-raise the
+        # original chunk error so the chunk error path records it instead of
+        # silently writing zero rows.
+        raise pending_exc
+    return written, dead
+
+
+def _metrics(processed: int, errors: int, chunks_seen: int, chunks_done: int,
+             chunks_skipped: int, dupes: int, elapsed: float) -> Dict:
+    total = processed + errors
+    return {
+        "rows_per_sec": round(processed / elapsed, 2),
+        "chunks": int(chunks_seen),
+        "chunks_done": int(chunks_done),
+        "chunks_skipped": int(chunks_skipped),
+        "error_rate": round(errors / total, 4) if total else 0.0,
+        "elapsed_sec": round(elapsed, 3),
+        "processed_rows": int(processed),
+        "skipped_duplicate_rows": int(dupes),
     }
 
 

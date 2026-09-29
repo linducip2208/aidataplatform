@@ -113,3 +113,97 @@ or run `php artisan sync:import-status`.
   placeholder), an hourly AI report and the per-minute alert evaluation, none of which delete
   anything, so plan the cleanup yourself. `php artisan sync:import-status` reconciles existing
   rows rather than pruning them.
+
+## 6. Streaming reads (memory-safe)
+
+`ai-engine/app/ingestion/reader.py::iter_chunks` yields bounded `chunksize` frames and never
+materialises the whole file, except the small-file XML fallback noted inline. Format notes:
+
+- Legacy `.xls` (BIFF) is read with **xlrd**, never openpyxl, which only parses OOXML
+  workbooks and raises on the OLE2 container. `.xlsx` streams via openpyxl read-only mode.
+- CSV uses chardet-free encoding detection (`utf-8-sig` → `utf-8` → `latin-1`, with a
+  NUL-byte heuristic for UTF-16) and `csv.Sniffer` delimiter detection (`,`, `;`, tab,
+  `|`, `:` with a comma fallback). `encoding=`/`delimiter=` overrides are accepted.
+- Malformed CSV rows are **collected, not raised**: a pandas `on_bad_lines` callback buffers
+  them (see `drain_malformed_rows`) and the row is skipped, so one bad line never aborts an
+  import. The validator surfaces them as `row_errors`/warnings and the ETL persists them as
+  dead-letter records (§9).
+- Empty files and empty sheets yield zero chunks. A 0-byte file is still a validation error;
+  a valid container with no data rows is a warning.
+- `.jsonl`/`.ndjson` (one object per line) stream line by line; plain `.json` array documents
+  up to 32 MB take the fast path, larger ones stream as JSON-lines. Invalid lines are
+  collected like malformed CSV rows.
+- Parquet supports column projection: `iter_chunks(path, columns=[...])` pushes the
+  projection into `pyarrow.ParquetFile.iter_batches`. Unknown columns are ignored.
+- ZIPs extract the first supported member into a per-call temp dir that is always removed.
+
+## 7. Checkpoints and resume
+
+`run_etl` writes one `import_checkpoints` row per committed chunk — `job_id`, `chunk_index`
+(zero-based for a fixed `chunksize`), cumulative `rows_done`, `state`
+(`started`/`done`/`failed`) — bound to the file's SHA-256 (`file_hash`). Helpers live in
+`ai-engine/app/ingestion/checkpoints.py` (pure functions over a session; no-ops on `None`).
+
+- Re-running the same `import_job_id` after a crash **resumes**: `done` chunks for the
+  current file bytes are skipped, `started`/missing chunks replay. A changed file (different
+  hash) never resumes stale progress. Pass `resume=False` for a clean restart.
+- Fresh runs purge the job's fact rows first (idempotency); resumed runs keep the rows
+  written by completed chunks and only replay the rest. Each chunk commits atomically, so a
+  crash mid-chunk rolls its rows back and the replay is exact; the only residual window is a
+  kill between the chunk commit and the checkpoint commit, which replays one chunk.
+- Endpoints (new router `ai-engine/app/api/v1/ingestion.py`, service key, engine envelope):
+  `POST /imports/{job_id}/cancel`, `POST /imports/{job_id}/resume` (locates the file via the
+  job's `raw_uploads` row; accepts `stored_path`/`mappings`/`dataset_type`/`chunksize`
+  overrides and `clear_cancel`), `GET /imports/{job_id}/checkpoints`,
+  `GET /imports/{job_id}/dead-letter?limit=&offset=`.
+- The cancel flag is `import_jobs.status = 'cancelled'`, checked at every chunk boundary; a
+  cancelled run stops and keeps the status. `resume` on a cancelled job needs
+  `{"clear_cancel": true}`.
+- Laravel side: `application/app/Jobs/RunImportJob.php` (queue `imports`) drives one dataset
+  by uuid through the public `DatasetIngestionService::commit($dataset, false)` +
+  `syncStatus()` pair and the `AiEngineClient` import endpoints; `failed()` mirrors the
+  dataset to `failed` after all retries. No existing service was modified.
+
+## 8. Duplicate detection
+
+Two layers, both content-hash based:
+
+- **File level**: `dedup_key = sha256(file bytes + dataset_type + mappings)` is stored on the
+  job report. A *different* job importing identical content is skipped (`skipped_duplicate`,
+  `duplicate_of`) without writing rows. Opt out with `skip_duplicates=False`.
+- **Row level**: exact-duplicate rows inside one import are dropped by canonical row hash and
+  counted in `skipped_duplicate_rows` (the hash set is per run; across a resume boundary a
+  repeated row may reload — documented, not silent: the count only covers the current run).
+
+## 9. Dead-letter records
+
+Every failed row is persisted to `dead_letter_records` with `job_id`, `row_index` (global
+index in the import; `-1` for source lines the reader skipped), the JSON-normalised `raw`
+row and a `reason` (`malformed_row: ...` or `row_load_failed: ...`). Retrieval is
+`GET /imports/{job_id}/dead-letter` (paginated) or `checkpoints.list_dead_letters`.
+Chunk loading is two-phase: one transaction per chunk on the fast path; a failed chunk
+retries row-by-row so a single bad row quarantines exactly one record instead of failing
+`len(chunk)` rows.
+
+## 10. Ingestion metrics
+
+Every `run_etl` return carries a `metrics` dict — `rows_per_sec`, `chunks`, `chunks_done`,
+`chunks_skipped` (resume), `error_rate`, `elapsed_sec`, `processed_rows`,
+`skipped_duplicate_rows`, `dead_letter_count`, `cancelled` — also merged into the persisted
+job report under `ingestion_metrics` alongside `file_hash`/`dedup_key`. Historic return keys
+(`total_rows`, `processed_rows`, `error_rows`, `quality`, `error_log`) are unchanged.
+
+## 11. Connectors and schedules
+
+`ai-engine/app/ingestion/connectors.py` provides dependency-free chunked sources:
+
+- `DatabaseConnector(url, query=... | table=... + order_by=...)` streams any sync-driver
+  SQLAlchemy URL in `{offset}`/`{limit}` pages. Async-driver URLs are refused with the sync
+  URL to provide.
+- `RestApiConnector(base_url, endpoint, ...)` streams paginated `GET` (`page`/`per_page`,
+  `{"data": [...]}` or bare-list payloads) via httpx; tests inject `httpx.MockTransport`.
+- `ScheduledImport(name, cron, connector, config, last_run_at, enabled)` is a storage-agnostic
+  cron-spec record (`to_dict`/`from_dict`) with minute-granularity `is_due()`; invalid specs
+  are never due and never raise.
+- Where a live system or credential is missing, connectors raise `IntegrationBoundary`
+  naming exactly what must be configured. No connector fabricates rows.

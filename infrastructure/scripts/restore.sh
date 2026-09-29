@@ -2,6 +2,13 @@
 # AIDataPlatform restore: replay a backup dump into the Postgres service.
 #
 # Usage: bash infrastructure/scripts/restore.sh [--yes] <backup.sql.gz>
+#        bash infrastructure/scripts/restore.sh --verify-only <backup.sql.gz>
+#
+# --verify-only validates the archive (gzip integrity, pg_dump header, SQL
+# presence) and exits without touching Docker, the database, or the safety
+# dump. Exit 0 means "this file would be accepted for replay"; exit 1 means
+# "refused, with the reason on stderr". It exists so a cron job or a drill can
+# prove a backup is replayable without replaying it.
 #
 # What actually happens: the dump was taken with `pg_dump --clean --if-exists`,
 # so it contains DROP statements for the objects it knows about. Those objects
@@ -30,8 +37,10 @@
 #     database is wrong" cannot be reported as a success.
 #
 # EXIT CODES:
-#   0  the dump was replayed and the post-restore checks passed
-#   1  refused before touching the database (bad file, bad arguments)
+#   0  the dump was replayed and the post-restore checks passed (--verify-only:
+#      the archive passed every pre-replay check and would be accepted)
+#   1  refused before touching the database (bad file, bad arguments; for
+#      --verify-only: the archive failed validation)
 #   2  could not run: no docker, no Compose v2, or postgres is unreachable
 #   3  the replay FAILED and was rolled back - the database is unchanged
 #   4  the replay exited 0 but verification failed - the state is unknown;
@@ -56,27 +65,84 @@ die()        { echo "[restore] FATAL: $*" >&2; exit "$EXIT_REFUSED"; }
 cannot_run() { echo "[restore] FATAL: $*" >&2; exit "$EXIT_CANNOT_RUN"; }
 
 ASSUME_YES=0
+VERIFY_ONLY=0
 FILE=""
 for _arg in "$@"
 do
     case "$_arg" in
         -y | --yes) ASSUME_YES=1 ;;
+        --verify-only) VERIFY_ONLY=1 ;;
         -h | --help)
             echo "Usage: bash infrastructure/scripts/restore.sh [--yes] <backup.sql.gz>" >&2
+            echo "       bash infrastructure/scripts/restore.sh --verify-only <backup.sql.gz>" >&2
             exit "$EXIT_REFUSED"
             ;;
-        -*) die "unknown option '$_arg'; only --yes is accepted" ;;
+        -*) die "unknown option '$_arg'; only --yes and --verify-only are accepted" ;;
         *)  FILE="$_arg" ;;
     esac
 done
 FILE="${FILE:-${FILE:-}}"
 if [ -z "$FILE" ]; then
     echo "Usage: bash infrastructure/scripts/restore.sh [--yes] <backup.sql.gz>" >&2
+    echo "       bash infrastructure/scripts/restore.sh --verify-only <backup.sql.gz>" >&2
     echo "Available:" >&2
     ls -lh ./backups/*.sql.gz 2>/dev/null >&2 || echo "  (no backups found)" >&2
     exit "$EXIT_REFUSED"
 fi
 [ -f "$FILE" ] || die "file not found: $FILE"
+
+# ---------------------------------------------------------------------------
+# --verify-only: validate the archive and stop. No docker, no database, no
+# prompt, no safety dump -- the checks below are the same four the replay path
+# runs in section 1 (gzip integrity, decompress, pg_dump header, SQL present),
+# duplicated here on purpose so that verifying a file never requires a running
+# stack. Exit 0 = would be accepted for replay; exit 1 = refused with reason.
+# ---------------------------------------------------------------------------
+if [ "$VERIFY_ONLY" -eq 1 ]; then
+    if [ ! -s "$FILE" ]; then
+        die "$FILE is empty; there is nothing to restore"
+    fi
+    if ! gzip -t "$FILE" 2>/dev/null; then
+        die "$FILE failed 'gzip -t' (truncated or not a gzip file)"
+    fi
+    _vdir=${TMPDIR:-/tmp}
+    _vwork=$(mktemp -d "$_vdir/aidata-restore-verify.XXXXXX") || {
+        echo "[restore] FATAL: cannot create a scratch directory under '$_vdir'" >&2
+        exit "$EXIT_REFUSED"
+    }
+    case "$_vwork" in
+        "$_vdir"/aidata-restore-verify.*) ;;
+        *) echo "[restore] FATAL: unexpected scratch path '$_vwork'" >&2; exit "$EXIT_REFUSED" ;;
+    esac
+    _vsql="$_vwork/restore.sql"
+    _vrc=0
+    gunzip -c "$FILE" > "$_vsql" 2>"$_vwork/gunzip.err" || _vrc=$?
+    if [ "$_vrc" -ne 0 ]; then
+        _verr=$(tr '\n' ' ' < "$_vwork/gunzip.err" 2>/dev/null | cut -c1-200)
+        rm -rf "$_vwork"
+        die "cannot decompress $FILE (gunzip exit $_vrc): $_verr"
+    fi
+    if [ ! -s "$_vsql" ]; then
+        rm -rf "$_vwork"
+        die "$FILE decompressed to an empty file; it would be refused for replay"
+    fi
+    if ! grep -q 'PostgreSQL database dump' "$_vsql"; then
+        _vbytes=$(wc -c < "$_vsql" | tr -d ' ')
+        rm -rf "$_vwork"
+        die "$FILE decompressed to $_vbytes bytes with no 'PostgreSQL database dump' header; this is not a pg_dump output"
+    fi
+    if ! grep -qE '^(SET|CREATE|ALTER|COPY|DROP|LOCK|SELECT) ' "$_vsql"; then
+        rm -rf "$_vwork"
+        die "$FILE has the pg_dump header but no SQL statements; it looks truncated"
+    fi
+    _vbytes=$(wc -c < "$_vsql" | tr -d ' ')
+    _vtables=$(grep -c '^CREATE TABLE ' "$_vsql" || true)
+    _vcopy=$(grep -c '^COPY ' "$_vsql" || true)
+    rm -rf "$_vwork"
+    echo "[restore] RESULT=verified file=$FILE bytes_uncompressed=$_vbytes create_table=$_vtables copy_blocks=$_vcopy"
+    echo "[restore] note: the dump covers the database only; datasets/models files need a volume snapshot (docs/backup-restore.md section 5)."
+    exit "$EXIT_OK"
+fi
 
 if [ -f .env ]; then
     set -a
@@ -202,6 +268,7 @@ SQL_BYTES=$(wc -c < "$SQL_FILE" | tr -d ' ')
 TABLES_IN_DUMP=$(grep -c '^CREATE TABLE ' "$SQL_FILE" || true)
 COPY_BLOCKS_IN_DUMP=$(grep -c '^COPY ' "$SQL_FILE" || true)
 echo "[restore] archive verified: $SQL_BYTES bytes uncompressed, $TABLES_IN_DUMP CREATE TABLE, $COPY_BLOCKS_IN_DUMP COPY blocks"
+echo "[restore] note: the dump covers the database only; datasets/models files are NOT in it (volume snapshot, docs/backup-restore.md section 5)."
 if [ "$TABLES_IN_DUMP" -eq 0 ]; then
     # Legitimate for a dump of an empty database, but it is also what a
     # half-finished migration chain produces, so it must never be silent.

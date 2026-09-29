@@ -13,6 +13,7 @@ from app.core.logging import get_request_id
 from app.core.security import require_service_auth
 from app.database.connection import get_db
 from app.ml.registry import FLOW
+from app.schemas.ml import RollbackRequest
 
 router = APIRouter(tags=["models"])
 
@@ -112,3 +113,64 @@ def promote(model_id: int, body: PromoteRequest, db: Session = Depends(get_db),
                       code="NOT_FOUND", error_type="not_found",
                       resolution="Pastikan ID versi milik model tersebut.")
     return {"success": True, "data": res}
+
+
+@router.post("/models/{model_id}/rollback")
+def rollback(model_id: int, body: RollbackRequest | None = None,
+             db: Session = Depends(get_db),
+             _: str = Depends(require_service_auth)):
+    """Re-activate the most recent archived predecessor of the serving version.
+
+    The only path back from ``ARCHIVED``: ``promote`` keeps it terminal by
+    design, so recovery cannot silently re-promote the same broken version.
+    """
+    from app.ml import registry as reg
+
+    actor = (body.actor if body else "") or ""
+    note = (body.note if body else "") or ""
+    try:
+        res = reg.rollback(model_id, db, actor=actor, note=note)
+    except reg.UnknownModel:
+        return _error(404, "rollback",
+                      f"model {model_id} not found",
+                      code="NOT_FOUND", error_type="not_found",
+                      resolution="Pastikan ID model benar.")
+    except ValueError as exc:
+        return _error(422, "rollback", str(exc),
+                      code="NO_ROLLBACK_TARGET", error_type="validation",
+                      resolution="Tidak ada versi sebelumnya yang dapat dipulihkan.")
+    return {"success": True, "data": res}
+
+
+@router.get("/models/{model_id}/events")
+def events(model_id: int, db: Session = Depends(get_db),
+           _: str = Depends(require_service_auth)):
+    """Audit trail for a model: lifecycle, deployment and rollback entries in
+    order, plus the current deployment status of every version."""
+    from app.ml import registry as reg
+
+    try:
+        return {"success": True, "data": reg.list_events(model_id, db)}
+    except ValueError:
+        return _error(404, "events",
+                      f"model {model_id} not found",
+                      code="NOT_FOUND", error_type="not_found",
+                      resolution="Pastikan ID model benar.")
+
+
+@router.get("/models/{model_id}/detail")
+def detail(model_id: int, db: Session = Depends(get_db),
+           _: str = Depends(require_service_auth)):
+    """Complete metadata for a model: every version carries its version
+    string, training timestamp, dataset version, feature list, metrics,
+    params, artifact path, lifecycle status and deployment status. Fields
+    that were never recorded are ``null`` with no back-fill."""
+    from app.ml import registry as reg
+
+    try:
+        return {"success": True, "data": reg.model_detail(model_id, db)}
+    except ValueError:
+        return _error(404, "detail",
+                      f"model {model_id} not found",
+                      code="NOT_FOUND", error_type="not_found",
+                      resolution="Pastikan ID model benar.")

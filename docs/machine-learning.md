@@ -125,3 +125,98 @@ history to query.
 - Long-running or recurring training belongs in a Celery task
   (`app/workers/tasks.py` already has `train_model` routed to the `ml` queue); the HTTP
   handler is a thin wrapper over the same `app/ml/training.py` function.
+
+## 5. Experiments
+
+`POST /api/v1/training/experiments` pins the full training context — model type,
+dataset rows (or nothing), `dataset_ref`/`dataset_version` provenance, `feature_list`,
+`params`, and the split plan — then trains once on the full dataset through the
+same `train_model` dispatcher (so the artifact is a real registry version) while
+recording honest per-split metrics with the serving code paths:
+
+```bash
+curl -s -X POST http://localhost:8001/api/v1/training/experiments \
+  -H "X-Service-Key: $SERVICE_API_KEY" -H 'Content-Type: application/json' \
+  -d '{"model_type":"churn","name":"churn_q1_baseline",
+       "dataset_ref":"warehouse:fact_sales","dataset_version":"v2024-01",
+       "dataset":[{...}],"train_ratio":0.7,"val_ratio":0.15,"test_ratio":0.15,"seed":42}'
+```
+
+```json
+{"data": {"id": 11, "status": "DONE", "model_id": 7, "version_id": 9,
+          "split_config": {"strategy": "stratified", "sizes": {"train": 14, "validate": 3, "test": 3}},
+          "metrics": {"train": {"accuracy": 0.93, "f1": 0.91},
+                      "validate": {"accuracy": 1.0, "f1": 1.0},
+                      "test": {"accuracy": 1.0, "f1": 1.0}}}}
+```
+
+Split strategies (`app/ml/experiments.py::split_dataset`, deterministic per `seed`):
+
+| Strategy | When | Guarantee |
+|---|---|---|
+| `time_aware` | `forecast`, or any payload with a date column | chronological, contiguous; the future never leaks into train |
+| `stratified` | `churn` with a usable two-class label | class proportions preserved; plain shuffle when a class is too thin |
+| `random` | everything else | seeded shuffle |
+| `too_small_to_split` | fewer than 3 rows | everything stays in train, explicitly |
+
+With no dataset rows the experiment is stored as `PLANNED` with the split plan
+and a reason — never zero-filled metrics. Rows live in `ml_experiments`
+(DDL owned by master; SQLAlchemy spec in `app/ml/experiments.py::MLExperiment`).
+
+Compare two or more same-type experiments with
+`POST /api/v1/training/experiments/{id}/compare`
+`{"experiment_ids":[...],"metric":"f1","split":"validate","higher_is_better":true}`.
+Defaults per type are `forecast → validate.mae` (lower), `churn → validate.f1`
+(higher), `segmentation → train.silhouette` (higher), `anomaly →
+train.n_anomalies` (lower), `recommend → train.n_transactions` (higher); any of
+them can be overridden. Experiments missing the metric rank last with an
+explicit reason — a missing score never outranks a measured one and never
+becomes a zero. Promote the winner with
+`POST /api/v1/training/experiments/{id}/promote` (optionally `{"version_id":…}`
+to pick a sibling version), which is the registry `promote` to `PRODUCTION`.
+
+Laravel mirrors the flow: `GET /api/ml/experiments` (list),
+`POST /api/ml/experiments` (202, admin/analyst),
+`POST /api/ml/experiments/{id}/compare` (any role),
+`POST /api/ml/experiments/{id}/promote` (200, admin only),
+`POST /api/ml/batch-predict` (202, admin/analyst). The Models page shows the
+experiment table with per-split validation metrics, a promote button per
+experiment (admin), plus create-experiment and batch-prediction forms
+(analyst and admin).
+
+## 6. Batch prediction
+
+`POST /api/v1/training/batch-predict` scores rows in chunks with the serving
+version and persists the run:
+
+```bash
+curl -s -X POST http://localhost:8001/api/v1/training/batch-predict \
+  -H "X-Service-Key: $SERVICE_API_KEY" -H 'Content-Type: application/json' \
+  -d '{"model_type":"churn","model_name":"churn-model",
+       "dataset":[{...}],"chunk_size":500}'
+```
+
+`dataset` is a row array or `csv_text` with a header row; `chunk_size` is
+clamped to 1–5000 and the dataset to 50 000 rows (same ceiling as training).
+`model_id` + `version_id` pin an exact version, otherwise the named model's
+production artifact is used. `churn` without a production artifact is an
+explicit 404, not an empty score list. Anomaly and segmentation are stateless
+and fit per chunk — the summary says so (`chunked: true` with the caveat that
+detectors do not share cross-chunk context). Forecast rows each carry their own
+`history` list; rows without one are error rows, never silent drops.
+
+Every run writes a `prediction_runs` row (`input_summary` provenance,
+`output_summary` counts) and a `models/batch_{run_id}.json` artifact with the
+summary plus up to 10 000 predictions (`truncated: true` beyond that), so
+inference history is queryable for the first time.
+
+## 7. Forecast coverage
+
+`GET /api/v1/forecast/domains` lists the six coverage domains and the value
+columns each reads; `POST /api/v1/forecast/{domain}` forecasts one of
+`revenue`, `sales`, `demand`, `inventory`, `customers`, `operational` through
+the identical seasonal-naive+GBM path (the domain only selects which history
+column is normalised to `y`). A history carrying none of the domain's columns
+answers `method: "unsupported_shape"` with a reason naming the expected
+columns — an explicit non-result, never fabricated points. The base
+`POST /api/v1/forecast` is unchanged.

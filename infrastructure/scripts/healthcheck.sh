@@ -11,6 +11,9 @@
 #   laravel  POST /api/login             application/routes/api.php:22
 #   laravel  GET  /api/me                application/routes/api.php:26
 #   engine   GET  /api/v1/health         ai-engine/app/api/v1/health.py:12
+#   engine   GET  /api/v1/liveness       ai-engine/app/api/v1/health.py:41
+#                                        (trivial {"alive": true}, no DB/Redis;
+#                                        the fast control for the readiness probe)
 #   engine   GET  /api/v1/readiness      ai-engine/app/api/v1/health.py:17
 #                                        -> 200 even when NOT ready, so the
 #                                           body has to be read, not the code
@@ -265,6 +268,38 @@ case "$PC_STATUS" in
     unreachable) bad "engine /api/v1/health" "probe could not run: $(shorten "$PC_ERR")" ;;
     *)           bad "engine /api/v1/health" "http=$PC_CODE body=$(shorten "$PC_BODY")" ;;
 esac
+
+# ---------------------------------------------------------------------------
+# 4b) Engine liveness. Trivial by design (no DB, no Redis): if health fails but
+#     liveness passes, the process is up and a dependency is down -- read the
+#     readiness section, not the container log. Kept to one tiny python probe so
+#     the whole script stays fast.
+# ---------------------------------------------------------------------------
+echo "-- [4b] engine (GET /api/v1/liveness) --"
+_live=$(docker compose exec -T fastapi python -c '
+import sys, urllib.request
+try:
+    raw = urllib.request.urlopen("http://localhost:8000/api/v1/liveness", timeout=10).read().decode("utf-8", "replace")
+except Exception as exc:
+    print("UNREACHABLE:" + type(exc).__name__)
+    sys.exit(0)
+print("BODY:" + raw[:200])
+' 2>"$ERR_FILE")
+if [ "$?" -ne 0 ]; then
+    bad "engine /api/v1/liveness" "probe could not run: $(shorten "$(cat "$ERR_FILE" 2>/dev/null)")"
+else
+    case "$_live" in
+        *UNREACHABLE:*)
+            bad "engine /api/v1/liveness" "the engine did not answer (${_live#UNREACHABLE:})"
+            ;;
+        *'"alive"'*)
+            ok "engine /api/v1/liveness alive"
+            ;;
+        *)
+            bad "engine /api/v1/liveness" "unexpected body: $(shorten "$_live")"
+            ;;
+    esac
+fi
 
 # ---------------------------------------------------------------------------
 # 5) Engine dependencies. /api/v1/readiness answers 200 even when the database

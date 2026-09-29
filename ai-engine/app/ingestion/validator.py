@@ -7,7 +7,7 @@ from typing import Any, Dict, List
 
 from app.core.config import settings
 
-ALLOWED_EXTS = {".csv", ".xlsx", ".xls", ".json", ".xml", ".parquet", ".zip"}
+ALLOWED_EXTS = {".csv", ".xlsx", ".xls", ".json", ".jsonl", ".ndjson", ".xml", ".parquet", ".zip"}
 
 # Content signatures that can legitimately back one of ALLOWED_EXTS: the zip
 # container family (a bare .zip, and .xlsx/.docx which are zips) and the OLE2
@@ -89,19 +89,33 @@ def validate_file(path: str | Path) -> Dict[str, Any]:
             checksum = sha256_file(p)
         except OSError as exc:
             errors.append(f"File is unreadable: {exc}")
-    # malformed sniff: try reading first rows
+    # malformed sniff: stream the first rows with malformed-row tolerance.
+    # A single bad line must never fail validation: the reader collects bad
+    # lines into a buffer (see reader.drain_malformed_rows) and skips them, so
+    # they are reported here as row_errors / warnings and later persisted as
+    # dead-letter records by the ETL. Only an unreadable file is an error.
     row_errors: List[Dict[str, Any]] = []
-    if not errors and ext in (".csv", ".xlsx", ".xls", ".json", ".xml", ".parquet", ".zip"):
+    if not errors and ext in (".csv", ".xlsx", ".xls", ".json", ".jsonl", ".ndjson",
+                              ".xml", ".parquet", ".zip"):
         try:
-            from app.ingestion.reader import iter_chunks
+            from app.ingestion.reader import drain_malformed_rows, iter_chunks
 
             n = 0
             for chunk in iter_chunks(p, chunksize=1000):
                 n += len(chunk)
                 if n >= 1000:
                     break
-            if n == 0:
-                warnings.append("No data rows detected")
+            for bad in drain_malformed_rows():
+                row_errors.append({"row": bad.get("source", 0), "error": bad.get("reason", "bad_line"),
+                                   "line": str(bad.get("line", ""))[:500]})
+            if n == 0 and not row_errors:
+                # Empty file (0 data rows) or empty sheet: valid container, no
+                # rows. A warning, not an error — the commit loads zero rows
+                # and reports the job accordingly.
+                warnings.append("No data rows detected (empty file or empty sheet)")
+            elif row_errors:
+                warnings.append(f"{len(row_errors)} malformed row(s) will be skipped "
+                                f"(see row_errors / dead-letter records)")
         except Exception as exc:  # malformed
             errors.append(f"Malformed file, cannot parse: {exc}")
             row_errors.append({"row": 0, "error": str(exc)})

@@ -201,7 +201,38 @@ def _valid_service_key(key: Optional[str]) -> bool:
         return False
     if not key:
         return False
+    # Both sides encoded to UTF-8 bytes first: secrets.compare_digest raises
+    # TypeError on str operands containing non-ASCII, which would turn a wrong
+    # key into a 500 instead of a 401 (pinned by
+    # test_non_ascii_configured_key_compares_through_utf8_bytes).
     return secrets.compare_digest(key.encode("utf-8"), configured.encode("utf-8"))
+
+
+def log_auth_failure(
+    reason: str,
+    *,
+    header: Optional[str] = None,
+    has_key: bool = False,
+    has_bearer: bool = False,
+) -> None:
+    """Structured audit record for a rejected service-auth attempt.
+
+    The log carries the REASON and the shape of the attempt only — never the
+    presented value, never the configured secret, never a fingerprint that
+    could be replayed. `reason` is one of: `unconfigured`, `missing`, or
+    `invalid`. The JSON formatter in app.core.logging redacts anything
+    credential-shaped that a caller interpolates, so even a buggy reason
+    string cannot leak the key.
+    """
+    allowed = {"unconfigured", "missing", "invalid"}
+    safe_reason = reason if reason in allowed else "invalid"
+    log.warning(
+        "auth.failed reason=%s header=%s has_key=%d has_bearer=%d",
+        safe_reason,
+        header or SERVICE_KEY_HEADER,
+        1 if has_key else 0,
+        1 if has_bearer else 0,
+    )
 
 
 def _valid_bearer(token: str) -> Optional[str]:
@@ -234,6 +265,26 @@ async def require_service_auth(
         # also allow raw service key passed as bearer
         if _valid_service_key(credentials.credentials):
             return "service-key"
+    # Audit hook (A8): every rejection is logged with reason + attempt shape,
+    # never with a secret value. Branches are ordered so the reason names the
+    # actual failure: unconfigured first (nothing could succeed), then
+    # missing, then invalid.
+    if not configured_service_key():
+        log_auth_failure(
+            "unconfigured",
+            header=SERVICE_KEY_HEADER,
+            has_key=bool(x_service_key),
+            has_bearer=bool(credentials and credentials.credentials),
+        )
+    elif not x_service_key and not (credentials and credentials.credentials):
+        log_auth_failure("missing", header=SERVICE_KEY_HEADER)
+    else:
+        log_auth_failure(
+            "invalid",
+            header=SERVICE_KEY_HEADER,
+            has_key=bool(x_service_key),
+            has_bearer=bool(credentials and credentials.credentials),
+        )
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail=(

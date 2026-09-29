@@ -65,9 +65,11 @@ class AssistantController extends Controller
         $validated = $request->validate([
             'message' => ['required', 'string', 'max:4000'],
             'thread_id' => ['nullable', 'integer'],
+            'template' => ['nullable', 'string', 'max:64'],
         ], [], [
             'message' => 'pesan',
             'thread_id' => 'percakapan',
+            'template' => 'template',
         ]);
 
         $user = $request->user();
@@ -95,14 +97,28 @@ class AssistantController extends Controller
 
         $thread->update($this->threadCounters($thread));
 
-        $result = $engine->chat($message, $thread->ai_conversation_id);
+        $result = $engine->chat($message, $thread->ai_conversation_id, $this->templateContext($validated));
 
-        $thread->messages()->create([
+        $assistantMessage = $thread->messages()->create([
             'role' => 'assistant',
             'content' => (string) ($result['answer'] ?? ''),
             'evidence' => (array) ($result['evidence'] ?? []),
             'steps' => (int) ($result['steps'] ?? 0),
         ]);
+
+        // The engine's token/cost ledger summary for the turn. Stored on the
+        // `meta` JSON column (added by `2026_09_30_030000_*`), never merged
+        // into `evidence`, so the evidence readers and their tests keep
+        // seeing exactly what the engine returned. Encoded explicitly:
+        // `ChatMessage` carries no `meta` cast, and an uncast array would hit
+        // the driver as a literal "Array".
+        $usage = $result['usage'] ?? null;
+
+        if (is_array($usage) && $usage !== []) {
+            $assistantMessage->forceFill([
+                'meta' => json_encode($usage, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            ])->save();
+        }
 
         $attributes = $this->threadCounters($thread);
 
@@ -131,6 +147,22 @@ class AssistantController extends Controller
         return redirect()
             ->route('assistant.index')
             ->with('status', 'Percakapan dihapus.');
+    }
+
+    /**
+     * Prompt template key forwarded to the engine inside `context`.
+     *
+     * Absent means `[]`, exactly the body older clients sent — see
+     * `Api\AgentController::templateContext()` for the shared rationale.
+     *
+     * @param  array<string, mixed>  $validated
+     * @return array<string, mixed>
+     */
+    private function templateContext(array $validated): array
+    {
+        $template = trim((string) ($validated['template'] ?? ''));
+
+        return $template === '' ? [] : ['template' => $template];
     }
 
     /**

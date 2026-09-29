@@ -79,6 +79,28 @@ x-laravel-volumes: &laravel-volumes
   - models-cache:/var/www/html/storage/app/models
 
 services:
+  # Hardening notes (AGENT 9):
+  #   * Every service carries `restart: unless-stopped`; a process that exits is
+  #     restarted by the engine. Healthchecks below only mark Unhealthy, they do
+  #     not restart on their own -- restart comes from the policy.
+  #   * No hard `mem_limit`/`cpus` are set on purpose: a 500 MB upload (nginx
+  #     client_max_body_size) plus ML training bursts legitimately exceed any
+  #     modest static cap, and a killed worker looks identical to a stuck one.
+  #     The leak control is `queue:work --max-time=3600` (hourly recycle) plus
+  #     the worker/beat process probes below.
+  #   * queue/schedule/worker/beat listen on no port, so their probes are
+  #     process-level only. Each probe uses a tool the image is guaranteed to
+  #     have (BusyBox `ps` on the PHP image, /proc + python on the slim image).
+  #     A wedged-but-alive worker still passes; that case is observed as queue
+  #     depth in Redis (docs/monitoring.md section 5), never as a healthcheck.
+  #   * prometheus/grafana carry no healthcheck: neither image guarantees
+  #     curl/wget, and a probe that cannot run is worse than none (permanent
+  #     Unhealthy teaches the operator to ignore health). Container Up is the
+  #     signal; Prometheus self-health is `up{job="prometheus"}` on the dashboard.
+  #   * Loopback bindings (127.0.0.1:) on laravel/fastapi are intentional: those
+  #     ports bypass nginx, so 0.0.0.0 would expose them off-box. Volume names
+  #     keep the ${VOLUME_PREFIX:-aidata} prefix; every host value is
+  #     ${VAR:-default} interpolated from the root .env.
   postgres:
     image: pgvector/pgvector:pg18
     container_name: aidata-postgres
@@ -217,11 +239,18 @@ services:
     environment:
       <<: *laravel-environment
     volumes: *laravel-volumes
-    # No healthcheck, the same choice as celery-worker and celery-beat: this
-    # process listens on no port, and no artisan command reports on a running
-    # worker (Horizon is not a dependency). A dead worker is already restarted
-    # by the restart policy; a wedged one is visible as a queue depth that stops
-    # falling in Redis.
+    # Process-level only: this worker listens on no port and no artisan command
+    # reports on a running worker (Horizon is not a dependency; `queue:monitor`
+    # needs Horizon tables and would false-negative here). `ps` is BusyBox in
+    # the php:8.3-fpm-alpine image, so it always exists. A wedged-but-alive
+    # worker still passes here; that case is visible as a queue depth that stops
+    # falling in Redis (docs/monitoring.md section 5).
+    healthcheck:
+      test: ["CMD-SHELL", "ps aux | grep -q '[q]ueue:work' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     networks:
       - appnet
 
@@ -249,6 +278,10 @@ services:
     # withoutOverlapping() is honoured inside the schedule:run it spawns, and
     # --whisper keeps "no scheduled commands were ready" out of the logs at that
     # cadence.
+    # The engine is deliberately not a depends_on: both scheduled commands
+    # preflight it themselves and exit non-zero, and withoutOverlapping(30)
+    # releases the lock when the process ends, so an engine outage costs one
+    # failed run in the log rather than the whole scheduler.
     command:
       - php
       - artisan
@@ -257,13 +290,16 @@ services:
     environment:
       <<: *laravel-environment
     volumes: *laravel-volumes
-    # No healthcheck, like celery-beat: schedule:work is an infinite loop, so the
-    # only failure mode is exiting, which the restart policy already covers. A
-    # skipped minute is not observable from inside the container. The engine is
-    # deliberately not a depends_on either: both scheduled commands preflight it
-    # themselves and exit non-zero, and withoutOverlapping(30) releases the lock
-    # when the process ends, so an engine outage costs one failed run in the log
-    # rather than the whole scheduler.
+    # Process-level only, same reasoning as laravel-queue: schedule:work is an
+    # infinite loop that listens on no port, so the only failure mode the probe
+    # can see is "the process is gone" (exit is already covered by the restart
+    # policy). A skipped minute is not observable from inside the container.
+    healthcheck:
+      test: ["CMD-SHELL", "ps aux | grep -q '[s]chedule:work' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     networks:
       - appnet
 
@@ -377,6 +413,18 @@ services:
       - ./ai-engine:/code
       - datasets-data:/code/data/datasets
       - models-cache:/code/data/models
+    # Process-level only: the worker listens on no port. `celery inspect ping`
+    # was rejected as a probe: it needs the broker on every check, so a Redis
+    # blip marks a healthy worker unhealthy. /proc is kernel-provided and
+    # python IS the image (python:3.13-slim, no procps guarantee), so this probe
+    # has no package dependency. A wedged-but-alive worker still passes; watch
+    # queue depth in Redis (docs/monitoring.md section 5).
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import glob,sys; sys.exit(0 if any('celery' in open(f,errors='ignore').read() for f in glob.glob('/proc/[0-9]*/cmdline')) else 1)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     networks:
       - appnet
 
@@ -404,6 +452,19 @@ services:
       TZ: ${TZ:-Asia/Jakarta}
     volumes:
       - ./ai-engine:/code
+    # Process-level only: beat listens on no port and its --pidfile alone proves
+    # nothing (a path, not a process). Same /proc + python reasoning as the
+    # worker above; the match string is 'beat' so a worker process cannot satisfy
+    # this probe. A beat that exits is restarted by the policy; a beat that is
+    # alive but not scheduling is visible as missed entries (nightly sync at
+    # 01:15, hourly report, per-minute alert evaluation -- see
+    # ai-engine/app/workers/celery_app.py).
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import glob,sys; sys.exit(0 if any('beat' in open(f,errors='ignore').read() for f in glob.glob('/proc/[0-9]*/cmdline')) else 1)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     networks:
       - appnet
 
@@ -444,6 +505,10 @@ services:
       - --web.enable-lifecycle
     volumes:
       - ./infrastructure/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # Alert rules are evaluated inside Prometheus (rule_files in prometheus.yml
+      # points at this path). Read-only like the main config; edit the source
+      # file and reload with POST /-/reload (--web.enable-lifecycle above).
+      - ./infrastructure/monitoring/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
       - prometheus-data:/prometheus
     ports:
       - "${PROMETHEUS_PORT:-9090}:9090"

@@ -551,3 +551,91 @@ def forecast(history: List[Dict[str, Any]], horizon: int = 30,
         metrics["reason"] = "no forecast could be produced from the supplied history"
         return {"forecast": [], "method": "insufficient_data", "metrics": metrics}
     return {"forecast": preds, "method": fc.method, "metrics": metrics}
+
+
+#: Forecast coverage domains. Each maps to the value columns its history rows
+#: are expected to carry; the forecaster itself is the same seasonal-naive+GBM
+#: in every case, because that is the only forecaster this engine ships. A
+#: domain whose history carries none of its columns is reported as
+#: ``unsupported_shape`` — an explicit non-result, never a fabricated series.
+FORECAST_DOMAINS: Dict[str, Tuple[str, ...]] = {
+    "revenue": ("revenue", "total", "amount", "sales", "omzet", "y", "value", "yhat"),
+    "sales": ("sales", "quantity", "revenue", "y", "value"),
+    "demand": ("demand", "quantity", "units", "y", "value"),
+    "inventory": ("stock_qty", "stock", "inventory", "quantity", "y", "value"),
+    "customers": ("customers", "customer_count", "n_customers", "quantity", "y", "value"),
+    "operational": ("amount", "expenses", "cost", "operational", "value", "y"),
+}
+
+
+def resolve_domain_column(history: List[Dict[str, Any]],
+                          domain: str) -> Tuple[str | None, str | None]:
+    """Return ``(value_column, date_column)`` for ``domain``, or ``(None,
+    reason)`` when the history cannot support it.
+
+    Raises ``ValueError`` for an unknown domain, naming the supported ones.
+    """
+    key = str(domain or "").strip().lower()
+    if key not in FORECAST_DOMAINS:
+        raise ValueError(
+            "forecast domain must be one of "
+            + ", ".join(sorted(FORECAST_DOMAINS))
+            + f"; got {domain!r}"
+        )
+    rows = [r for r in (history or []) if isinstance(r, dict)]
+    if not rows:
+        return None, "no usable history points"
+    cols = {str(c).strip().lower(): c for r in rows for c in r.keys()}
+    preferred = next((cols[alias] for alias in FORECAST_DOMAINS[key] if alias in cols), None)
+    if preferred is None:
+        observed = sorted({str(c) for r in rows for c in r.keys()})
+        return None, (
+            f"domain {key!r} needs one of "
+            + ", ".join(FORECAST_DOMAINS[key])
+            + f"; observed columns: {', '.join(observed) or 'none'}"
+        )
+    date_col = next(
+        (c for c in rows[0].keys() if str(c).strip().lower() in DATE_ALIASES), None)
+    if date_col is None:
+        date_col = next(iter(rows[0].keys()))
+    return preferred, date_col
+
+
+def forecast_for_domain(history: List[Dict[str, Any]], horizon: int = 30,
+                        granularity: str = "daily", domain: str = "revenue") -> Dict[str, Any]:
+    """Forecast ``domain`` over ``history`` through the shared forecaster.
+
+    The domain's value column is normalised to ``y`` before forecasting, so
+    ``demand`` over ``quantity`` and ``inventory`` over ``stock_qty`` use the
+    identical, tested code path as ``revenue``. Returns the standard
+    ``{"forecast", "method", "metrics"}`` envelope; an unsupported shape
+    returns ``method="unsupported_shape"`` with ``metrics["domain"]`` and a
+    ``reason`` naming the expected columns.
+    """
+    key = str(domain or "").strip().lower()
+    if key not in FORECAST_DOMAINS:
+        raise ValueError(
+            "forecast domain must be one of "
+            + ", ".join(sorted(FORECAST_DOMAINS))
+            + f"; got {domain!r}"
+        )
+    rows = [r for r in (history or []) if isinstance(r, dict)]
+    if not rows:
+        res = forecast([], horizon, granularity)
+        res["metrics"] = {**res.get("metrics", {}), "domain": key}
+        return res
+    value_col, date_col = resolve_domain_column(rows, key)
+    if value_col is None:
+        try:
+            h = _validate_horizon(horizon)
+        except ValueError:
+            h = 30
+        return {"forecast": [], "method": "unsupported_shape",
+                "metrics": {"domain": key, "n_obs": 0, "reason": date_col}}
+    normalised = [{"date": r.get(date_col), "y": r.get(value_col)} for r in rows]
+    res = forecast(normalised, horizon, granularity)
+    if res.get("method") == "insufficient_data":
+        return res
+    res["metrics"] = {**res.get("metrics", {}), "domain": key,
+                      "value_column": str(value_col)}
+    return res

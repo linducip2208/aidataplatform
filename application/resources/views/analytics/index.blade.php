@@ -141,6 +141,91 @@
         </div>
     </x-card>
 
+    <x-card class="mb-6" title="Target & ambang KPI" description="Status tiap KPI terhadap target dan ambang peringatan dari mesin AI.">
+        @php $evaluated = $kpiEvaluated ?? []; @endphp
+        @if ($evaluated === [])
+            <x-empty-state
+                title="Definisi KPI belum tersedia"
+                description="Mesin AI tidak mengembalikan definisi target. Nilai KPI di atas tetap dapat dibaca."
+            />
+        @else
+            <x-table-wrapper label="Target dan ambang KPI">
+                <table class="app-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">KPI</th>
+                            <th scope="col" class="text-right">Nilai</th>
+                            <th scope="col" class="text-right">Target</th>
+                            <th scope="col">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach ($evaluated as $row)
+                            @php
+                                $status = (string) ($row['status'] ?? 'ok');
+                                $variant = $status === 'crit' ? 'danger' : ($status === 'warn' ? 'warning' : 'success');
+                                $label = $status === 'crit' ? 'Kritis' : ($status === 'warn' ? 'Waspada' : 'OK');
+                            @endphp
+                            <tr>
+                                <td class="font-medium text-slate-900">{{ $row['name'] ?? 'Tidak diketahui' }}</td>
+                                <td class="text-right tabular-nums">{{ number_format((float) ($row['value'] ?? 0), 2, ',', '.') }}</td>
+                                <td class="text-right tabular-nums">
+                                    @if (($row['target'] ?? null) === null)
+                                        <span class="text-slate-400">—</span>
+                                    @else
+                                        {{ number_format((float) $row['target'], 2, ',', '.') }}
+                                    @endif
+                                </td>
+                                <td><x-badge :variant="$variant">{{ $label }}</x-badge></td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </x-table-wrapper>
+        @endif
+    </x-card>
+
+    <x-card class="mb-6" title="Perbandingan periode" description="Selisih KPI periode berjalan terhadap periode pembanding dari mesin AI.">
+        @php
+            $compareRows = [];
+            $comparisonData = $comparison ?? [];
+            if (isset($comparisonData['kpis']) && is_array($comparisonData['kpis'])) {
+                $compareRows = $comparisonData['kpis'];
+            }
+        @endphp
+        @if ($compareRows === [])
+            <x-empty-state
+                title="Belum ada perbandingan"
+                description="Mesin AI tidak mengembalikan delta periode. Coba muat ulang atau longgarkan filter."
+            />
+        @else
+            <x-table-wrapper label="Perbandingan periode">
+                <table class="app-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">KPI</th>
+                            <th scope="col" class="text-right">Berjalan</th>
+                            <th scope="col" class="text-right">Pembanding</th>
+                            <th scope="col" class="text-right">Selisih</th>
+                            <th scope="col" class="text-right">Selisih %</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach ($compareRows as $name => $delta)
+                            <tr>
+                                <td class="font-medium text-slate-900">{{ $name }}</td>
+                                <td class="text-right tabular-nums">{{ number_format((float) ($delta['current'] ?? 0), 2, ',', '.') }}</td>
+                                <td class="text-right tabular-nums">{{ number_format((float) ($delta['previous'] ?? 0), 2, ',', '.') }}</td>
+                                <td class="text-right tabular-nums">{{ number_format((float) ($delta['delta'] ?? 0), 2, ',', '.') }}</td>
+                                <td class="text-right tabular-nums">{{ number_format((float) ($delta['delta_pct'] ?? 0), 1, ',', '.') }}%</td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </x-table-wrapper>
+        @endif
+    </x-card>
+
     <x-card class="mb-6" title="Tren penjualan" description="Pendapatan, pesanan, dan unit per periode.">
         @if ($trend === [])
             <x-empty-state
@@ -368,4 +453,72 @@
             </x-table-wrapper>
         @endif
     </x-card>
+
+    <x-card class="mb-6" title="Dasbor eksekutif" description="Kumpulan widget dasbor dari mesin AI untuk filter yang dipilih.">
+        @php
+            $dashboardData = $dashboard ?? [];
+            $widgets = is_array($dashboardData) && isset($dashboardData['widgets']) && is_array($dashboardData['widgets'])
+                ? $dashboardData['widgets']
+                : [];
+        @endphp
+        @if ($widgets === [])
+            <x-empty-state
+                title="Widget dasbor belum tersedia"
+                description="Mesin AI tidak mengembalikan widget dasbor untuk filter ini."
+            />
+        @else
+            <div class="grid gap-4 sm:grid-cols-2">
+                @foreach ($widgets as $widget)
+                    @php
+                        $wdata = $widget['data'] ?? [];
+                        $count = is_array($wdata) ? (array_is_list($wdata) ? count($wdata) : count($wdata)) : 0;
+                    @endphp
+                    <div class="rounded-md border border-slate-200 p-4">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <h3 class="text-sm font-semibold text-slate-900">{{ $widget['title'] ?? $widget['id'] ?? 'Widget' }}</h3>
+                            <x-badge variant="info">{{ $widget['chart_type'] ?? 'table' }}</x-badge>
+                        </div>
+                        <p class="mt-1 text-xs text-slate-500">
+                            {{ $count }} baris dari endpoint <code class="rounded bg-slate-100 px-1">{{ $widget['endpoint'] ?? '—' }}</code>
+                        </p>
+                    </div>
+                @endforeach
+            </div>
+        @endif
+    </x-card>
+
+    <x-card class="mb-6" title="Ekspor dataset" description="Unduh hasil analitik periode ini sebagai CSV atau XLSX.">
+        <div class="flex flex-wrap gap-2">
+            <form method="POST" action="{{ url('/api/analytics/export') }}">
+                @csrf
+                <input type="hidden" name="format" value="csv">
+                <input type="hidden" name="dataset" value="trend">
+                <button
+                    type="submit"
+                    class="inline-flex items-center justify-center rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                >Unduh CSV</button>
+            </form>
+            <form method="POST" action="{{ url('/api/analytics/export') }}">
+                @csrf
+                <input type="hidden" name="format" value="xlsx">
+                <input type="hidden" name="dataset" value="trend">
+                <button
+                    type="submit"
+                    class="inline-flex items-center justify-center rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                >Unduh XLSX</button>
+            </form>
+        </div>
+        <p class="mt-2 text-xs text-slate-500">Ekspor PDF belum tersedia — lihat batasan di dokumentasi BI.</p>
+    </x-card>
+
+    <script type="application/json" id="analytics-data">
+        {!! json_encode([
+            'kpi' => $kpi ?? [],
+            'trend' => $trend ?? [],
+            'branches' => $branches ?? [],
+            'finance' => $finance ?? [],
+            'comparison' => $comparison ?? [],
+            'dashboard' => $dashboard ?? [],
+        ], JSON_UNESCAPED_UNICODE) !!}
+    </script>
 @endsection

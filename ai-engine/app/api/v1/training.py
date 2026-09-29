@@ -11,7 +11,14 @@ from app.core.errors import build_error_response
 from app.core.logging import get_request_id, get_logger
 from app.core.security import require_service_auth
 from app.database.connection import get_db
-from app.schemas.ml import PredictRequest, TrainRequest
+from app.schemas.ml import (
+    BatchPredictRequest,
+    ExperimentCompareRequest,
+    ExperimentCreate,
+    ExperimentPromoteRequest,
+    PredictRequest,
+    TrainRequest,
+)
 
 log = get_logger("api.training", "train")
 
@@ -187,3 +194,160 @@ def _bounded(value: Any, low: float, high: float, field: str, *, default: float)
                             f"{field} must be between {low} and {high}, got {n}",
                             f"INVALID_{field.upper()}", field)
     return n
+
+
+# --------------------------------------------------------------------------
+# Experiments + batch prediction (enterprise).
+# --------------------------------------------------------------------------
+
+@router.post("/training/experiments")
+def create_experiment(body: ExperimentCreate, db: Session = Depends(get_db),
+                      _: str = Depends(require_service_auth)):
+    from app.ml import experiments as exp
+
+    model_type = str(body.model_type).strip().lower()
+    if model_type not in MODEL_TYPES:
+        return _bad_request(
+            "create_experiment",
+            f"unsupported model_type {model_type!r}; expected one of: "
+            + ", ".join(sorted(MODEL_TYPES)),
+            "UNSUPPORTED_MODEL_TYPE", "model_type")
+
+    dataset: List[Dict[str, Any]] = [dict(r) for r in (body.dataset or [])]
+    if len(dataset) > MAX_DATASET_ROWS:
+        return _error(413, "create_experiment",
+                      f"dataset has {len(dataset)} rows; the maximum is {MAX_DATASET_ROWS}",
+                      code="DATASET_TOO_LARGE", error_type="validation",
+                      resolution="Kirim dataset yang lebih kecil, atau latih lewat worker.",
+                      details={"field": "dataset", "max_rows": MAX_DATASET_ROWS})
+    try:
+        res = exp.create_experiment(
+            model_type, dataset, name=body.name,
+            dataset_ref=body.dataset_ref, dataset_version=body.dataset_version,
+            feature_list=list(body.feature_list or []),
+            params=dict(body.params or {}),
+            train_ratio=body.train_ratio, val_ratio=body.val_ratio,
+            test_ratio=body.test_ratio, seed=body.seed,
+            label_key=body.label_key, date_key=body.date_key,
+            run_training=body.run_training, db_session=db)
+    except ValueError as exc:
+        return _bad_request("create_experiment", str(exc), "INVALID_EXPERIMENT", "dataset")
+    except Exception as exc:  # noqa: BLE001 - third-party numeric code
+        log.error("experiment failed: %s", type(exc).__name__, exc_info=exc)
+        return JSONResponse(status_code=500, content=build_error_response(
+            module="training", operation="create_experiment", error_type="internal",
+            code="EXPERIMENT_FAILED", message="Experiment failed.",
+            request_id=get_request_id(),
+            resolution="Periksa log server lalu ulangi.", internal=True))
+    return {"success": True, "data": res}
+
+
+@router.get("/training/experiments")
+def list_experiments(model_type: str | None = None,
+                     db: Session = Depends(get_db),
+                     _: str = Depends(require_service_auth)) -> dict:
+    from app.ml import experiments as exp
+
+    try:
+        rows = exp.list_experiments(model_type, db_session=db)
+    except ValueError as exc:
+        return _bad_request("list_experiments", str(exc),
+                            "UNSUPPORTED_MODEL_TYPE", "model_type")
+    return {"success": True, "data": rows}
+
+
+@router.get("/training/experiments/{experiment_id}")
+def get_experiment(experiment_id: int, db: Session = Depends(get_db),
+                   _: str = Depends(require_service_auth)):
+    from app.ml import experiments as exp
+
+    try:
+        return {"success": True, "data": exp.get_experiment(int(experiment_id), db)}
+    except ValueError:
+        return _error(404, "get_experiment",
+                      f"experiment {experiment_id} not found",
+                      code="NOT_FOUND", error_type="not_found",
+                      resolution="Pastikan ID eksperimen benar.")
+
+
+@router.post("/training/experiments/{experiment_id}/compare")
+def compare_experiment(experiment_id: int, body: ExperimentCompareRequest,
+                       db: Session = Depends(get_db),
+                       _: str = Depends(require_service_auth)):
+    from app.ml import experiments as exp
+
+    ids = [int(i) for i in (body.experiment_ids or [])]
+    if int(experiment_id) not in ids:
+        ids = [int(experiment_id)] + ids
+    try:
+        res = exp.compare_experiments(ids, body.metric, body.split,
+                                      body.higher_is_better, db)
+    except ValueError as exc:
+        msg = str(exc)
+        if "not found" in msg:
+            return _error(404, "compare_experiment", msg,
+                          code="NOT_FOUND", error_type="not_found",
+                          resolution="Pastikan ID eksperimen benar.")
+        return _bad_request("compare_experiment", msg, "INVALID_COMPARE", "experiment_ids")
+    return {"success": True, "data": res}
+
+
+@router.post("/training/experiments/{experiment_id}/promote")
+def promote_experiment(experiment_id: int, body: ExperimentPromoteRequest,
+                       db: Session = Depends(get_db),
+                       _: str = Depends(require_service_auth)):
+    from app.ml import experiments as exp
+
+    try:
+        res = exp.promote_experiment(int(experiment_id), body.version_id, db)
+    except ValueError as exc:
+        msg = str(exc)
+        if "not found" in msg:
+            return _error(404, "promote_experiment", msg,
+                          code="NOT_FOUND", error_type="not_found",
+                          resolution="Pastikan ID eksperimen benar.")
+        return _bad_request("promote_experiment", msg,
+                            "INVALID_PROMOTION", "experiment_id")
+    return {"success": True, "data": res}
+
+
+@router.post("/training/batch-predict")
+def batch_predict(body: BatchPredictRequest, db: Session = Depends(get_db),
+                  _: str = Depends(require_service_auth)):
+    from app.ml import batch as batch_mod
+
+    mt = str(body.model_type or "").strip().lower()
+    if mt not in MODEL_TYPES:
+        return _bad_request(
+            "batch_predict",
+            f"unsupported model_type {mt!r}; expected one of: "
+            + ", ".join(sorted(MODEL_TYPES)),
+            "UNSUPPORTED_MODEL_TYPE", "model_type")
+    dataset: List[Dict[str, Any]] = [dict(r) for r in (body.dataset or [])]
+    if len(dataset) > MAX_DATASET_ROWS:
+        return _error(413, "batch_predict",
+                      f"dataset has {len(dataset)} rows; the maximum is {MAX_DATASET_ROWS}",
+                      code="DATASET_TOO_LARGE", error_type="validation",
+                      resolution="Kirim dataset yang lebih kecil.",
+                      details={"field": "dataset", "max_rows": MAX_DATASET_ROWS})
+    try:
+        res = batch_mod.run_batch_predict(
+            mt, dataset, csv_text=body.csv_text, model_name=body.model_name,
+            model_id=body.model_id, version_id=body.version_id,
+            chunk_size=body.chunk_size, params=dict(body.params or {}),
+            db_session=db)
+    except ValueError as exc:
+        msg = str(exc)
+        if "no production model" in msg or "not found" in msg:
+            return _error(404, "batch_predict", msg,
+                          code="NO_PRODUCTION_MODEL", error_type="not_found",
+                          resolution="Train a model, lalu promote versinya ke PRODUCTION.")
+        return _bad_request("batch_predict", msg, "INVALID_BATCH", "dataset")
+    except Exception as exc:  # noqa: BLE001 - third-party numeric code
+        log.error("batch predict failed: %s", type(exc).__name__, exc_info=exc)
+        return JSONResponse(status_code=500, content=build_error_response(
+            module="training", operation="batch_predict", error_type="internal",
+            code="BATCH_FAILED", message="Batch prediction failed.",
+            request_id=get_request_id(),
+            resolution="Periksa log server lalu ulangi.", internal=True))
+    return {"success": True, "data": res}

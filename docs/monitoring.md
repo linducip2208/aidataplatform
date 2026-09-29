@@ -35,6 +35,15 @@ docker run -d --network aidata-appnet --name postgres-exporter \
 `redis-exporter` needs the password in `REDIS_ADDR` once `REDIS_PASSWORD` is set. To clear
 `laravel`, add a Prometheus client library in `application/` and register a `/metrics` route.
 
+Alert rules live in `infrastructure/monitoring/alert-rules.yml`, wired via `rule_files` in
+`prometheus.yml` and mounted read-only by `docker-compose.yml`. Three rules: `EngineErrorRate`
+(5xx share > 1 % for 5 min, the same expression as the dashboard's panel 13 and the §7 SLO),
+`EngineReadinessDown` (`up{job="fastapi"} == 0` for 2 min — the scrape proxy for readiness, since
+true readiness is a response body, not a metric), and `DiskSpaceLow` (root filesystem < 15 % free
+for 10 min, pending the `node_exporter` target, which is not in the base stack). After editing the
+file, reload without restart: `curl -X POST http://localhost:9090/-/reload` (the compose command
+enables `--web.enable-lifecycle`). See `operations.md` for what each alert means on-call.
+
 ## 2. The metrics that exist
 
 `ai-engine/app/main.py` declares exactly two, and nothing else in the engine emits metrics:
@@ -57,8 +66,9 @@ rate limiter (`_UNRATE_LIMITED_PATHS` in `app/main.py`), so a probe can never be
 
 Because `http_request_latency_seconds` is a `Histogram`, p95 is
 `histogram_quantile(0.95, sum(rate(http_request_latency_seconds_bucket[5m])) by (le, path))`
-— the name `http_request_duration_seconds_bucket`, which the shipped Grafana dashboard JSON
-was written against, does not exist.
+— that is exactly what the Grafana dashboard queries (panels 1 and 4). The name
+`http_request_duration_seconds_bucket` does not exist anywhere in this tree; if a panel ever
+references it, the panel is wrong, not the engine.
 
 Practical queries:
 
@@ -93,10 +103,11 @@ SELECT count(*) FROM data_quality_reports WHERE created_at > now() - interval '2
 | `postgres` | `pg_isready` | Everything depending on it blocks |
 | `redis` | `redis-cli ping`, with `-a "$REDIS_PASSWORD"` when one is set | `laravel`, `laravel-queue`, `laravel-schedule`, `fastapi` and the Celery containers block on `service_healthy` |
 | `laravel` | `GET /up` **and** `public/build/manifest.json` exists **and** `storage/framework/migrate_failed` does not | `nginx`, `laravel-queue` and `laravel-schedule` block |
-| `laravel-queue` | none | — (no artisan command reports on a running worker; a dead one is restarted by the policy) |
-| `laravel-schedule` | none | — (`schedule:work` is an infinite loop; the only failure mode is exiting) |
+| `laravel-queue` | process probe: `ps aux \| grep -q '[q]ueue:work'` (BusyBox `ps` is guaranteed in the PHP image) | nothing blocks on it; unhealthy means the datasets/default consumer is gone |
+| `laravel-schedule` | process probe: `ps aux \| grep -q '[s]chedule:work'` | nothing blocks on it; unhealthy means the per-minute schedule loop died |
 | `fastapi` | `GET /api/v1/health` | `nginx`, `celery-worker` block |
-| `celery-worker`, `celery-beat` | none | — |
+| `celery-worker` | process probe: `/proc` scan for `celery` via the image's own `python` (`celery inspect ping` rejected — needs the broker on every probe) | `celery-beat` uses `service_started`, so nothing blocks; unhealthy means no queue is consumed |
+| `celery-beat` | process probe: `/proc` scan for `beat` (a worker process cannot satisfy it) | nothing blocks; unhealthy means the nightly sync, hourly report and per-minute alert evaluation stop being scheduled |
 | `nginx` | `GET /health`, answered locally without touching either upstream | — |
 | `prometheus`, `grafana` | none | — (no `healthcheck:` block in `docker-compose.yml`; the `laravel.Dockerfile` `HEALTHCHECK` only applies to the three `laravel*` services, and Compose overrides it) |
 
@@ -155,15 +166,16 @@ bind mount, so it can be edited without touching `docker-compose.yml`. It appear
 under the **AIDataPlatform** folder and refreshes every 30 s; use Grafana → Dashboards →
 AIDataPlatform to open it.
 
-The dashboard's panels are written against metric names this build does not emit (it expects
-`http_request_duration_seconds_bucket`, `celery_queue_length{queue}`, `import_jobs_total`,
-`ml_jobs_total`, `quality_score`, `rag_queries_total`). Every one of those panels will show
-"No data" until the corresponding metric exists. Two panels are worth editing to match reality:
+The dashboard's fourteen panels are all written against metrics this build actually emits —
+the inventory in the dashboard description is the contract (`http_requests_total`,
+`http_request_latency_seconds_bucket/_sum/_count`, the `prometheus_client` default registry,
+`up`). Panels 13–14 were added with the alert rules: 13 is the 5xx share the `EngineErrorRate`
+alert fires on (the §7 SLO as a live tile, with 1 %/5 % thresholds), 14 is open/max file
+descriptors from the same default registry as the CPU/RSS panel. Per-endpoint latency p95 is
+panel 4, error rate is panels 6 (rate) and 13 (share).
 
-- latency p95 → `histogram_quantile(0.95, sum(rate(http_request_latency_seconds_bucket[5m])) by (le, path))`
-- request rate → `sum(rate(http_requests_total[5m])) by (path)`
-
-Queue depth has no metric at all. Watch it with
+Queue depth has no panel and must never gain one until the metric exists: Celery exposes no
+Prometheus metric by default and no exporter in this stack publishes Redis `llen`. Watch it with
 `docker compose exec redis redis-cli llen <queue>` for the queues you care about —
 `imports`, `quality`, `ml`, `agent` and `rag` are the ones the engine routes to, and
 `default` carries the nightly sync. The Laravel queue depth is the same command on the
@@ -207,7 +219,12 @@ Queue depth, model training duration and RAG query volume have no instrumentatio
 build. If you add metrics, emit them from `ai-engine/app/main.py` next to the existing
 `Counter` and `Histogram` declarations, and update the Grafana dashboard JSON in the same PR.
 
-## 8. Alerting
+## 8. Alerting (two systems — do not confuse them)
+
+Prometheus alert rules (`infrastructure/monitoring/alert-rules.yml`) watch the PLATFORM:
+`EngineErrorRate`, `EngineReadinessDown`, and the pending `DiskSpaceLow`. They page on-call
+(see `operations.md`). What follows is the ENGINE's own business-metric alerting, which pages
+nobody — it opens rows in the database.
 
 `ai-engine/app/alerts/` implements threshold alerting on the engine, and it is the only
 subscriber to the `alert-evaluation` beat entry. `celery-beat` runs it every minute

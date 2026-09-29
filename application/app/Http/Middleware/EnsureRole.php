@@ -3,8 +3,10 @@
 namespace App\Http\Middleware;
 
 use App\Enums\UserRole;
+use App\Support\PiiMask;
 use Closure;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
 
 class EnsureRole
@@ -40,6 +42,11 @@ class EnsureRole
             $resolved = UserRole::tryFrom(trim($role));
 
             if ($resolved === null) {
+                Log::error('auth.role_misconfigured', [
+                    'route' => $request->path(),
+                    'unknown_role' => substr((string) $role, 0, 64),
+                ]);
+
                 return $request->expectsJson()
                     ? response()->json([
                         'message' => 'Misconfigured role guard: unknown role "'.$role.'".',
@@ -52,6 +59,16 @@ class EnsureRole
         }
 
         if ($allowed === [] || ! in_array($user->role(), $allowed, true)) {
+            // Audit-only: the denial below is unchanged. Emails are masked so
+            // the log line carries no PII beyond the actor id.
+            Log::warning('auth.role_denied', [
+                'user_id' => $user->getKey(),
+                'actor' => PiiMask::maskEmail((string) ($user->email ?? '')),
+                'route' => $request->path(),
+                'required' => implode(',', $roles),
+                'ip' => $request->ip(),
+            ]);
+
             return $request->expectsJson()
                 ? response()->json([
                     'message' => 'This action requires role: '.implode(' or ', $roles).'.',

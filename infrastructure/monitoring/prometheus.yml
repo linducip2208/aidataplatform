@@ -16,6 +16,16 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+# Alert rules evaluated inside Prometheus (AGENT 9). The file is mounted
+# read-only by docker-compose.yml; after editing it, reload without restart:
+#   curl -X POST http://localhost:9090/-/reload   (--web.enable-lifecycle)
+# Every rule below fires only on metrics this stack actually exports (see the
+# file header for the per-rule source). The disk rule needs the node_exporter
+# target, which is NOT in the base stack -- it stays pending until that
+# exporter is added, by design rather than by accident.
+rule_files:
+  - /etc/prometheus/alert-rules.yml
+
 scrape_configs:
   # The engine exposes /metrics from app/main.py and registers the route without
   # an auth dependency, so it needs no credentials.

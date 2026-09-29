@@ -201,3 +201,117 @@ On a suspected leak, in order: rotate `SERVICE_API_KEY` (root `.env`, then
 rotate the LLM keys, deactivate the affected user, then investigate `audit_logs` and the
 container logs. Preserve `docker compose logs` output before restarting anything — it is the
 only record of the failure.
+
+## 7. Enterprise hardening pass (A8)
+
+### 7.1 Permission matrix
+
+Role gates enforced today by `EnsureRole` + `EnsureAccountActive` on every
+authed route (pinned by `SecurityEnterpriseTest`, `RoleMiddlewareTest`,
+`SecurityHardeningTest`):
+
+| Capability | admin | analyst | viewer | inactive / guest |
+|---|---|---|---|---|
+| Read pages + token API (`datasets.index/show`, `dashboard`, `api.me`, …) | yes | yes | yes | no (403 `account_inactive` / redirect) |
+| Write datasets (`store`, `preview/mapping/quality/commit`, `destroy`) | yes | yes | no (403 `forbidden`) | no |
+| Assistant threads (`assistant.*`, scoped to own) | own only | own only | own only | no |
+| `POST /api/agent/chat`, `POST /api/rag/query` (any active account) | yes | yes | yes | no |
+| Train models (`ml.train`) | yes | yes | no | no |
+| Promote models (`ml.promote`) | yes | no | no | no |
+| Manage users / read audit log (`admin.*`, `audit.index`) | yes | no | no | no |
+
+Row-level ownership is stricter than the role gate and is NOT yet enforced
+(see A8-03 below). The intended policy, defined in
+`application/app/Policies/DatasetPolicy.php` (owner-or-admin for
+write/delete, global read) and
+`application/app/Policies/ChatThreadPolicy.php` (strictly owner-only —
+mirrors the existing `abort_unless(..., 404)` in `AssistantController`, so
+even admins get 404 on another account's thread), plus the pure
+`User::canDo(action, resource)` helper that restates the matrix without new
+grants. Master wiring (A8 must not edit the shared files):
+
+```php
+// app/Providers/AppServiceProvider.php, inside boot():
+Gate::policy(\App\Models\Dataset::class, \App\Policies\DatasetPolicy::class);
+Gate::policy(\App\Models\ChatThread::class, \App\Policies\ChatThreadPolicy::class);
+
+// bootstrap/app.php, inside ->withMiddleware(...), LAST so error pages keep them:
+$middleware->append(\App\Http\Middleware\SecurityHeaders::class);
+```
+
+### 7.2 Upload security
+
+The web upload (`DatasetController@store`, A8-owned) now enforces, in order:
+(1) `max:` in **kilobytes** (`MAX_UPLOAD_MB × 1024` — the old spelling passed
+the raw MB value, capping uploads at ~500 KB instead of 500 MB; fixed),
+extension allowlist, and a filename screen rejecting path components
+(`/`, `\`, NUL, controls, leading dots) and double extensions with an
+executable middle (`sales.php.csv`); (2) an explicit byte-size re-check
+before the synchronous engine round trip; (3) post-create re-sanitisation of
+`source_filename`/`name` (no-op for normal names). Rejections are 422/session
+errors and never reach the engine (`Http::assertNothingSent`).
+
+### 7.3 Response headers
+
+`App\Http\Middleware\SecurityHeaders` sets `X-Content-Type-Options: nosniff`,
+`X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`
+and a restrictive `Permissions-Policy`; `Strict-Transport-Security` only when
+the request itself is HTTPS, so plain-HTTP dev/test never pins HSTS for
+localhost. Mirrors `infrastructure/nginx/default.conf` (read-only for A8),
+which additionally keeps HSTS commented until TLS is terminated.
+
+### 7.4 PII masking
+
+`App\Support\PiiMask` (`maskEmail` keeps the domain, `maskPhone` keeps the
+last two digits, `maskText`/`maskArray` for free text and structured rows) is
+dependency-free by design. Adopted today in exactly one safe place: the
+`EnsureRole` denial log masks the actor email. Wider adoption (audit `detail`
+blobs, CSV exports, assistant evidence) is left to the owning agents.
+
+### 7.5 Secret management (no real values below)
+
+Unchanged: everything sensitive comes from the root `.env`; placeholders
+(`change-me*`, `changeme`, `secret`, empty) are treated as *not configured*
+and every engine call fails closed with 401. Every engine auth rejection now
+also emits a structured `auth.failed` log (`reason=unconfigured|missing|invalid`,
+`header=`, `has_key=`, `has_bearer=`) that never contains a secret value
+(pinned by `ai-engine/tests/test_security_enterprise.py`).
+
+### 7.6 Audit findings (A8)
+
+| ID | Severity | Location | Finding | Status |
+|---|---|---|---|---|
+| A8-01 | High | `application/app/Http/Controllers/DatasetController.php:58` + `Api/DatasetController.php:57` | `max:` got the raw MB value (KB semantics) → effective cap ~500 KB, contradicting the documented 500 MB | **Fixed** (web, A8-owned). API mirror identical — flagged for master (A8-02 also covers it) |
+| A8-02 | High | `application/app/Http/Controllers/Api/DatasetController.php@store` (read-only for A8) | No double-extension / traversal filename screen; `sales.php.csv` accepted (201). Pinned as known-gap test | **Open** — port `DatasetController::unsafeFilenameReason()` + helpers into the API controller |
+| A8-03 | High | dataset controllers (web + API) | No per-row ownership check: any `analyst` can mutate/delete any dataset; any active user can read all | **Open** — policies defined (`Policies/*`); master must `$this->authorize()` them in mutating actions |
+| A8-04 | Medium | `ai-engine/app/api/v1/models.py:90` (A5-owned) | Engine `GET /models` decorates versions with server-side `artifact_path`; Laravel strips it but direct engine callers see filesystem layout | **Open** — strip server-side or gate the route; Laravel already `Arr::except`s it |
+| A8-05 | Medium | `application/app/Models/Dataset.php:42` | `$fillable` is deliberately wide (server-owned columns mass-assignable); safe today only because no client key reaches `create()/update()` | **Accepted risk** — documented in the model; tightening needs service+seeder+factory conversion together |
+| A8-06 | Low | `application/app/Models/User.php:56` | `role()` falls back to `Viewer` on corrupt values (fail-open to viewer reads) | **Accepted risk** — behaviour frozen per task; `EnsureRole` strictness + `EnsureAccountActive` bound the blast radius |
+| A8-07 | Low | `application/config/sanctum.php:53` | `expiration => null`; expiry relies on per-token `expires_at` written at issue (`token_ttl_days`) | **Accepted** — all tokens are issued with expiry; no path mints non-expiring tokens |
+
+Fixed in this pass: A8-01 (web); `EnsureRole`/`EnsureAccountActive` denial
+audit logging (responses unchanged); `SecurityHeaders` (awaits master
+wiring); engine `auth.failed` audit hook (no secret values);
+`DatasetController` filename + size hardening; `PiiMask` + `User::canDo()`
+pure helpers (no behaviour change; account lockout deliberately NOT added —
+the 5/min login throttle already bounds guessing and lockout risked
+`AuthTest` regressions).
+
+Login/session verified (read-only, no change): web login regenerates the
+session, logout invalidates + rotates CSRF, `last_login_at` + audit rows
+written, deactivated refused on both form and token paths, `throttle:login`
+on both, token TTL read at issue time.
+
+### 7.7 Residual risks (for A9 / operators)
+
+- Published host ports (`fastapi` 8001, Postgres, Redis) bypass Nginx
+  entirely — bind to `127.0.0.1` or drop `ports:` outside dev.
+- No TLS in the Nginx file yet (correct — HSTS stays commented until
+  certbot has written real certs); internal compose traffic is plain HTTP.
+- Laravel hop forwards the caller `Host` (needed for absolute URLs); add the
+  documented `server_name` + `return 444` allowlist once the deployment has a
+  real name.
+- No per-dataset ACL / row-level security: the warehouse is single-tenant;
+  `viewer` chat reads committed sales data from every dataset.
+- Engine has no separate audit table by design — attribute AI work through
+  Laravel `audit_logs` + the new `auth.failed` engine log.
