@@ -15,7 +15,14 @@ Date: 2026-09-29 (UTC). Branch: `main`. Scope: master enterprise commands, itera
    `WebWorkflowTest` updated to act as owner + new non-owner 403 cases.
    Suite → **929 tests, 0 failures**.
 
-## Iteration 7 (this commit)
+## Iteration 8 (this commit)
+
+16. **Migration proof** — new `test_migration_0003.py` runs the real
+   `alembic upgrade head` twice on a scratch database (second boot must not
+   fail) and asserts the product columns exist. Full engine suite green
+   (1 pre-existing xfail).
+
+## Iteration 7 (previous commit)
 
 15. **Product images matching descriptions (demo sample)** — `dim_product`
    gained `description` + `image_url` (Alembic 0003, guarded); new
