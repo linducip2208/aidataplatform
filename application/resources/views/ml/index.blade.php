@@ -16,24 +16,28 @@
         $versions = (array) ($selected['versions'] ?? []);
     @endphp
 
-    <div class="mb-6">
-        <h1 class="text-2xl font-semibold text-slate-900">Pembelajaran mesin</h1>
-        <p class="mt-1 text-sm text-slate-500">
-            Latih model, tinjau metrik setiap versi, dan promosikan versi terbaik ke produksi sesuai tata kelola model.
-        </p>
+    <div class="page-header">
+        <div class="row align-items-center">
+            <div class="col">
+                <h1 class="page-title">Pembelajaran mesin</h1>
+                <div class="page-subtitle">
+                    Latih model, tinjau metrik setiap versi, dan promosikan versi terbaik ke produksi sesuai tata kelola model.
+                </div>
+            </div>
+        </div>
     </div>
 
     @if (filled($error))
-        <x-card class="mb-6">
-            <div role="alert" class="flex flex-wrap items-center gap-2">
+        <x-card class="mb-3">
+            <div role="alert" class="alert alert-danger mb-0">
                 <x-badge variant="danger">Gagal</x-badge>
-                <p class="text-sm text-slate-700">{{ $error }}</p>
+                <span>{{ $error }}</span>
             </div>
         </x-card>
     @endif
 
-    <div class="grid gap-6 lg:grid-cols-3">
-        <div class="space-y-6 lg:col-span-2">
+    <div class="row row-cards">
+        <div class="col-lg-8">
             <x-card title="Daftar model" description="Model yang terdaftar di registry mesin AI.">
                 @if ($models === [])
                     <x-empty-state
@@ -42,14 +46,14 @@
                     />
                 @else
                     <x-table-wrapper label="Daftar model">
-                        <table class="app-table">
+                        <table class="table table-vcenter card-table">
                             <thead>
                                 <tr>
                                     <th scope="col">Model</th>
                                     <th scope="col">Tipe</th>
                                     <th scope="col">Status</th>
-                                    <th scope="col" class="text-right">Versi produksi</th>
-                                    <th scope="col"><span class="sr-only">Aksi</span></th>
+                                    <th scope="col" class="text-end">Versi produksi</th>
+                                    <th scope="col"><span class="visually-hidden">Aksi</span></th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -58,10 +62,10 @@
                                         $statusKey = strtoupper((string) ($model['status'] ?? 'DRAFT'));
                                         $modelId = (int) ($model['id'] ?? 0);
                                     @endphp
-                                    <tr @if ($selectedId === $modelId) class="bg-brand-50" @endif>
+                                    <tr @if ($selectedId === $modelId) class="table-active" @endif>
                                         <td>
-                                            <span class="font-medium text-slate-900">{{ $model['name'] ?? 'Tanpa nama' }}</span>
-                                            <span class="mt-1 block text-xs text-slate-500">ID {{ $modelId }}</span>
+                                            <span class="fw-medium">{{ $model['name'] ?? 'Tanpa nama' }}</span>
+                                            <span class="d-block small text-secondary">ID {{ $modelId }}</span>
                                         </td>
                                         <td>{{ $typeLabels[$model['model_type'] ?? ''] ?? ($model['model_type'] ?? 'Tidak diketahui') }}</td>
                                         <td>
@@ -69,15 +73,15 @@
                                                 {{ $statuses[$statusKey]['label'] ?? 'Status tidak dikenal' }}
                                             </x-badge>
                                         </td>
-                                        <td class="text-right tabular-nums">
+                                        <td class="text-end">
                                             {{ ! empty($model['production_version_id']) ? number_format((int) $model['production_version_id'], 0, ',', '.') : 'Belum ada' }}
                                         </td>
-                                        <td class="text-right">
+                                        <td class="text-end">
                                             <form method="GET" action="{{ route('ml.index') }}">
                                                 <input type="hidden" name="model" value="{{ $modelId }}">
                                                 <button
                                                     type="submit"
-                                                    class="rounded-md border border-slate-300 px-3 py-1 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                                                    class="btn"
                                                 >{{ $selectedId === $modelId ? 'Sedang dibuka' : 'Lihat versi' }}</button>
                                             </form>
                                         </td>
@@ -100,14 +104,14 @@
                     />
                 @else
                     <x-table-wrapper label="Versi model">
-                        <table class="app-table">
+                        <table class="table table-vcenter card-table">
                             <thead>
                                 <tr>
                                     <th scope="col">Versi</th>
                                     <th scope="col">Status</th>
                                     <th scope="col">Metrik</th>
                                     @if ($canApprove)
-                                        <th scope="col"><span class="sr-only">Promosi</span></th>
+                                        <th scope="col"><span class="visually-hidden">Promosi</span></th>
                                     @endif
                                 </tr>
                             </thead>
@@ -120,8 +124,8 @@
                                     @endphp
                                     <tr>
                                         <td>
-                                            <span class="font-medium text-slate-900">{{ $version['version'] ?? 'v'.$versionId }}</span>
-                                            <span class="mt-1 block text-xs text-slate-500">ID {{ $versionId }}</span>
+                                            <span class="fw-medium">{{ $version['version'] ?? 'v'.$versionId }}</span>
+                                            <span class="d-block small text-secondary">ID {{ $versionId }}</span>
                                         </td>
                                         <td>
                                             <x-badge :class="$statuses[$versionStatus]['badge'] ?? 'badge-neutral'">
@@ -130,13 +134,13 @@
                                         </td>
                                         <td>
                                             @if ($metrics === [])
-                                                <span class="text-sm text-slate-500">Tidak ada metrik</span>
+                                                <span class="small text-secondary">Tidak ada metrik</span>
                                             @else
-                                                <dl class="space-y-1 text-sm">
+                                                <dl class="datagrid">
                                                     @foreach ($metrics as $metricKey => $metricValue)
-                                                        <div class="flex flex-wrap items-center justify-between gap-2">
-                                                            <dt class="text-slate-500">{{ \Illuminate\Support\Str::headline((string) $metricKey) }}</dt>
-                                                            <dd class="tabular-nums text-slate-900">
+                                                        <div class="datagrid-item">
+                                                            <dt class="datagrid-title">{{ \Illuminate\Support\Str::headline((string) $metricKey) }}</dt>
+                                                            <dd class="datagrid-content">
                                                                 @if (is_bool($metricValue))
                                                                     {{ $metricValue ? 'Ya' : 'Tidak' }}
                                                                 @elseif (is_scalar($metricValue) || $metricValue === null)
@@ -152,15 +156,15 @@
                                         </td>
                                         @if ($canApprove)
                                             <td>
-                                                <form method="POST" action="{{ route('ml.promote', ['modelId' => $selectedId]) }}" class="space-y-2">
+                                                <form method="POST" action="{{ route('ml.promote', ['modelId' => $selectedId]) }}">
                                                     @csrf
                                                     <input type="hidden" name="version_id" value="{{ $versionId }}">
 
-                                                    <label for="to_status-{{ $versionId }}" class="sr-only">Status tujuan untuk versi {{ $version['version'] ?? $versionId }}</label>
+                                                    <label for="to_status-{{ $versionId }}" class="visually-hidden">Status tujuan untuk versi {{ $version['version'] ?? $versionId }}</label>
                                                     <select
                                                         id="to_status-{{ $versionId }}"
                                                         name="to_status"
-                                                        class="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                                                        class="form-select"
                                                     >
                                                         @foreach ($promoteTargets as $value => $target)
                                                             <option value="{{ $value }}" @selected(old('to_status', 'PRODUCTION') === $value)>{{ $target['label'] }}</option>
@@ -169,7 +173,7 @@
 
                                                     <button
                                                         type="submit"
-                                                        class="inline-flex w-full items-center justify-center rounded-md bg-brand-600 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                                                        class="btn btn-primary w-100 mt-2"
                                                     >Promosikan</button>
                                                 </form>
                                             </td>
@@ -183,10 +187,10 @@
             </x-card>
         </div>
 
-        <div class="space-y-6">
+        <div class="col-lg-4">
             @if (auth()->user()->isAnalyst())
                 <x-card title="Latih model baru" description="Pelatihan dijalankan mesin AI dan menghasilkan versi tervalidasi.">
-                    <form method="POST" action="{{ route('ml.train') }}" class="space-y-4">
+                    <form method="POST" action="{{ route('ml.train') }}">
                         @csrf
 
                         <x-field label="Tipe model" for="model_type" name="model_type" required>
@@ -195,7 +199,7 @@
                                 name="model_type"
                                 required
                                 @error('model_type') aria-invalid="true" @enderror
-                                class="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                                class="form-select"
                             >
                                 <option value="">Pilih tipe model</option>
                                 @foreach ($modelTypes as $type)
@@ -214,7 +218,7 @@
                                 maxlength="100"
                                 placeholder="mis. forecast_penjualan_harian"
                                 @error('name') aria-invalid="true" @enderror
-                                class="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                                class="form-control"
                             >
                         </x-field>
 
@@ -230,19 +234,19 @@
                                 rows="5"
                                 spellcheck="false"
                                 @error('params') aria-invalid="true" @enderror
-                                class="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 font-mono text-sm text-slate-900 focus:border-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                                class="form-control"
                             >{{ old('params', '{}') }}</textarea>
                         </x-field>
 
                         <button
                             type="submit"
-                            class="inline-flex w-full items-center justify-center rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                            class="btn btn-primary w-100"
                         >Mulai pelatihan</button>
                     </form>
                 </x-card>
             @else
                 <x-card title="Akses baca saja">
-                    <p class="text-sm text-slate-600">
+                    <p class="text-secondary mb-0">
                         Peran <strong>{{ auth()->user()->role()->localizedLabel() }}</strong> tidak dapat menjalankan pelatihan model.
                         Pelatihan tersedia untuk {{ \App\Enums\UserRole::Admin->localizedLabel() }} dan {{ \App\Enums\UserRole::Analyst->localizedLabel() }}.
                     </p>
@@ -250,7 +254,7 @@
             @endif
 
             <x-card title="Tata kelola model" description="Aturan promosi versi model.">
-                <ul class="space-y-2 text-sm text-slate-600">
+                <ul class="list-unstyled mb-0 text-secondary">
                     <li>Hanya {{ \App\Enums\UserRole::Admin->localizedLabel() }} yang dapat menaikkan versi model ke produksi.</li>
                     <li>Setiap versi menyimpan metrik evaluasi hasil validasi.</li>
                     <li>Model produksi dipakai untuk prediksi dan analitik otomatis.</li>
@@ -266,15 +270,15 @@
         $eventsError = $eventsError ?? null;
     @endphp
 
-    <div class="mt-6 space-y-6">
+    <div class="d-grid gap-3 mt-3">
         <x-card
             title="Eksperimen"
             description="Jejak pelatihan dengan pembagian train/validasi/test, metrik per split, dan promosi versi terbaik."
         >
             @if (filled($experimentsError))
-                <div role="alert" class="flex flex-wrap items-center gap-2">
+                <div role="alert" class="alert alert-danger mb-0">
                     <x-badge variant="danger">Gagal</x-badge>
-                    <p class="text-sm text-slate-700">{{ $experimentsError }}</p>
+                    <span>{{ $experimentsError }}</span>
                 </div>
             @elseif ($experiments === [])
                 <x-empty-state
@@ -283,7 +287,7 @@
                 />
             @else
                 <x-table-wrapper label="Daftar eksperimen">
-                    <table class="app-table">
+                    <table class="table table-vcenter card-table">
                         <thead>
                             <tr>
                                 <th scope="col">Eksperimen</th>
@@ -292,7 +296,7 @@
                                 <th scope="col">Split</th>
                                 <th scope="col">Metrik validasi</th>
                                 @if ($canApprove)
-                                    <th scope="col"><span class="sr-only">Promosi eksperimen</span></th>
+                                    <th scope="col"><span class="visually-hidden">Promosi eksperimen</span></th>
                                 @endif
                             </tr>
                         </thead>
@@ -307,8 +311,8 @@
                                 @endphp
                                 <tr>
                                     <td>
-                                        <span class="font-medium text-slate-900">{{ $experiment['name'] ?? 'Tanpa nama' }}</span>
-                                        <span class="mt-1 block text-xs text-slate-500">ID {{ $experimentId }}</span>
+                                        <span class="fw-medium">{{ $experiment['name'] ?? 'Tanpa nama' }}</span>
+                                        <span class="d-block small text-secondary">ID {{ $experimentId }}</span>
                                     </td>
                                     <td>{{ $typeLabels[$experiment['model_type'] ?? ''] ?? ($experiment['model_type'] ?? 'Tidak diketahui') }}</td>
                                     <td>
@@ -316,10 +320,10 @@
                                             {{ $statuses[$experimentStatus]['label'] ?? $experimentStatus }}
                                         </x-badge>
                                     </td>
-                                    <td class="text-sm text-slate-600">
+                                    <td class="text-secondary">
                                         {{ $splitConfig['strategy'] ?? 'belum dibagi' }}
                                         @if ($splitSizes !== [])
-                                            <span class="block text-xs tabular-nums">
+                                            <span class="d-block small">
                                                 latih {{ $splitSizes['train'] ?? 0 }} /
                                                 validasi {{ $splitSizes['validate'] ?? 0 }} /
                                                 uji {{ $splitSizes['test'] ?? 0 }}
@@ -328,13 +332,13 @@
                                     </td>
                                     <td>
                                         @if ($validateMetrics === [])
-                                            <span class="text-sm text-slate-500">Tidak ada metrik</span>
+                                            <span class="small text-secondary">Tidak ada metrik</span>
                                         @else
-                                            <dl class="space-y-1 text-sm">
+                                            <dl class="datagrid">
                                                 @foreach ($validateMetrics as $metricKey => $metricValue)
-                                                    <div class="flex flex-wrap items-center justify-between gap-2">
-                                                        <dt class="text-slate-500">{{ \Illuminate\Support\Str::headline((string) $metricKey) }}</dt>
-                                                        <dd class="tabular-nums text-slate-900">
+                                                    <div class="datagrid-item">
+                                                        <dt class="datagrid-title">{{ \Illuminate\Support\Str::headline((string) $metricKey) }}</dt>
+                                                        <dd class="datagrid-content">
                                                             @if (is_scalar($metricValue) || $metricValue === null)
                                                                 {{ \Illuminate\Support\Str::limit((string) $metricValue, 40) }}
                                                             @else
@@ -352,7 +356,7 @@
                                                 @csrf
                                                 <button
                                                     type="submit"
-                                                    class="inline-flex w-full items-center justify-center rounded-md bg-brand-600 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                                                    class="btn btn-primary w-100"
                                                 >Promosikan versi</button>
                                             </form>
                                         </td>
@@ -371,9 +375,9 @@
                 description="Riwayat promosi, rollback, dan status deployment untuk model yang dipilih."
             >
                 @if (filled($eventsError))
-                    <div role="alert" class="flex flex-wrap items-center gap-2">
+                    <div role="alert" class="alert alert-danger mb-0">
                         <x-badge variant="danger">Gagal</x-badge>
-                        <p class="text-sm text-slate-700">{{ $eventsError }}</p>
+                        <span>{{ $eventsError }}</span>
                     </div>
                 @elseif ($events === [])
                     <x-empty-state
@@ -382,7 +386,7 @@
                     />
                 @else
                     <x-table-wrapper label="Jejak audit model">
-                        <table class="app-table">
+                        <table class="table table-vcenter card-table">
                             <thead>
                                 <tr>
                                     <th scope="col">Waktu</th>
@@ -395,11 +399,11 @@
                             <tbody>
                                 @foreach ($events as $event)
                                     <tr>
-                                        <td class="text-sm text-slate-600">{{ $event['created_at'] ?? '-' }}</td>
-                                        <td class="text-sm text-slate-900">{{ $event['event_type'] ?? '-' }}</td>
-                                        <td class="tabular-nums text-sm text-slate-900">{{ $event['version_id'] ?? '-' }}</td>
-                                        <td class="text-sm text-slate-600">{{ $event['from_status'] ?? '' }} &rarr; {{ $event['to_status'] ?? '' }}</td>
-                                        <td class="text-sm text-slate-600">{{ \Illuminate\Support\Str::limit((string) ($event['note'] ?? ''), 80) }}</td>
+                                        <td class="text-secondary">{{ $event['created_at'] ?? '-' }}</td>
+                                        <td>{{ $event['event_type'] ?? '-' }}</td>
+                                        <td>{{ $event['version_id'] ?? '-' }}</td>
+                                        <td class="text-secondary">{{ $event['from_status'] ?? '' }} &rarr; {{ $event['to_status'] ?? '' }}</td>
+                                        <td class="text-secondary">{{ \Illuminate\Support\Str::limit((string) ($event['note'] ?? ''), 80) }}</td>
                                     </tr>
                                 @endforeach
                             </tbody>
@@ -408,116 +412,124 @@
                 @endif
 
                 @if ($canApprove)
-                    <form method="POST" action="{{ url('/ml/'.((int) $selected['id']).'/rollback') }}" class="mt-4 flex flex-wrap items-end gap-3">
+                    <form method="POST" action="{{ url('/ml/'.((int) $selected['id']).'/rollback') }}" class="mt-3">
                         @csrf
-                        <div class="min-w-52 flex-1">
-                            <label for="rollback-note" class="mb-1 block text-sm font-medium text-slate-700">Catatan rollback</label>
-                            <input
-                                id="rollback-note"
-                                name="note"
-                                type="text"
-                                maxlength="1024"
-                                placeholder="mis. versi bermasalah di produksi"
-                                class="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
-                            >
+                        <div class="row g-2 align-items-end">
+                            <div class="col-md-8">
+                                <label for="rollback-note" class="form-label">Catatan rollback</label>
+                                <input
+                                    id="rollback-note"
+                                    name="note"
+                                    type="text"
+                                    maxlength="1024"
+                                    placeholder="mis. versi bermasalah di produksi"
+                                    class="form-control"
+                                >
+                            </div>
+                            <div class="col-md-4">
+                                <button
+                                    type="submit"
+                                    class="btn btn-outline-danger w-100"
+                                >Kembalikan ke versi sebelumnya</button>
+                            </div>
                         </div>
-                        <button
-                            type="submit"
-                            class="inline-flex items-center justify-center rounded-md border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600 focus-visible:ring-offset-2"
-                        >Kembalikan ke versi sebelumnya</button>
                     </form>
                 @endif
             </x-card>
         @endif
 
         @if (auth()->user()->isAnalyst())
-            <div class="grid gap-6 lg:grid-cols-2">
-                <x-card title="Buat eksperimen" description="Catat split train/validasi/test beserta metrik per split.">
-                    <form method="POST" action="{{ url('/ml/experiments') }}" class="space-y-4">
-                        @csrf
+            <div class="row row-cards">
+                <div class="col-md-6">
+                    <x-card title="Buat eksperimen" description="Catat split train/validasi/test beserta metrik per split.">
+                        <form method="POST" action="{{ url('/ml/experiments') }}">
+                            @csrf
 
-                        <x-field label="Tipe model" for="experiment_model_type" name="model_type" required>
-                            <select
-                                id="experiment_model_type"
-                                name="model_type"
-                                required
-                                class="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
-                            >
-                                <option value="">Pilih tipe model</option>
-                                @foreach ($modelTypes as $type)
-                                    <option value="{{ $type }}">{{ $typeLabels[$type] ?? $type }}</option>
-                                @endforeach
-                            </select>
-                        </x-field>
+                            <x-field label="Tipe model" for="experiment_model_type" name="model_type" required>
+                                <select
+                                    id="experiment_model_type"
+                                    name="model_type"
+                                    required
+                                    class="form-select"
+                                >
+                                    <option value="">Pilih tipe model</option>
+                                    @foreach ($modelTypes as $type)
+                                        <option value="{{ $type }}">{{ $typeLabels[$type] ?? $type }}</option>
+                                    @endforeach
+                                </select>
+                            </x-field>
 
-                        <x-field label="Nama eksperimen" for="experiment_name" name="name">
-                            <input
-                                id="experiment_name"
-                                name="name"
-                                type="text"
-                                maxlength="128"
-                                placeholder="mis. churn_q1_baseline"
-                                class="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
-                            >
-                        </x-field>
+                            <x-field label="Nama eksperimen" for="experiment_name" name="name">
+                                <input
+                                    id="experiment_name"
+                                    name="name"
+                                    type="text"
+                                    maxlength="128"
+                                    placeholder="mis. churn_q1_baseline"
+                                    class="form-control"
+                                >
+                            </x-field>
 
-                        <button
-                            type="submit"
-                            class="inline-flex w-full items-center justify-center rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
-                        >Jalankan eksperimen</button>
-                    </form>
-                </x-card>
+                            <button
+                                type="submit"
+                                class="btn btn-primary w-100"
+                            >Jalankan eksperimen</button>
+                        </form>
+                    </x-card>
+                </div>
 
-                <x-card title="Batch prediksi" description="Nilai dataset baris demi chunk dengan versi produksi dan simpan riwayatnya.">
-                    <form method="POST" action="{{ url('/ml/batch-predict') }}" class="space-y-4">
-                        @csrf
+                <div class="col-md-6">
+                    <x-card title="Batch prediksi" description="Nilai dataset baris demi chunk dengan versi produksi dan simpan riwayatnya.">
+                        <form method="POST" action="{{ url('/ml/batch-predict') }}">
+                            @csrf
 
-                        <x-field label="Tipe model" for="batch_model_type" name="model_type" required>
-                            <select
-                                id="batch_model_type"
-                                name="model_type"
-                                required
-                                class="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
-                            >
-                                <option value="">Pilih tipe model</option>
-                                @foreach ($modelTypes as $type)
-                                    <option value="{{ $type }}">{{ $typeLabels[$type] ?? $type }}</option>
-                                @endforeach
-                            </select>
-                        </x-field>
+                            <x-field label="Tipe model" for="batch_model_type" name="model_type" required>
+                                <select
+                                    id="batch_model_type"
+                                    name="model_type"
+                                    required
+                                    class="form-select"
+                                >
+                                    <option value="">Pilih tipe model</option>
+                                    @foreach ($modelTypes as $type)
+                                        <option value="{{ $type }}">{{ $typeLabels[$type] ?? $type }}</option>
+                                    @endforeach
+                                </select>
+                            </x-field>
 
-                        <x-field label="Nama model" for="batch_model_name" name="model_name">
-                            <input
-                                id="batch_model_name"
-                                name="model_name"
-                                type="text"
-                                maxlength="128"
-                                placeholder="mis. churn-model"
-                                class="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
-                            >
-                        </x-field>
+                            <x-field label="Nama model" for="batch_model_name" name="model_name">
+                                <input
+                                    id="batch_model_name"
+                                    name="model_name"
+                                    type="text"
+                                    maxlength="128"
+                                    placeholder="mis. churn-model"
+                                    class="form-control"
+                                >
+                            </x-field>
 
-                        <x-field
-                            label="Dataset JSON"
-                            for="batch_dataset"
-                            name="dataset"
-                            hint="Array JSON dari baris data, misalnya [{&quot;recency&quot;: 12}]."
-                        >
-                            <textarea
-                                id="batch_dataset"
+                            <x-field
+                                label="Dataset JSON"
+                                for="batch_dataset"
                                 name="dataset"
-                                rows="4"
-                                spellcheck="false"
-                                class="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 font-mono text-sm text-slate-900 focus:border-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
-                            >[]</textarea>
-                        </x-field>
+                                hint="Array JSON dari baris data, misalnya [{&quot;recency&quot;: 12}]."
+                            >
+                                <textarea
+                                    id="batch_dataset"
+                                    name="dataset"
+                                    rows="4"
+                                    spellcheck="false"
+                                    class="form-control"
+                                >[]</textarea>
+                            </x-field>
 
-                        <button
-                            type="submit"
-                            class="inline-flex w-full items-center justify-center rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
-                        >Jalankan batch prediksi</button>
-                    </form>
-                </x-card>
+                            <button
+                                type="submit"
+                                class="btn btn-primary w-100"
+                            >Jalankan batch prediksi</button>
+                        </form>
+                    </x-card>
+                </div>
             </div>
         @endif
     </div>

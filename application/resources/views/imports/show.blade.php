@@ -21,38 +21,41 @@
                 ?? ['label' => 'Status tidak dikenal', 'badge' => 'badge-neutral']);
     @endphp
 
-    <div class="mb-6 flex flex-wrap items-start justify-between gap-4">
-        <div class="min-w-0">
-            <nav aria-label="Remah roti" class="mb-2 text-sm text-slate-500">
+    <div class="page-header">
+        <div class="row align-items-center">
+            <div class="col">
+                <nav aria-label="Remah roti">
+                    <ol class="breadcrumb">
+                        <li class="breadcrumb-item">
+                            <a
+                                href="{{ route('imports.index') }}"
+                            >Impor</a>
+                        </li>
+                        <li class="breadcrumb-item active" aria-current="page">{{ $dataset->name }}</li>
+                    </ol>
+                </nav>
+
+                <h1 class="page-title">Status impor</h1>
+                <p class="page-subtitle">
+                    <x-badge :class="$status->badgeClass()">{{ $status->localizedLabel() }}</x-badge>
+                    <span>ID job impor {{ number_format((int) $dataset->import_job_id, 0, ',', '.') }}</span>
+                </p>
+            </div>
+            <div class="col-auto">
                 <a
-                    href="{{ route('imports.index') }}"
-                    class="rounded hover:text-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
-                >Impor</a>
-                <span aria-hidden="true"> / </span>
-                <span class="text-slate-700">{{ $dataset->name }}</span>
-            </nav>
-
-            <h1 class="text-2xl font-semibold text-slate-900">Status impor</h1>
-            <p class="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500">
-                <x-badge :class="$status->badgeClass()">{{ $status->localizedLabel() }}</x-badge>
-                <span>ID job impor {{ number_format((int) $dataset->import_job_id, 0, ',', '.') }}</span>
-            </p>
-        </div>
-
-        <div class="flex flex-wrap gap-2">
-            <a
-                href="{{ route('imports.show', ['dataset' => $dataset, 'refresh' => 1]) }}"
-                class="inline-flex items-center rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
-            >Perbarui status</a>
-            <a
-                href="{{ route('datasets.show', $dataset) }}"
-                class="inline-flex items-center rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
-            >Kembali ke dataset</a>
+                    href="{{ route('imports.show', ['dataset' => $dataset, 'refresh' => 1]) }}"
+                    class="btn btn-primary"
+                >Perbarui status</a>
+                <a
+                    href="{{ route('datasets.show', $dataset) }}"
+                    class="btn"
+                >Kembali ke dataset</a>
+            </div>
         </div>
     </div>
 
-    <div class="grid gap-6 lg:grid-cols-3">
-        <div class="space-y-6 lg:col-span-2">
+    <div class="row row-cards">
+        <div class="col-lg-8">
             <x-card title="Progres" description="Diambil dari mesin AI ketika tautan Perbarui status diklik.">
                 @if ($progress === null)
                     <x-empty-state
@@ -60,12 +63,12 @@
                         description="Mesin AI belum melaporkan progres untuk job ini. Klik Perbarui status untuk mengambil laporan terbaru."
                     />
                 @else
-                    <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <div>
                         <x-badge :class="$jobBadge['badge']">{{ $jobBadge['label'] }}</x-badge>
-                        <span class="text-sm font-semibold tabular-nums text-slate-700">{{ \Illuminate\Support\Number::percentage($progress, precision: 1, locale: 'id') }}</span>                    </div>
+                        <span class="fw-bold text-secondary">{{ \Illuminate\Support\Number::percentage($progress, precision: 1, locale: 'id') }}</span>                    </div>
 
                     <div
-                        class="h-2 w-full overflow-hidden rounded-full bg-slate-200"
+                        class="progress"
                         role="progressbar"
                         aria-valuenow="{{ number_format($progress, 1, '.', '') }}"
                         aria-valuemin="0"
@@ -73,7 +76,7 @@
                         aria-label="Progres impor {{ $dataset->name }}"
                     >
                         <div
-                            class="h-2 rounded-full {{ $progress >= 100 ? 'bg-emerald-600' : 'bg-brand-600' }}"
+                            class="progress-bar {{ $progress >= 100 ? 'bg-success' : '' }}"
                             style="width: {{ number_format($progress, 1, '.', '') }}%"
                         ></div>
                     </div>
@@ -87,24 +90,24 @@
                         description="Klik Perbarui status untuk mengambil laporan terbaru dari mesin AI."
                     />
                 @else
-                    <dl class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                        <div>
-                            <dt class="text-sm font-medium text-slate-500">Total baris</dt>
-                            <dd class="mt-1 text-lg font-semibold tabular-nums text-slate-900">{{ number_format((int) ($job['total_rows'] ?? 0), 0, ',', '.') }}</dd>
+                    <dl class="datagrid">
+                        <div class="datagrid-item">
+                            <dt class="datagrid-title">Total baris</dt>
+                            <dd class="datagrid-content">{{ number_format((int) ($job['total_rows'] ?? 0), 0, ',', '.') }}</dd>
                         </div>
-                        <div>
-                            <dt class="text-sm font-medium text-slate-500">Baris diproses</dt>
-                            <dd class="mt-1 text-lg font-semibold tabular-nums text-slate-900">{{ number_format((int) ($job['processed_rows'] ?? 0), 0, ',', '.') }}</dd>
+                        <div class="datagrid-item">
+                            <dt class="datagrid-title">Baris diproses</dt>
+                            <dd class="datagrid-content">{{ number_format((int) ($job['processed_rows'] ?? 0), 0, ',', '.') }}</dd>
                         </div>
-                        <div>
-                            <dt class="text-sm font-medium text-slate-500">Baris berhasil</dt>
-                            <dd class="mt-1 text-lg font-semibold tabular-nums text-emerald-700">
+                        <div class="datagrid-item">
+                            <dt class="datagrid-title">Baris berhasil</dt>
+                            <dd class="datagrid-content">
                                 {{ number_format(max(0, (int) ($job['processed_rows'] ?? 0) - (int) ($job['error_rows'] ?? 0)), 0, ',', '.') }}
                             </dd>
                         </div>
-                        <div>
-                            <dt class="text-sm font-medium text-slate-500">Baris bermasalah</dt>
-                            <dd class="mt-1 text-lg font-semibold tabular-nums text-rose-700">{{ number_format((int) ($job['error_rows'] ?? 0), 0, ',', '.') }}</dd>
+                        <div class="datagrid-item">
+                            <dt class="datagrid-title">Baris bermasalah</dt>
+                            <dd class="datagrid-content">{{ number_format((int) ($job['error_rows'] ?? 0), 0, ',', '.') }}</dd>
                         </div>
                     </dl>
                 @endif
@@ -117,11 +120,11 @@
                         description="Mesin AI belum memberikan laporan rinci untuk job ini."
                     />
                 @else
-                    <dl class="divide-y divide-slate-100 text-sm">
+                    <dl class="datagrid">
                         @foreach ((array) $job['report'] as $key => $value)
-                            <div class="flex flex-wrap items-start justify-between gap-2 py-2">
-                                <dt class="font-medium text-slate-500">{{ $reportLabels[$key] ?? \Illuminate\Support\Str::headline((string) $key) }}</dt>
-                                <dd class="max-w-full break-words text-right text-slate-800">
+                            <div class="datagrid-item">
+                                <dt class="datagrid-title">{{ $reportLabels[$key] ?? \Illuminate\Support\Str::headline((string) $key) }}</dt>
+                                <dd class="datagrid-content text-end">
                                     @php
                                         $reportValue = is_scalar($value) || $value === null
                                             ? (string) ($value ?? '—')
@@ -136,28 +139,28 @@
             </x-card>
         </div>
 
-        <div class="space-y-6">
+        <div class="col-lg-4">
             <x-card title="Dataset" description="Ringkasan berkas yang diimpor.">
-                <dl class="space-y-3 text-sm">
-                    <div>
-                        <dt class="font-medium text-slate-500">Nama</dt>
-                        <dd class="text-slate-900">{{ $dataset->name }}</dd>
+                <dl class="datagrid">
+                    <div class="datagrid-item">
+                        <dt class="datagrid-title">Nama</dt>
+                        <dd class="datagrid-content">{{ $dataset->name }}</dd>
                     </div>
-                    <div>
-                        <dt class="font-medium text-slate-500">Tipe</dt>
-                        <dd class="text-slate-900">{{ $typeLabels[$dataset->dataset_type] ?? $dataset->dataset_type }}</dd>
+                    <div class="datagrid-item">
+                        <dt class="datagrid-title">Tipe</dt>
+                        <dd class="datagrid-content">{{ $typeLabels[$dataset->dataset_type] ?? $dataset->dataset_type }}</dd>
                     </div>
-                    <div>
-                        <dt class="font-medium text-slate-500">Berkas</dt>
-                        <dd class="break-all text-slate-900">{{ $dataset->source_filename ?: 'Tidak diketahui' }}</dd>
+                    <div class="datagrid-item">
+                        <dt class="datagrid-title">Berkas</dt>
+                        <dd class="datagrid-content">{{ $dataset->source_filename ?: 'Tidak diketahui' }}</dd>
                     </div>
-                    <div>
-                        <dt class="font-medium text-slate-500">Jumlah baris tercatat</dt>
-                        <dd class="text-slate-900">{{ number_format((int) $dataset->row_count, 0, ',', '.') }}</dd>
+                    <div class="datagrid-item">
+                        <dt class="datagrid-title">Jumlah baris tercatat</dt>
+                        <dd class="datagrid-content">{{ number_format((int) $dataset->row_count, 0, ',', '.') }}</dd>
                     </div>
-                    <div>
-                        <dt class="font-medium text-slate-500">Waktu komit</dt>
-                        <dd class="text-slate-900">
+                    <div class="datagrid-item">
+                        <dt class="datagrid-title">Waktu komit</dt>
+                        <dd class="datagrid-content">
                             {{ $dataset->committed_at ? $dataset->committed_at->locale('id')->translatedFormat('d M Y H:i') : 'Belum dikomit' }}
                         </dd>
                     </div>

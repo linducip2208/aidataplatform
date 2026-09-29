@@ -7,70 +7,82 @@
         $typeLabels = config('ai_engine.dataset_type_labels', []);
     @endphp
 
-    <div class="mb-6">
-        <h1 class="text-2xl font-semibold text-slate-900">Kualitas data</h1>
-        <p class="mt-1 text-sm text-slate-500">
+    <div class="page-header">
+        <h1 class="page-title">Kualitas data</h1>
+        <p class="page-subtitle">
             Riwayat pemeriksaan kualitas dataset dan dataset yang belum dinilai.
         </p>
     </div>
 
-    <div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <x-stat
-            :label="\App\Enums\QualityVerdict::Pass->localizedLabel()"
-            :value="number_format((int) ($breakdown['pass'] ?? 0), 0, ',', '.')"
-            hint="Dataset di atas ambang minimum"
-        />
-        <x-stat
-            :label="\App\Enums\QualityVerdict::Quarantine->localizedLabel()"
-            :value="number_format((int) ($breakdown['quarantine'] ?? 0), 0, ',', '.')"
-            hint="Dataset di bawah ambang minimum"
-        />
-        <x-stat label="Belum dinilai" :value="number_format((int) ($breakdown['unscored'] ?? 0), 0, ',', '.')" hint="Dataset tanpa laporan kualitas" />
-        <x-stat
-            label="Ambang minimum"
-            :value="\Illuminate\Support\Number::percentage($threshold * 100, precision: 1, locale: 'id')"
-            hint="Dataset dengan skor di bawah nilai ini dikarantina"
-        />
+    <div class="row row-cards">
+        <div class="col-sm-6 col-lg-3">
+            <x-stat
+                :label="\App\Enums\QualityVerdict::Pass->localizedLabel()"
+                :value="number_format((int) ($breakdown['pass'] ?? 0), 0, ',', '.')"
+                hint="Dataset di atas ambang minimum"
+            />
+        </div>
+        <div class="col-sm-6 col-lg-3">
+            <x-stat
+                :label="\App\Enums\QualityVerdict::Quarantine->localizedLabel()"
+                :value="number_format((int) ($breakdown['quarantine'] ?? 0), 0, ',', '.')"
+                hint="Dataset di bawah ambang minimum"
+            />
+        </div>
+        <div class="col-sm-6 col-lg-3">
+            <x-stat label="Belum dinilai" :value="number_format((int) ($breakdown['unscored'] ?? 0), 0, ',', '.')" hint="Dataset tanpa laporan kualitas" />
+        </div>
+        <div class="col-sm-6 col-lg-3">
+            <x-stat
+                label="Ambang minimum"
+                :value="\Illuminate\Support\Number::percentage($threshold * 100, precision: 1, locale: 'id')"
+                hint="Dataset dengan skor di bawah nilai ini dikarantina"
+            />
+        </div>
     </div>
 
-    <x-card class="mb-6" title="Filter" description="Saring berdasarkan tipe dataset atau vonis kualitas.">
-        <form method="GET" action="{{ route('quality.index') }}" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <x-field label="Tipe dataset" for="dataset_type">
-                <select
-                    id="dataset_type"
-                    name="dataset_type"
-                    class="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
-                >
-                    <option value="">Semua tipe</option>
-                    @foreach (array_keys($typeLabels) as $type)
-                        <option value="{{ $type }}" @selected(($filters['dataset_type'] ?? '') === $type)>{{ $typeLabels[$type] }}</option>
-                    @endforeach
-                </select>
-            </x-field>
+    <x-card title="Filter" description="Saring berdasarkan tipe dataset atau vonis kualitas.">
+        <form method="GET" action="{{ route('quality.index') }}" class="row row-cards">
+            <div class="col-md-6">
+                <x-field label="Tipe dataset" for="dataset_type">
+                    <select
+                        id="dataset_type"
+                        name="dataset_type"
+                        class="form-select"
+                    >
+                        <option value="">Semua tipe</option>
+                        @foreach (array_keys($typeLabels) as $type)
+                            <option value="{{ $type }}" @selected(($filters['dataset_type'] ?? '') === $type)>{{ $typeLabels[$type] }}</option>
+                        @endforeach
+                    </select>
+                </x-field>
+            </div>
 
-            <x-field label="Vonis kualitas" for="verdict">
-                <select
-                    id="verdict"
-                    name="verdict"
-                    class="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
-                >
-                    <option value="">Semua vonis</option>
-                    @foreach ($verdicts as $verdict)
-                        <option value="{{ $verdict->value }}" @selected(($filters['verdict'] ?? '') === $verdict->value)>
-                            {{ $verdict->localizedLabel() }}
-                        </option>
-                    @endforeach
-                </select>
-            </x-field>
+            <div class="col-md-6">
+                <x-field label="Vonis kualitas" for="verdict">
+                    <select
+                        id="verdict"
+                        name="verdict"
+                        class="form-select"
+                    >
+                        <option value="">Semua vonis</option>
+                        @foreach ($verdicts as $verdict)
+                            <option value="{{ $verdict->value }}" @selected(($filters['verdict'] ?? '') === $verdict->value)>
+                                {{ $verdict->localizedLabel() }}
+                            </option>
+                        @endforeach
+                    </select>
+                </x-field>
+            </div>
 
-            <div class="flex items-end gap-2 sm:col-span-2">
+            <div class="col-md-6">
                 <button
                     type="submit"
-                    class="inline-flex flex-1 items-center justify-center rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                    class="btn btn-primary"
                 >Terapkan</button>
                 <a
                     href="{{ route('quality.index') }}"
-                    class="inline-flex items-center justify-center rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                    class="btn"
                 >Atur ulang</a>
             </div>
         </form>
@@ -85,21 +97,21 @@
                 <x-slot:action>
                     <a
                         href="{{ route('datasets.index') }}"
-                        class="inline-flex rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                        class="btn"
                     >Lihat dataset</a>
                 </x-slot:action>
             </x-empty-state>
         @else
             <x-table-wrapper label="Hasil pemeriksaan kualitas">
-                <table class="app-table">
+                <table class="table table-vcenter card-table">
                     <thead>
                         <tr>
                             <th scope="col">Dataset</th>
                             <th scope="col">Tipe</th>
-                            <th scope="col" class="text-right">Skor</th>
+                            <th scope="col" class="text-end">Skor</th>
                             <th scope="col">Vonis</th>
                             <th scope="col">Status alur</th>
-                            <th scope="col" class="text-right">Diperiksa</th>
+                            <th scope="col" class="text-end">Diperiksa</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -113,16 +125,16 @@
                                 <td>
                                     <a
                                         href="{{ route('datasets.show', $dataset) }}"
-                                        class="rounded font-medium text-slate-900 hover:text-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                                        class="fw-bold text-secondary"
                                     >{{ $dataset->name }}</a>
-                                    <span class="mt-1 block text-xs text-slate-500">{{ $dataset->source_filename ?: 'Tanpa nama berkas' }}</span>
+                                    <span class="text-secondary">{{ $dataset->source_filename ?: 'Tanpa nama berkas' }}</span>
                                 </td>
                                 <td>{{ $typeLabels[$dataset->dataset_type] ?? $dataset->dataset_type }}</td>
-                                <td class="text-right">
-                                    <span class="tabular-nums font-medium text-slate-900">
+                                <td class="text-end">
+                                    <span class="fw-bold text-secondary">
                                         {{ \Illuminate\Support\Number::percentage((float) $dataset->quality_score * 100, precision: 1, locale: 'id') }}
                                     </span>
-                                    <span class="mt-1 block text-xs {{ $meetsThreshold ? 'text-emerald-700' : 'text-rose-700' }}">
+                                    <span class="text-secondary">
                                         {{ $meetsThreshold ? 'Di atas ambang' : 'Di bawah ambang' }}
                                     </span>
                                 </td>
@@ -132,11 +144,11 @@
                                     </x-badge>
                                 </td>
                                 <td><x-badge :class="$status->badgeClass()">{{ $status->localizedLabel() }}</x-badge></td>
-                                <td class="text-right">
+                                <td class="text-end">
                                     @if ($dataset->quality_checked_at)
-                                        <span class="text-xs text-slate-500">{{ $dataset->quality_checked_at->locale('id')->translatedFormat('d M Y H:i') }}</span>
+                                        <span class="text-secondary">{{ $dataset->quality_checked_at->locale('id')->translatedFormat('d M Y H:i') }}</span>
                                     @else
-                                        <span class="text-xs text-slate-400">Tidak diketahui</span>
+                                        <span class="text-secondary">Tidak diketahui</span>
                                     @endif
                                 </td>
                             </tr>
@@ -145,7 +157,7 @@
                 </table>
             </x-table-wrapper>
 
-            <div class="mt-4">
+            <div>
                 {{ $datasets->links() }}
             </div>
         @endif

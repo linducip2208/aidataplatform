@@ -64,62 +64,70 @@
         $typeLabels = config('ai_engine.dataset_type_labels', []);
     @endphp
 
-    <div class="mb-6 flex flex-wrap items-start justify-between gap-4">
-        <div class="min-w-0">
-            <nav aria-label="Remah roti" class="mb-2 text-sm text-slate-500">
-                <a
-                    href="{{ route('datasets.index') }}"
-                    class="rounded hover:text-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
-                >Kumpulan data</a>
-                <span aria-hidden="true"> / </span>
-                <span class="text-slate-700">{{ $dataset->name }}</span>
-            </nav>
+    <div class="page-header">
+        <div class="row align-items-center">
+            <div class="col">
+                <nav aria-label="Remah roti">
+                    <ol class="breadcrumb">
+                        <li class="breadcrumb-item">
+                            <a
+                                href="{{ route('datasets.index') }}"
+                            >Kumpulan data</a>
+                        </li>
+                        <li class="breadcrumb-item active" aria-current="page">{{ $dataset->name }}</li>
+                    </ol>
+                </nav>
 
-            <h1 class="text-2xl font-semibold text-slate-900">{{ $dataset->name }}</h1>
-            <p class="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500">
-                <x-badge :class="$status->badgeClass()">{{ $status->localizedLabel() }}</x-badge>
-                <span>{{ $dataset->source_filename ?: 'Tanpa nama berkas' }}</span>
-                <span aria-hidden="true">&middot;</span>
-                <span>{{ $dataset->sizeForHumans() }}</span>
-            </p>
-        </div>
+                <h1 class="page-title">{{ $dataset->name }}</h1>
+                <div class="page-subtitle d-flex flex-wrap align-items-center gap-2">
+                    <x-badge :class="$status->badgeClass()">{{ $status->localizedLabel() }}</x-badge>
+                    <span>{{ $dataset->source_filename ?: 'Tanpa nama berkas' }}</span>
+                    <span aria-hidden="true">&middot;</span>
+                    <span>{{ $dataset->sizeForHumans() }}</span>
+                </div>
+            </div>
 
-        <div class="flex flex-wrap gap-2">
-            <a
-                href="{{ route('datasets.index') }}"
-                class="inline-flex items-center rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
-            >Kembali ke daftar</a>
+            <div class="col-auto ms-auto">
+                <div class="d-flex flex-wrap gap-2">
+                    <a
+                        href="{{ route('datasets.index') }}"
+                        class="btn"
+                    >Kembali ke daftar</a>
 
-            @if ($hasJob)
-                <a
-                    href="{{ route('imports.show', $dataset) }}"
-                    class="inline-flex items-center rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
-                >Lihat job impor</a>
-            @endif
+                    @if ($hasJob)
+                        <a
+                            href="{{ route('imports.show', $dataset) }}"
+                            class="btn"
+                        >Lihat job impor</a>
+                    @endif
+                </div>
+            </div>
         </div>
     </div>
 
-    <ol class="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-label="Tahapan pemrosesan dataset">
+    <ol class="row row-cards" aria-label="Tahapan pemrosesan dataset">
         @foreach ($steps as $index => $step)
-            <li class="app-card p-4">
-                <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Tahap {{ $index + 1 }}</p>
-                <p class="mt-1 text-sm font-semibold text-slate-900">{{ $step['label'] }}</p>
-                <p class="mt-2">
-                    @if ($step['done'])
-                        <x-badge variant="success">Selesai</x-badge>
-                    @elseif ($step['ready'])
-                        <x-badge variant="info">Siap dijalankan</x-badge>
-                    @else
-                        <x-badge variant="neutral">Menunggu langkah sebelumnya</x-badge>
-                    @endif
-                </p>
+            <li class="col-sm-6 col-lg-3">
+                <div class="card card-body">
+                    <p class="text-secondary small fw-bold text-uppercase">Tahap {{ $index + 1 }}</p>
+                    <p class="fw-bold">{{ $step['label'] }}</p>
+                    <p>
+                        @if ($step['done'])
+                            <x-badge variant="success">Selesai</x-badge>
+                        @elseif ($step['ready'])
+                            <x-badge variant="info">Siap dijalankan</x-badge>
+                        @else
+                            <x-badge variant="neutral">Menunggu langkah sebelumnya</x-badge>
+                        @endif
+                    </p>
+                </div>
             </li>
         @endforeach
     </ol>
 
     @unless ($canWrite)
-        <x-card class="mb-6" title="Akses baca saja">
-            <p class="text-sm text-slate-600">
+        <x-card class="mb-3" title="Akses baca saja">
+            <p class="text-secondary">
                 Peran <strong>{{ auth()->user()->role()->localizedLabel() }}</strong> hanya dapat melihat dataset.
                 Menjalankan pratinjau, pemetaan, kualitas, dan komit terbatas untuk
                 {{ \App\Enums\UserRole::Admin->localizedLabel() }} dan {{ \App\Enums\UserRole::Analyst->localizedLabel() }}.
@@ -127,34 +135,34 @@
         </x-card>
     @endunless
 
-    <div class="grid gap-6 lg:grid-cols-3">
-        <div class="space-y-6 lg:col-span-2">
+    <div class="row row-cards">
+        <div class="col-lg-8">
             <x-card
                 title="Tahap 1: Pratinjau data"
                 description="Membaca berkas dan memprofil jumlah baris, kolom, serta contoh data."
             >
                 @if (! $hasJob)
-                    <p class="mb-4 text-sm text-slate-600">
+                    <p class="text-secondary">
                         Dataset ini belum memiliki job import, jadi mesin AI tidak bisa memprofilnya. Unggah ulang berkasnya untuk memulai dari awal.
                     </p>
                 @endif
 
-                <dl class="mb-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                    <div>
-                        <dt class="text-sm font-medium text-slate-500">Jumlah baris</dt>
-                        <dd class="mt-1 text-lg font-semibold tabular-nums text-slate-900">{{ number_format((int) $dataset->row_count, 0, ',', '.') }}</dd>
+                <dl class="datagrid mb-3">
+                    <div class="datagrid-item">
+                        <dt class="datagrid-title">Jumlah baris</dt>
+                        <dd class="datagrid-content tabular-nums">{{ number_format((int) $dataset->row_count, 0, ',', '.') }}</dd>
                     </div>
-                    <div>
-                        <dt class="text-sm font-medium text-slate-500">Jumlah kolom</dt>
-                        <dd class="mt-1 text-lg font-semibold tabular-nums text-slate-900">{{ number_format((int) $dataset->column_count, 0, ',', '.') }}</dd>
+                    <div class="datagrid-item">
+                        <dt class="datagrid-title">Jumlah kolom</dt>
+                        <dd class="datagrid-content tabular-nums">{{ number_format((int) $dataset->column_count, 0, ',', '.') }}</dd>
                     </div>
-                    <div>
-                        <dt class="text-sm font-medium text-slate-500">Job impor</dt>
-                        <dd class="mt-1 text-lg font-semibold tabular-nums text-slate-900">{{ $dataset->import_job_id ? number_format((int) $dataset->import_job_id, 0, ',', '.') : 'Belum ada' }}</dd>
+                    <div class="datagrid-item">
+                        <dt class="datagrid-title">Job impor</dt>
+                        <dd class="datagrid-content tabular-nums">{{ $dataset->import_job_id ? number_format((int) $dataset->import_job_id, 0, ',', '.') : 'Belum ada' }}</dd>
                     </div>
-                    <div>
-                        <dt class="text-sm font-medium text-slate-500">Diunggah</dt>
-                        <dd class="mt-1 text-sm text-slate-700">
+                    <div class="datagrid-item">
+                        <dt class="datagrid-title">Diunggah</dt>
+                        <dd class="datagrid-content">
                             {{ $dataset->created_at ? $dataset->created_at->locale('id')->translatedFormat('d M Y H:i') : 'Tidak diketahui' }}
                         </dd>
                     </div>
@@ -166,11 +174,11 @@
                         <button
                             type="submit"
                             @disabled(! $hasJob)
-                            class="inline-flex items-center rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
+                            class="btn btn-primary"
                         >{{ $hasProfile ? 'Jalankan pratinjau ulang' : 'Jalankan pratinjau' }}</button>
 
                         @unless ($hasJob)
-                            <p class="mt-2 text-xs text-slate-500">Tombol dinonaktifkan karena dataset belum memiliki job import.</p>
+                            <p class="text-secondary small">Tombol dinonaktifkan karena dataset belum memiliki job import.</p>
                         @endunless
                     </form>
                 @endif
@@ -190,8 +198,8 @@
                         <form method="POST" action="{{ route('datasets.mapping', $dataset) }}">
                             @csrf
 
-                            <x-table-wrapper label="Pemetaan kolom" class="mb-4">
-                                <table class="app-table">
+                            <x-table-wrapper label="Pemetaan kolom" class="mb-3">
+                                <table class="table table-vcenter card-table">
                                     <thead>
                                         <tr>
                                             <th scope="col">Kolom sumber</th>
@@ -213,12 +221,12 @@
                                             @endphp
                                             <tr>
                                                 <td>
-                                                    <span class="font-medium text-slate-900">{{ $column }}</span>
+                                                    <span>{{ $column }}</span>
                                                     @php $profile = $columnProfiles[$loop->index] ?? null; @endphp
                                                     @if (is_array($profile))
-                                                        <span class="mt-1 block text-xs text-slate-500">
+                                                        <span class="d-block text-secondary small">
                                                             @if (! empty($profile['dtype']))
-                                                                <span class="uppercase">{{ $profile['dtype'] }}</span>
+                                                                <span class="text-uppercase">{{ $profile['dtype'] }}</span>
                                                                 &middot;
                                                             @endif
                                             kosong {{ number_format((int) ($profile['missing'] ?? 0), 0, ',', '.') }}
@@ -228,11 +236,11 @@
                                                     @endif
                                                 </td>
                                                 <td>
-                                                    <label for="mapping-{{ $loop->index }}" class="sr-only">Target untuk kolom {{ $column }}</label>
+                                                    <label for="mapping-{{ $loop->index }}" class="visually-hidden">Target untuk kolom {{ $column }}</label>
                                                     <select
                                                         id="mapping-{{ $loop->index }}"
                                                         name="{{ $inputName }}"
-                                                        class="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                                                        class="form-select"
                                                     >
                                                         <option value="">Tidak dipetakan</option>
                                                         @foreach ($options as $target)
@@ -247,7 +255,7 @@
                             </x-table-wrapper>
 
                             @error('mappings')
-                                <p class="mb-4 text-xs font-medium text-rose-700">{{ $message }}</p>
+                                <p class="text-danger small fw-bold">{{ $message }}</p>
                             @enderror
 
                             <x-field
@@ -255,7 +263,7 @@
                                 for="save_as_template"
                                 name="save_as_template"
                                 hint="Opsional. Nama template untuk dipakai ulang pada dataset berikutnya."
-                                class="mb-4"
+                                class="mb-3"
                             >
                                 <input
                                     id="save_as_template"
@@ -265,21 +273,21 @@
                                     maxlength="120"
                                     placeholder="mis. template_penjualan_retail"
                                     @error('save_as_template') aria-invalid="true" @enderror
-                                    class="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                                    class="form-control"
                                 >
                             </x-field>
 
                             <button
                                 type="submit"
-                                class="inline-flex items-center rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                                class="btn btn-primary"
                             >Simpan pemetaan</button>
                         </form>
                     @else
-                        <dl class="divide-y divide-slate-100">
+                        <dl class="datagrid">
                             @foreach ($mappings as $source => $target)
-                                <div class="flex flex-wrap items-center justify-between gap-2 py-2">
-                                    <dt class="text-sm font-medium text-slate-900">{{ $source }}</dt>
-                                    <dd class="text-sm text-slate-600">{{ $target }}</dd>
+                                <div class="datagrid-item">
+                                    <dt class="datagrid-title">{{ $source }}</dt>
+                                    <dd class="datagrid-content">{{ $target }}</dd>
                                 </div>
                             @endforeach
 
@@ -296,32 +304,32 @@
                 description="Menghitung kelengkapan, keunikan, validitas, dan konsistensi data sebelum masuk gudang."
             >
                 @if ($score === null)
-                    <p class="mb-4 text-sm text-slate-600">
+                    <p class="text-secondary">
                         Belum ada laporan kualitas. Jalankan pemeriksaan setelah pemetaan kolom tersimpan.
                     </p>
                 @else
-                    <div class="mb-4 flex flex-wrap items-center gap-3">
-                        <p class="text-3xl font-semibold tabular-nums text-slate-900">
+                    <div class="d-flex flex-wrap align-items-center gap-3 mb-3">
+                        <p class="tabular-nums">
                             {{ \Illuminate\Support\Number::percentage($score * 100, precision: 1, locale: 'id') }}
                         </p>
                         <x-badge variant="{{ $passed ? 'success' : 'danger' }}">{{ $passed ? \App\Enums\QualityVerdict::Pass->localizedLabel() : 'Belum lolos' }}</x-badge>
-                        <span class="text-sm text-slate-500">Ambang minimum {{ \Illuminate\Support\Number::percentage($threshold * 100, precision: 1, locale: 'id') }}</span>
+                        <span class="text-secondary">Ambang minimum {{ \Illuminate\Support\Number::percentage($threshold * 100, precision: 1, locale: 'id') }}</span>
                     </div>
 
-                    <dl class="mb-4 space-y-3">
+                    <dl class="mb-3">
                         @foreach ($breakdownLabels as $key => $label)
                             @php
                                 $value = (float) ($breakdown[$key] ?? 0);
                                 $percent = max(0.0, min(1.0, $value)) * 100;
-                                $barClass = $value >= $threshold ? 'bg-emerald-600' : 'bg-amber-500';
+                                $barClass = $value >= $threshold ? 'bg-success' : 'bg-warning';
                             @endphp
-                            <div>
-                                <div class="flex items-center justify-between gap-2 text-sm">
-                                    <dt class="font-medium text-slate-700">{{ $label }}</dt>
-                                    <dd class="tabular-nums text-slate-600">{{ \Illuminate\Support\Number::percentage($value * 100, precision: 1, locale: 'id') }}</dd>
+                            <div class="datagrid-item">
+                                <div class="d-flex align-items-center justify-content-between gap-2">
+                                    <dt class="datagrid-title">{{ $label }}</dt>
+                                    <dd class="datagrid-content tabular-nums">{{ \Illuminate\Support\Number::percentage($value * 100, precision: 1, locale: 'id') }}</dd>
                                 </div>
-                                <div class="mt-1 h-2 w-full overflow-hidden rounded-full bg-slate-200">
-                                    <div class="h-2 rounded-full {{ $barClass }}" style="width: {{ number_format($percent, 1, '.', '') }}%"></div>
+                                <div class="progress">
+                                    <div class="progress-bar {{ $barClass }}" role="progressbar" style="width: {{ number_format($percent, 1, '.', '') }}%" aria-valuenow="{{ number_format($percent, 1, '.', '') }}" aria-valuemin="0" aria-valuemax="100"></div>
                                 </div>
                             </div>
                         @endforeach
@@ -329,23 +337,23 @@
                 @endif
 
                 @if ($issues !== [])
-                    <x-table-wrapper label="Temuan pemeriksaan kualitas" class="mb-4">
-                        <table class="app-table">
+                    <x-table-wrapper label="Temuan pemeriksaan kualitas" class="mb-3">
+                        <table class="table table-vcenter card-table">
                             <thead>
                                 <tr>
                                     <th scope="col">Aturan</th>
                                     <th scope="col">Kolom</th>
-                                    <th scope="col" class="text-right">Jumlah</th>
+                                    <th scope="col" class="text-end">Jumlah</th>
                                     <th scope="col">Keterangan</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 @foreach ($issues as $issue)
                                     <tr>
-                                        <td><code class="rounded bg-slate-100 px-1 text-xs">{{ $issue['rule'] ?? 'tidak diketahui' }}</code></td>
+                                        <td><code>{{ $issue['rule'] ?? 'tidak diketahui' }}</code></td>
                                         <td>{{ $issue['column'] ?? 'seluruh tabel' }}</td>
-                                        <td class="text-right tabular-nums">{{ number_format((int) ($issue['count'] ?? 0), 0, ',', '.') }}</td>
-                                        <td class="text-sm text-slate-600">{{ $issue['message'] ?? 'Tanpa keterangan' }}</td>
+                                        <td class="text-end tabular-nums">{{ number_format((int) ($issue['count'] ?? 0), 0, ',', '.') }}</td>
+                                        <td class="text-secondary">{{ $issue['message'] ?? 'Tanpa keterangan' }}</td>
                                     </tr>
                                 @endforeach
                             </tbody>
@@ -359,11 +367,11 @@
                         <button
                             type="submit"
                             @disabled(! $hasJob || ! $hasMappings)
-                            class="inline-flex items-center rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
+                            class="btn btn-primary"
                         >{{ $score === null ? 'Jalankan pemeriksaan kualitas' : 'Jalankan ulang pemeriksaan' }}</button>
 
                         @unless ($hasJob && $hasMappings)
-                            <p class="mt-2 text-xs text-slate-500">
+                            <p class="text-secondary small">
                                 Tombol dinonaktifkan karena
                                 @if (! $hasJob)
                                     job impor belum tersedia.
@@ -381,9 +389,9 @@
                 description="Baris yang lolos ambang kualitas dikirim ke gudang data untuk dianalisis."
             >
                 @if ($isCommitted)
-                    <div class="mb-4 flex flex-wrap items-center gap-2">
+                    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
                         <x-badge :class="$status->badgeClass()">{{ $status->localizedLabel() }}</x-badge>
-                        <p class="text-sm text-slate-600">
+                        <p class="text-secondary">
                             Komit terakhir
                             @if ($dataset->committed_at)
                                 pada {{ $dataset->committed_at->locale('id')->translatedFormat('d M Y H:i') }}.
@@ -393,7 +401,7 @@
                         </p>
                     </div>
                 @elseif (! $passed)
-                    <p class="mb-4 text-sm text-slate-600">
+                    <p class="text-secondary">
                         Komit baru bisa dijalankan setelah skor kualitas mencapai ambang minimum
                         {{ \Illuminate\Support\Number::percentage($threshold * 100, precision: 1, locale: 'id') }}.
                     </p>
@@ -403,7 +411,7 @@
                     <form method="POST" action="{{ route('datasets.commit', $dataset) }}">
                         @csrf
 
-                        <div class="mb-4 flex items-start gap-2">
+                        <div class="d-flex align-items-start gap-2 mb-3">
                             <input
                                 id="run_async"
                                 name="run_async"
@@ -411,11 +419,11 @@
                                 value="1"
                                 @checked(old('run_async', '1'))
                                 @disabled($isCommitted)
-                                class="mt-1 h-4 w-4 rounded border-slate-300 text-brand-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                                class="form-check-input"
                             >
-                            <label for="run_async" class="text-sm text-slate-700">
+                            <label for="run_async" class="text-secondary">
                                 Proses di latar belakang (disarankan)
-                                <span class="mt-1 block text-xs text-slate-500">
+                                <span class="d-block text-secondary small">
                                     Impor diproses oleh worker. Nonaktifkan untuk menjalankan sinkron dan menunggu sampai selesai.
                                 </span>
                             </label>
@@ -424,11 +432,11 @@
                         <button
                             type="submit"
                             @disabled($isCommitted || ! $hasJob || ! $passed)
-                            class="inline-flex items-center rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
+                            class="btn btn-primary"
                         >Komit dataset</button>
 
                         @if ($isCommitted || ! $hasJob || ! $passed)
-                            <p class="mt-2 text-xs text-slate-500">
+                            <p class="text-secondary small">
                                 Tombol dinonaktifkan karena
                                 @if ($isCommitted)
                                     dataset sudah dikomit.
@@ -451,7 +459,7 @@
                     />
                 @else
                     <x-table-wrapper label="Contoh data">
-                        <table class="app-table">
+                        <table class="table table-vcenter card-table">
                             <thead>
                                 <tr>
                                     @foreach ($sampleColumns as $column)
@@ -465,7 +473,7 @@
                                     <tr>
                                         @foreach ($sampleColumns as $column)
                                             @php $value = $row[$column] ?? null; @endphp
-                                            <td class="whitespace-nowrap text-sm text-slate-600">
+                                            <td class="text-secondary">
                                                 @php
                                                     $text = is_scalar($value) || $value === null
                                                         ? (string) ($value ?? '')
@@ -483,34 +491,34 @@
             </x-card>
         </div>
 
-        <div class="space-y-6">
+        <div class="col-lg-4">
             <x-card title="Informasi dataset" description="Metadata berkas dan status pemrosesan.">
-                <dl class="space-y-3 text-sm">
-                    <div>
-                        <dt class="font-medium text-slate-500">Tipe dataset</dt>
-                        <dd class="text-slate-900">{{ $typeLabels[$dataset->dataset_type] ?? $dataset->dataset_type }}</dd>
+                <dl class="datagrid">
+                    <div class="datagrid-item">
+                        <dt class="datagrid-title">Tipe dataset</dt>
+                        <dd class="datagrid-content">{{ $typeLabels[$dataset->dataset_type] ?? $dataset->dataset_type }}</dd>
                     </div>
-                    <div>
-                        <dt class="font-medium text-slate-500">Berkas sumber</dt>
-                        <dd class="break-all text-slate-900">{{ $dataset->source_filename ?: 'Tidak diketahui' }}</dd>
+                    <div class="datagrid-item">
+                        <dt class="datagrid-title">Berkas sumber</dt>
+                        <dd class="datagrid-content">{{ $dataset->source_filename ?: 'Tidak diketahui' }}</dd>
                     </div>
-                    <div>
-                        <dt class="font-medium text-slate-500">Ukuran</dt>
-                        <dd class="text-slate-900">{{ $dataset->sizeForHumans() }}</dd>
+                    <div class="datagrid-item">
+                        <dt class="datagrid-title">Ukuran</dt>
+                        <dd class="datagrid-content">{{ $dataset->sizeForHumans() }}</dd>
                     </div>
-                    <div>
-                        <dt class="font-medium text-slate-500">UUID</dt>
-                        <dd class="break-all font-mono text-xs text-slate-700">{{ $dataset->uuid }}</dd>
+                    <div class="datagrid-item">
+                        <dt class="datagrid-title">UUID</dt>
+                        <dd class="datagrid-content font-monospace text-secondary small">{{ $dataset->uuid }}</dd>
                     </div>
                     @if ($dataset->checksum_sha256)
-                        <div>
-                            <dt class="font-medium text-slate-500">Checksum SHA-256</dt>
-                            <dd class="break-all font-mono text-xs text-slate-700">{{ $dataset->checksum_sha256 }}</dd>
+                        <div class="datagrid-item">
+                            <dt class="datagrid-title">Checksum SHA-256</dt>
+                            <dd class="datagrid-content font-monospace text-secondary small">{{ $dataset->checksum_sha256 }}</dd>
                         </div>
                     @endif
-                    <div>
-                        <dt class="font-medium text-slate-500">Skor kualitas</dt>
-                        <dd class="text-slate-900">
+                    <div class="datagrid-item">
+                        <dt class="datagrid-title">Skor kualitas</dt>
+                        <dd class="datagrid-content">
                             @if ($score !== null)
                                 {{ \Illuminate\Support\Number::percentage($score * 100, precision: 1, locale: 'id') }}
                             @else
@@ -518,9 +526,9 @@
                             @endif
                         </dd>
                     </div>
-                    <div>
-                        <dt class="font-medium text-slate-500">Diperbarui</dt>
-                        <dd class="text-slate-900">
+                    <div class="datagrid-item">
+                        <dt class="datagrid-title">Diperbarui</dt>
+                        <dd class="datagrid-content">
                             {{ $dataset->updated_at ? $dataset->updated_at->locale('id')->translatedFormat('d M Y H:i') : 'Tidak diketahui' }}
                         </dd>
                     </div>
@@ -529,7 +537,7 @@
 
             @if ($canWrite)
                 <x-card title="Hapus dataset" description="Tindakan ini menghapus berkas dan seluruh metadatanya.">
-                    <p class="mb-4 text-sm text-slate-600">
+                    <p class="text-secondary">
                         Job impor yang sedang berjalan tidak dapat dibatalkan. Hapus hanya dilakukan bila Anda yakin tidak lagi membutuhkan data ini.
                     </p>
 
@@ -542,7 +550,7 @@
                         @method('DELETE')
                         <button
                             type="submit"
-                            class="inline-flex items-center rounded-md border border-rose-600 px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 focus-visible:ring-offset-2"
+                            class="btn btn-outline-danger"
                         >Hapus dataset</button>
                     </form>
                 </x-card>

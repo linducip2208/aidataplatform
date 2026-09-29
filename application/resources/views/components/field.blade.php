@@ -5,26 +5,26 @@
     $error = $name ? $errors->first($name) : null;
 @endphp
 
-<div {{ $attributes->merge(['class' => 'space-y-1']) }}>
+<div {{ $attributes->merge(['class' => 'mb-3']) }}>
     @if ($inputId)
-        <label for="{{ $inputId }}" class="block text-sm font-medium text-slate-700">
+        <label for="{{ $inputId }}" class="form-label">
             {{ $label }}
             @if ($required)
-                <span class="text-rose-700" aria-hidden="true">*</span>
-                <span class="sr-only">(wajib diisi)</span>
+                <span class="text-danger" aria-hidden="true">*</span>
+                <span class="visually-hidden">(wajib diisi)</span>
             @endif
         </label>
     @else
-        <p class="block text-sm font-medium text-slate-700">{{ $label }}</p>
+        <p class="form-label">{{ $label }}</p>
     @endif
 
     {{ $slot }}
 
     @if ($hint && ! $error)
-        <p @if ($inputId) id="{{ $inputId }}-hint" @endif class="text-xs text-slate-500">{{ $hint }}</p>
+        <small @if ($inputId) id="{{ $inputId }}-hint" @endif class="form-hint">{{ $hint }}</small>
     @endif
 
     @if ($error)
-        <p @if ($inputId) id="{{ $inputId }}-error" @endif class="text-xs font-medium text-rose-700">{{ $error }}</p>
+        <div @if ($inputId) id="{{ $inputId }}-error" @endif class="invalid-feedback d-block">{{ $error }}</div>
     @endif
 </div>

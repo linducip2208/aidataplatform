@@ -3,49 +3,61 @@
 @section('title', 'Audit log')
 
 @section('content')
-    <div class="mb-6">
-        <h1 class="text-2xl font-semibold text-slate-900">Audit log</h1>
-        <p class="mt-1 text-sm text-slate-500">
-            Catatan aktivitas penting pengguna: login, perubahan dataset, pelatihan model, dan pengelolaan akun.
-        </p>
+    <div class="page-header">
+        <div class="row align-items-center">
+            <div class="col">
+                <h1 class="page-title">Audit log</h1>
+                <div class="page-subtitle">
+                    Catatan aktivitas penting pengguna: login, perubahan dataset, pelatihan model, dan pengelolaan akun.
+                </div>
+            </div>
+        </div>
     </div>
 
-    <x-card class="mb-6" title="Filter" description="Saring berdasarkan nama aksi atau email aktor.">
-        <form method="GET" action="{{ route('audit.index') }}" class="grid gap-4 sm:grid-cols-3">
-            <x-field label="Aksi" for="action">
-                <select
-                    id="action"
-                    name="action"
-                    class="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
-                >
-                    <option value="">Semua aksi</option>
-                    @foreach ($actions as $action)
-                        <option value="{{ $action }}" @selected(($filters['action'] ?? '') === $action)>{{ $action }}</option>
-                    @endforeach
-                </select>
-            </x-field>
+    <x-card class="mb-3" title="Filter" description="Saring berdasarkan nama aksi atau email aktor.">
+        <form method="GET" action="{{ route('audit.index') }}">
+            <div class="row row-cards">
+                <div class="col-md-4">
+                    <x-field label="Aksi" for="action">
+                        <select
+                            id="action"
+                            name="action"
+                            class="form-select"
+                        >
+                            <option value="">Semua aksi</option>
+                            @foreach ($actions as $action)
+                                <option value="{{ $action }}" @selected(($filters['action'] ?? '') === $action)>{{ $action }}</option>
+                            @endforeach
+                        </select>
+                    </x-field>
+                </div>
 
-            <x-field label="Aktor" for="actor" hint="Mencocokkan email aktor.">
-                <input
-                    id="actor"
-                    name="actor"
-                    type="search"
-                    value="{{ $filters['actor'] ?? '' }}"
-                    placeholder="mis. admin@example.com"
-                    @error('actor') aria-invalid="true" @enderror
-                    class="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
-                >
-            </x-field>
+                <div class="col-md-4">
+                    <x-field label="Aktor" for="actor" hint="Mencocokkan email aktor.">
+                        <input
+                            id="actor"
+                            name="actor"
+                            type="search"
+                            value="{{ $filters['actor'] ?? '' }}"
+                            placeholder="mis. admin@example.com"
+                            @error('actor') aria-invalid="true" @enderror
+                            class="form-control"
+                        >
+                    </x-field>
+                </div>
 
-            <div class="flex items-end gap-2">
-                <button
-                    type="submit"
-                    class="inline-flex flex-1 items-center justify-center rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
-                >Terapkan</button>
-                <a
-                    href="{{ route('audit.index') }}"
-                    class="inline-flex items-center justify-center rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
-                >Atur ulang</a>
+                <div class="col-md-4">
+                    <div class="d-flex align-items-end gap-2 h-100">
+                        <button
+                            type="submit"
+                            class="btn btn-primary flex-fill"
+                        >Terapkan</button>
+                        <a
+                            href="{{ route('audit.index') }}"
+                            class="btn"
+                        >Atur ulang</a>
+                    </div>
+                </div>
             </div>
         </form>
     </x-card>
@@ -58,7 +70,7 @@
             />
         @else
             <x-table-wrapper label="Daftar aktivitas audit">
-                <table class="app-table">
+                <table class="table table-vcenter card-table">
                     <thead>
                         <tr>
                             <th scope="col">Waktu</th>
@@ -71,26 +83,26 @@
                     <tbody>
                         @foreach ($logs as $log)
                             <tr>
-                                <td class="whitespace-nowrap">
+                                <td class="text-nowrap">
                                     @if ($log->created_at)
-                                        <span class="text-sm text-slate-700">{{ $log->created_at->locale('id')->translatedFormat('d M Y H:i') }}</span>
+                                        <span>{{ $log->created_at->locale('id')->translatedFormat('d M Y H:i') }}</span>
                                     @else
-                                        <span class="text-xs text-slate-400">Tidak diketahui</span>
+                                        <span class="small text-secondary">Tidak diketahui</span>
                                     @endif
                                     @if ($log->ip)
-                                        <span class="mt-1 block text-xs text-slate-500">{{ $log->ip }}</span>
+                                        <span class="d-block small text-secondary">{{ $log->ip }}</span>
                                     @endif
                                 </td>
-                                <td class="break-all text-slate-900">{{ $log->actor ?: 'sistem' }}</td>
-                                <td><code class="rounded bg-slate-100 px-1 text-xs text-slate-700">{{ $log->action }}</code></td>
+                                <td class="text-break">{{ $log->actor ?: 'sistem' }}</td>
+                                <td><code>{{ $log->action }}</code></td>
                                 <td>
                                     @if ($log->resource)
-                                        <span class="text-slate-700">{{ $log->resource }}</span>
-                                        <span class="mt-1 block text-xs text-slate-500">
+                                        <span class="text-secondary">{{ $log->resource }}</span>
+                                        <span class="d-block small text-secondary">
                                             {{ $log->resource_id !== null ? 'ID '.$log->resource_id : 'Tanpa ID' }}
                                         </span>
                                     @else
-                                        <span class="text-slate-400">Tidak ada</span>
+                                        <span class="text-secondary">Tidak ada</span>
                                     @endif
                                 </td>
                                 <td>
@@ -99,14 +111,14 @@
                                         $detailJson = $detail === [] ? '' : (string) json_encode($detail, JSON_UNESCAPED_UNICODE);
                                     @endphp
                                     @if ($detailJson === '')
-                                        <span class="text-xs text-slate-400">Tidak ada</span>
+                                        <span class="small text-secondary">Tidak ada</span>
                                     @else
-                                        <details class="text-left">
-                                            <summary class="cursor-pointer list-none rounded text-xs font-semibold text-brand-700 hover:text-brand-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2">
-                                                <span class="sr-only">Tampilkan rincian</span>
+                                        <details class="text-start">
+                                            <summary>
+                                                <span class="visually-hidden">Tampilkan rincian</span>
                                                 Lihat rincian
                                             </summary>
-                                            <pre class="mt-2 max-w-md overflow-x-auto whitespace-pre-wrap break-all rounded bg-slate-50 p-2 text-xs text-slate-700">{{ $detailJson }}</pre>
+                                            <pre class="mt-2 small text-secondary text-break" style="white-space: pre-wrap;">{{ $detailJson }}</pre>
                                         </details>
                                     @endif
                                 </td>
@@ -116,7 +128,7 @@
                 </table>
             </x-table-wrapper>
 
-            <div class="mt-4">
+            <div class="mt-3">
                 {{ $logs->links() }}
             </div>
         @endif

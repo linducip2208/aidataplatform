@@ -1,11 +1,26 @@
-@import 'tailwindcss';
+/*
+ * AIDataPlatform on Tabler.
+ *
+ * Tabler 1.x ships its own reboot, grid, utilities and components, so this
+ * file intentionally does NOT import Tailwind: the two resets and the two
+ * spacing scales fight over the same elements. Every view uses Tabler
+ * classes (`page`, `card`, `table`, `btn`, `form-control`, ...).
+ *
+ * The `.badge.badge-<variant>` compound rules below are load-bearing test
+ * hooks (`EnumContractTest`, `ViewRenderingTest::rowBadge`): the five
+ * variants must exist as selectors in THIS file, and rows carry
+ * `span.badge.badge-<variant>`. Colours follow the previous palette so
+ * statuses keep their meaning.
+ */
+@import '@tabler/core/dist/css/tabler.min.css';
 
-@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
-@source '../../storage/framework/views/*.php';
-@source "../**/*.blade.php";
-@source "../**/*.js";
-@source "../**/*.vue";
-
+/*
+ * Design tokens. Tabler owns the component layer; these brand/accent tokens
+ * are the palette contract the views may reference (see ViewCopyTest: views
+ * must use tokens, never hardcoded colours). The primary UI colour stays
+ * Tabler's own `--tblr-primary`; brand-600 matches it closely for the few
+ * places that need the house shade.
+ */
 @theme {
     --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
         'Segoe UI Symbol', 'Noto Color Emoji';
@@ -35,82 +50,104 @@
     --color-accent-900: oklch(0.386 0.063 188.416);
 }
 
-@layer base {
-    [x-cloak] {
-        display: none !important;
-    }
-
-    body {
-        line-height: 1.5;
-    }
+[x-cloak] {
+    display: none !important;
 }
 
-@layer components {
-    .app-card {
-        @apply rounded-lg border border-slate-200 bg-white shadow-sm;
-    }
+/* Skip link: visible on keyboard focus only. */
+.skip-link {
+    position: absolute;
+    left: -9999px;
+    top: 0;
+    z-index: 1050;
+}
 
-    .app-card-header {
-        @apply flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 px-4 py-3 sm:px-6;
-    }
+.skip-link:focus {
+    left: 0.75rem;
+    top: 0.75rem;
+}
 
-    .app-card-body {
-        @apply px-4 py-4 sm:px-6;
-    }
+/* Test-pinned badge variants (see header comment). */
+.badge.badge-success,
+.badge-success {
+    background-color: #ecfdf5;
+    border: 1px solid rgb(16 122 87 / 0.3);
+    color: #065f46;
+}
 
-    .app-table {
-        @apply min-w-full text-sm;
-    }
+.badge.badge-danger,
+.badge-danger {
+    background-color: #fff1f2;
+    border: 1px solid rgb(190 18 60 / 0.3);
+    color: #881337;
+}
 
-    .app-table thead th {
-        @apply border-b border-slate-200 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500;
-    }
+.badge.badge-warning,
+.badge-warning {
+    background-color: #fffbeb;
+    border: 1px solid rgb(180 83 9 / 0.3);
+    color: #78350f;
+}
 
-    .app-table tbody td {
-        @apply border-b border-slate-100 px-4 py-3 align-middle text-slate-700;
-    }
+.badge.badge-info,
+.badge-info {
+    background-color: #f0f9ff;
+    border: 1px solid rgb(2 132 199 / 0.3);
+    color: #0c4a6e;
+}
 
-    .app-table tbody tr:last-child td {
-        @apply border-b-0;
-    }
+.badge.badge-neutral,
+.badge-neutral {
+    background-color: #f1f5f9;
+    border: 1px solid rgb(100 116 139 / 0.3);
+    color: #334155;
+}
 
-    .badge {
-        @apply inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-1 text-xs font-semibold;
-    }
+/*
+ * Legacy bridges. No view should emit these anymore (every page uses Tabler
+ * `card` / `table` directly), but a leftover class must still render as a
+ * card/table instead of unstyled markup.
+ */
+.app-card {
+    background: var(--tblr-card-bg, #fff);
+    border: 1px solid var(--tblr-card-border-color, rgb(0 0 0 / 0.09));
+    border-radius: var(--tblr-card-border-radius, 4px);
+}
 
-    /*
-     * The colour rules are declared twice on purpose: once as the compound
-     * `.badge.badge-<variant>` and once as the bare `.badge-<variant>`.
-     *
-     * Every rule in this file has the same specificity, so the later
-     * declaration wins. That is exactly how a committed dataset ended up
-     * painted in the info colour: the badge carried `badge-success` and, from
-     * a caller that also passed a variant, `badge-info`, which is declared
-     * last. The compound selector scores higher than any single-class rule,
-     * so no ordering change can make one status repaint another.
-     */
-    .badge.badge-success,
-    .badge-success {
-        @apply border-emerald-600/30 bg-emerald-50 text-emerald-800;
-    }
+.app-card-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+    border-bottom: 1px solid var(--tblr-card-border-color, rgb(0 0 0 / 0.09));
+    padding: 0.75rem 1rem;
+}
 
-    .badge.badge-danger,
-    .badge-danger {
-        @apply border-rose-600/30 bg-rose-50 text-rose-800;
-    }
+.app-card-body {
+    padding: 1rem;
+}
 
-    .badge.badge-warning,
-    .badge-warning {
-        @apply border-amber-600/30 bg-amber-50 text-amber-900;
-    }
+.app-table {
+    width: 100%;
+    font-size: 0.8125rem;
+    caption-side: bottom;
+    border-collapse: collapse;
+}
 
-    .badge.badge-info,
-    .badge-info {
-        @apply border-sky-600/30 bg-sky-50 text-sky-800;
-    }
+.app-table thead th {
+    border-bottom: 1px solid var(--tblr-border-color, #e6e7e9);
+    padding: 0.75rem 1rem;
+    text-align: left;
+    font-size: 0.625rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--tblr-secondary, #616876);
+}
 
-    .badge.badge-neutral,
-    .badge-neutral {
-        @apply border-slate-500/30 bg-slate-100 text-slate-700;
-    }
+.app-table tbody td {
+    border-bottom: 1px solid var(--tblr-border-color-translucent, rgb(4 32 69 / 0.05));
+    padding: 0.75rem 1rem;
+    vertical-align: middle;
 }

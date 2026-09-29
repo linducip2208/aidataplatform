@@ -3,96 +3,104 @@
 @section('title', 'Ubah password')
 
 @section('content')
-    <div class="mb-6">
-        <h1 class="text-2xl font-semibold text-slate-900">Ubah password</h1>
-        <p class="mt-1 text-sm text-slate-500">
-            Password baru minimal 8 karakter dan harus memuat huruf serta angka.
-        </p>
+    <div class="page-header">
+        <div class="row align-items-center">
+            <div class="col">
+                <h1 class="page-title">Ubah password</h1>
+                <div class="page-subtitle">
+                    Password baru minimal 8 karakter dan harus memuat huruf serta angka.
+                </div>
+            </div>
+        </div>
     </div>
 
-    <div class="grid gap-6 lg:grid-cols-3">
-        <x-card class="lg:col-span-2" title="Password akun" description="Masukkan password lama untuk memverifikasi perubahan.">
-            <form method="POST" action="{{ route('password.update') }}" class="space-y-5">
-                @csrf
-                @method('PUT')
+    <div class="row row-cards">
+        <div class="col-lg-8">
+            <x-card title="Password akun" description="Masukkan password lama untuk memverifikasi perubahan.">
+                <form method="POST" action="{{ route('password.update') }}">
+                    @csrf
+                    @method('PUT')
 
-                <x-field label="Password saat ini" for="current_password" name="current_password" required>
-                    <input
-                        id="current_password"
-                        name="current_password"
-                        type="password"
-                        autocomplete="current-password"
-                        required
-                        @error('current_password') aria-invalid="true" @enderror
-                        class="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
-                    >
-                </x-field>
+                    <x-field label="Password saat ini" for="current_password" name="current_password" required>
+                        <input
+                            id="current_password"
+                            name="current_password"
+                            type="password"
+                            autocomplete="current-password"
+                            required
+                            @error('current_password') aria-invalid="true" @enderror
+                            class="form-control"
+                        >
+                    </x-field>
 
-                <x-field
-                    label="Password baru"
-                    for="password"
-                    name="password"
-                    required
-                    hint="Minimal 8 karakter, berisi huruf dan angka."
-                >
-                    <input
-                        id="password"
+                    <x-field
+                        label="Password baru"
+                        for="password"
                         name="password"
-                        type="password"
-                        autocomplete="new-password"
                         required
-                        @error('password') aria-invalid="true" aria-describedby="password-error" @enderror
-                        class="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                        hint="Minimal 8 karakter, berisi huruf dan angka."
                     >
-                </x-field>
+                        <input
+                            id="password"
+                            name="password"
+                            type="password"
+                            autocomplete="new-password"
+                            required
+                            @error('password') aria-invalid="true" aria-describedby="password-error" @enderror
+                            class="form-control"
+                        >
+                    </x-field>
 
-                <x-field label="Konfirmasi password baru" for="password_confirmation" name="password_confirmation" required>
-                    <input
-                        id="password_confirmation"
-                        name="password_confirmation"
-                        type="password"
-                        autocomplete="new-password"
-                        required
-                        class="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
-                    >
-                </x-field>
+                    <x-field label="Konfirmasi password baru" for="password_confirmation" name="password_confirmation" required>
+                        <input
+                            id="password_confirmation"
+                            name="password_confirmation"
+                            type="password"
+                            autocomplete="new-password"
+                            required
+                            class="form-control"
+                        >
+                    </x-field>
 
-                <div class="border-t border-slate-200 pt-4">
-                    <button
-                        type="submit"
-                        class="inline-flex items-center rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
-                    >Perbarui password</button>
-                </div>
-            </form>
-        </x-card>
+                    <div class="pt-3 mt-3 border-top">
+                        <button
+                            type="submit"
+                            class="btn btn-primary"
+                        >Perbarui password</button>
+                    </div>
+                </form>
+            </x-card>
+        </div>
 
-        <x-card title="Akun Anda" description="Informasi akun yang sedang digunakan.">
-            <dl class="space-y-3 text-sm">
-                <div>
-                    <dt class="font-medium text-slate-500">Nama</dt>
-                    <dd class="text-slate-900">{{ $user->name }}</dd>
-                </div>
-                <div>
-                    <dt class="font-medium text-slate-500">Email</dt>
-                    <dd class="break-all text-slate-900">{{ $user->email }}</dd>
-                </div>
-                <div>
-                    <dt class="font-medium text-slate-500">Peran</dt>
-                    <dd class="mt-1">
-                        <x-badge variant="info">{{ $user->role()->localizedLabel() }}</x-badge>
-                    </dd>
-                </div>
-                <div>
-                    <dt class="font-medium text-slate-500">Login terakhir</dt>
-                    <dd class="text-slate-900">
-                        {{ $user->last_login_at ? $user->last_login_at->locale('id')->translatedFormat('d M Y H:i') : 'Belum pernah' }}
-                    </dd>
-                </div>
-            </dl>
+        <div class="col-lg-4">
+            <x-card title="Akun Anda" description="Informasi akun yang sedang digunakan.">
+                <dl class="datagrid">
+                    <div class="datagrid-item">
+                        <dt class="datagrid-title">Nama</dt>
+                        <dd class="datagrid-content">{{ $user->name }}</dd>
+                    </div>
+                    <div class="datagrid-item">
+                        <dt class="datagrid-title">Email</dt>
+                        <dd class="datagrid-content text-break">{{ $user->email }}</dd>
+                    </div>
+                    <div class="datagrid-item">
+                        <dt class="datagrid-title">Peran</dt>
+                        <dd class="datagrid-content">
+                            <x-badge variant="info">{{ $user->role()->localizedLabel() }}</x-badge>
+                        </dd>
+                    </div>
+                    <div class="datagrid-item">
+                        <dt class="datagrid-title">Login terakhir</dt>
+                        <dd class="datagrid-content">
+                            {{ $user->last_login_at ? $user->last_login_at->locale('id')->translatedFormat('d M Y H:i') : 'Belum pernah' }}
+                        </dd>
+                    </div>
+                </dl>
 
-            <p class="mt-4 text-xs text-slate-500">
-                Setelah password diubah, gunakan password baru pada login berikutnya di perangkat ini maupun perangkat lain.
-            </p>
-        </x-card>
+                <p class="small text-secondary mt-3 mb-0">
+                    Setelah password diubah, gunakan password baru pada login berikutnya di perangkat ini maupun perangkat lain.
+                </p>
+            </x-card>
+        </div>
     </div>
 @endsection

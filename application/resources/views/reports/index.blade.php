@@ -14,22 +14,26 @@
         $hasContent = $report !== [];
     @endphp
 
-    <div class="mb-6">
-        <h1 class="text-2xl font-semibold text-slate-900">Laporan eksekutif</h1>
-        <p class="mt-1 text-sm text-slate-500">
-            Ringkasan periode yang disusun mesin AI dari KPI, tren penjualan, inventori, dan keuangan.
-        </p>
+    <div class="page-header">
+        <div class="row align-items-center">
+            <div class="col">
+                <h1 class="page-title">Laporan eksekutif</h1>
+                <div class="page-subtitle">
+                    Ringkasan periode yang disusun mesin AI dari KPI, tren penjualan, inventori, dan keuangan.
+                </div>
+            </div>
+        </div>
     </div>
 
-    <nav aria-label="Pilih periode laporan" class="mb-6">
-        <ul class="flex flex-wrap gap-2">
+    <nav aria-label="Pilih periode laporan" class="mb-3">
+        <ul class="list-unstyled d-flex flex-wrap gap-2 mb-0">
             @foreach ($periods as $value)
                 @php $isActive = $period === $value; @endphp
                 <li>
                     <a
                         href="{{ route('reports.index', ['period' => $value]) }}"
                         @if ($isActive) aria-current="page" @endif
-                        class="inline-flex rounded-md border px-4 py-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 {{ $isActive ? 'border-brand-600 bg-brand-50 text-brand-800' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50' }}"
+                        class="{{ $isActive ? 'btn btn-primary' : 'btn' }}"
                     >{{ $periodLabels[$value] ?? \Illuminate\Support\Str::headline($value) }}</a>
                 </li>
             @endforeach
@@ -37,11 +41,11 @@
     </nav>
 
     @unless ($engineAvailable)
-        <x-card class="mb-6">
-            <div role="status" class="flex flex-wrap items-center gap-2">
+        <x-card class="mb-3">
+            <div role="status" class="alert alert-warning mb-0">
                 <x-badge variant="warning">Mesin AI tidak tersedia</x-badge>
-                <p class="text-sm text-slate-600">
-                    Laporan belum dapat disusun. Periksa layanan <code class="rounded bg-slate-100 px-1">fastapi</code>
+                <p class="mb-0 text-secondary">
+                    Laporan belum dapat disusun. Periksa layanan <code>fastapi</code>
                     lalu muat ulang halaman ini.
                 </p>
             </div>
@@ -57,7 +61,7 @@
         </x-card>
     @else
         <x-card
-            class="mb-6"
+            class="mb-3"
             title="Ringkasan {{ $periodLabels[$period] ?? $period }}"
             description="Disusun dari data yang sudah dikomit, lalu dinarasi oleh mesin AI."
         >
@@ -67,17 +71,17 @@
                     description="Mesin AI tidak menghasilkan narasi untuk periode ini. Nilai KPI di bawah tetap dapat dibaca."
                 />
             @else
-                <p class="whitespace-pre-line text-sm leading-[1.5] text-slate-700">{{ $narrative }}</p>
+                <p class="text-secondary mb-0" style="white-space: pre-line;">{{ $narrative }}</p>
             @endif
         </x-card>
 
         @if ($sections !== [])
-            <x-card class="mb-6" title="Rincian per bagian" description="Highlight, risiko, dan rekomendasi dari mesin AI.">
-                <div class="space-y-4">
+            <x-card class="mb-3" title="Rincian per bagian" description="Highlight, risiko, dan rekomendasi dari mesin AI.">
+                <div class="d-grid gap-3">
                     @foreach ($sections as $sectionKey => $section)
                         <div>
-                            <h3 class="text-sm font-semibold text-slate-900">{{ \Illuminate\Support\Str::headline((string) $sectionKey) }}</h3>
-                            <ul class="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-700">
+                            <h3 class="fw-bold mb-2">{{ \Illuminate\Support\Str::headline((string) $sectionKey) }}</h3>
+                            <ul class="mb-0 text-secondary">
                                 @if (is_array($section))
                                     @foreach ($section as $item)
                                         <li>
@@ -98,43 +102,47 @@
             </x-card>
         @endif
 
-        <div class="grid gap-6 lg:grid-cols-2">
-            <x-card title="KPI periode" description="Angka penjualan yang menjadi dasar laporan.">
-                <div class="grid gap-4 sm:grid-cols-2">
-                    <x-stat label="Pendapatan" :value="\Illuminate\Support\Number::currency((float) ($kpi['revenue'] ?? 0), in: 'idr', locale: 'id', precision: 0)" />
-                    <x-stat label="Jumlah pesanan" :value="number_format((int) ($kpi['orders'] ?? 0), 0, ',', '.')" />
-                    <x-stat label="Unit terjual" :value="number_format((float) ($kpi['units'] ?? 0), 0, ',', '.')" />
-                    <x-stat label="Nilai pesanan rata-rata" :value="\Illuminate\Support\Number::currency((float) ($kpi['aov'] ?? 0), in: 'idr', locale: 'id', precision: 0)" />
-                    <x-stat label="Pertumbuhan" :value="\Illuminate\Support\Number::percentage((float) ($kpi['growth_pct'] ?? 0), precision: 1, locale: 'id')" />
-                    <x-stat label="Margin" :value="\Illuminate\Support\Number::percentage((float) ($kpi['margin_pct'] ?? 0), precision: 1, locale: 'id')" />
-                </div>
-            </x-card>
+        <div class="row row-cards">
+            <div class="col-md-6">
+                <x-card title="KPI periode" description="Angka penjualan yang menjadi dasar laporan.">
+                    <div class="row row-cards">
+                        <div class="col-sm-6"><x-stat label="Pendapatan" :value="\Illuminate\Support\Number::currency((float) ($kpi['revenue'] ?? 0), in: 'idr', locale: 'id', precision: 0)" /></div>
+                        <div class="col-sm-6"><x-stat label="Jumlah pesanan" :value="number_format((int) ($kpi['orders'] ?? 0), 0, ',', '.')" /></div>
+                        <div class="col-sm-6"><x-stat label="Unit terjual" :value="number_format((float) ($kpi['units'] ?? 0), 0, ',', '.')" /></div>
+                        <div class="col-sm-6"><x-stat label="Nilai pesanan rata-rata" :value="\Illuminate\Support\Number::currency((float) ($kpi['aov'] ?? 0), in: 'idr', locale: 'id', precision: 0)" /></div>
+                        <div class="col-sm-6"><x-stat label="Pertumbuhan" :value="\Illuminate\Support\Number::percentage((float) ($kpi['growth_pct'] ?? 0), precision: 1, locale: 'id')" /></div>
+                        <div class="col-sm-6"><x-stat label="Margin" :value="\Illuminate\Support\Number::percentage((float) ($kpi['margin_pct'] ?? 0), precision: 1, locale: 'id')" /></div>
+                    </div>
+                </x-card>
+            </div>
 
-            <x-card title="Keuangan periode" description="Pendapatan, beban, dan laba periode berjalan.">
-                @if ($finance === [])
-                    <x-empty-state title="Data keuangan kosong" description="Mesin AI tidak mengembalikan ringkasan keuangan untuk periode ini." />
-                @else
-                    <dl class="space-y-3 text-sm">
-                        @foreach ($finance as $key => $value)
-                            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2 last:border-b-0 last:pb-0">
-                                <dt class="font-medium text-slate-500">{{ $financeLabels[$key] ?? \Illuminate\Support\Str::headline((string) $key) }}</dt>
-                                <dd class="tabular-nums text-slate-900">
-                                    @if ($key === 'margin_pct')
-                                        {{ \Illuminate\Support\Number::percentage((float) $value, precision: 1, locale: 'id') }}
-                                    @elseif (is_bool($value))
-                                        {{ $value ? 'Ya' : 'Tidak' }}
-                                    @else
-                                        {{ \Illuminate\Support\Number::currency((float) $value, in: 'idr', locale: 'id', precision: 0) }}
-                                    @endif
-                                </dd>
-                            </div>
-                        @endforeach
-                    </dl>
-                @endif
-            </x-card>
+            <div class="col-md-6">
+                <x-card title="Keuangan periode" description="Pendapatan, beban, dan laba periode berjalan.">
+                    @if ($finance === [])
+                        <x-empty-state title="Data keuangan kosong" description="Mesin AI tidak mengembalikan ringkasan keuangan untuk periode ini." />
+                    @else
+                        <dl class="datagrid">
+                            @foreach ($finance as $key => $value)
+                                <div class="datagrid-item">
+                                    <dt class="datagrid-title">{{ $financeLabels[$key] ?? \Illuminate\Support\Str::headline((string) $key) }}</dt>
+                                    <dd class="datagrid-content">
+                                        @if ($key === 'margin_pct')
+                                            {{ \Illuminate\Support\Number::percentage((float) $value, precision: 1, locale: 'id') }}
+                                        @elseif (is_bool($value))
+                                            {{ $value ? 'Ya' : 'Tidak' }}
+                                        @else
+                                            {{ \Illuminate\Support\Number::currency((float) $value, in: 'idr', locale: 'id', precision: 0) }}
+                                        @endif
+                                    </dd>
+                                </div>
+                            @endforeach
+                        </dl>
+                    @endif
+                </x-card>
+            </div>
         </div>
 
-        <x-card class="mt-6" title="Laporan otomatis" description="Snapshot KPI terjadwal dari mesin AI (bi.snapshot_kpis).">
+        <x-card class="mt-3" title="Laporan otomatis" description="Snapshot KPI terjadwal dari mesin AI (bi.snapshot_kpis).">
             @php $autoSnapshots = $snapshots ?? []; @endphp
             @if (($snapshotsAvailable ?? false) === false)
                 <x-empty-state
@@ -148,12 +156,12 @@
                 />
             @else
                 <x-table-wrapper label="Snapshot KPI otomatis">
-                    <table class="app-table">
+                    <table class="table table-vcenter card-table">
                         <thead>
                             <tr>
                                 <th scope="col">KPI</th>
-                                <th scope="col" class="text-right">Nilai</th>
-                                <th scope="col" class="text-right">Target</th>
+                                <th scope="col" class="text-end">Nilai</th>
+                                <th scope="col" class="text-end">Target</th>
                                 <th scope="col">Status</th>
                                 <th scope="col">Periode</th>
                                 <th scope="col">Dihitung</th>
@@ -166,31 +174,31 @@
                                     $svariant = $sstatus === 'crit' ? 'danger' : ($sstatus === 'warn' ? 'warning' : 'success');
                                 @endphp
                                 <tr>
-                                    <td class="font-medium text-slate-900">{{ $snap['kpi_name'] ?? 'Tidak diketahui' }}</td>
-                                    <td class="text-right tabular-nums">{{ number_format((float) ($snap['value'] ?? 0), 2, ',', '.') }}</td>
-                                    <td class="text-right tabular-nums">
+                                    <td class="fw-medium">{{ $snap['kpi_name'] ?? 'Tidak diketahui' }}</td>
+                                    <td class="text-end">{{ number_format((float) ($snap['value'] ?? 0), 2, ',', '.') }}</td>
+                                    <td class="text-end">
                                         @if (($snap['target'] ?? null) === null)
-                                            <span class="text-slate-400">—</span>
+                                            <span class="text-secondary">—</span>
                                         @else
                                             {{ number_format((float) $snap['target'], 2, ',', '.') }}
                                         @endif
                                     </td>
                                     <td><x-badge :variant="$svariant">{{ strtoupper($sstatus) }}</x-badge></td>
                                     <td>{{ $snap['period'] ?? '—' }}</td>
-                                    <td class="text-slate-500">{{ $snap['computed_at'] ?? '—' }}</td>
+                                    <td class="text-secondary">{{ $snap['computed_at'] ?? '—' }}</td>
                                 </tr>
                             @endforeach
                         </tbody>
                     </table>
                 </x-table-wrapper>
-                <div class="mt-4 flex flex-wrap gap-2">
+                <div class="d-flex flex-wrap gap-2 mt-3">
                     <form method="POST" action="{{ url('/api/analytics/export') }}">
                         @csrf
                         <input type="hidden" name="format" value="csv">
                         <input type="hidden" name="dataset" value="kpi">
                         <button
                             type="submit"
-                            class="inline-flex items-center justify-center rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                            class="btn"
                         >Unduh snapshot (CSV)</button>
                     </form>
                     <form method="POST" action="{{ url('/api/analytics/export') }}">
@@ -199,7 +207,7 @@
                         <input type="hidden" name="dataset" value="kpi">
                         <button
                             type="submit"
-                            class="inline-flex items-center justify-center rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                            class="btn"
                         >Unduh snapshot (XLSX)</button>
                     </form>
                 </div>

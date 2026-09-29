@@ -1,13 +1,13 @@
 @props(['title', 'description' => null])
 
-<div {{ $attributes->merge(['class' => 'flex flex-col items-center justify-center gap-2 px-4 py-10 text-center']) }}>
-    <p class="text-sm font-semibold text-slate-900">{{ $title }}</p>
+<div {{ $attributes->merge(['class' => 'empty']) }}>
+    <p class="empty-title">{{ $title }}</p>
 
     @if ($description)
-        <p class="max-w-prose text-sm text-slate-500">{{ $description }}</p>
+        <p class="empty-subtitle text-secondary">{{ $description }}</p>
     @endif
 
     @isset($action)
-        <div class="mt-2">{{ $action }}</div>
+        <div class="empty-action">{{ $action }}</div>
     @endisset
 </div>

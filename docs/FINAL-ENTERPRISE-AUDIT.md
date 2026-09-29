@@ -2,7 +2,33 @@
 
 Date: 2026-09-29 (UTC). Branch: `main`. Scope: master enterprise commands, iterations 1-2.
 
-## Iteration 2 (this commit)
+## Iteration 3
+
+8. **Dataset ownership enforcement (IDOR closed)** — `DatasetPolicy::update`
+   gained a documented legacy rule (null-owner rows stay analyst-writable;
+   all new uploads carry `user_id`), and `Gate::authorize` now guards
+   `Api\DatasetController` (quality/mapping/commit/destroy),
+   `Api\CatalogController` (versions/annotate/contracts), web
+   `DatasetWorkflowController` (preview/mapping/quality/commit) and web
+   `DatasetController@destroy`. New `DatasetOwnershipTest` (6 tests:
+   owner/admin/legacy OK, cross-analyst 403, catalog writes, global reads);
+   `WebWorkflowTest` updated to act as owner + new non-owner 403 cases.
+   Suite → **929 tests, 0 failures**.
+
+## Iteration 4 (this commit)
+
+9. **Tabler UI standardization** — `@tabler/core@1.6.1` via npm (Vite-built,
+   no CDN): `resources/css/app.css` imports Tabler + keeps the test-pinned
+   `.badge.badge-*` selectors and an `@theme` brand/accent token block;
+   `app.js` loads Tabler JS (sidebar collapse, dropdowns) alongside Alpine
+   (wizard confirm). New vertical-sidebar shell (`layouts/app` + named nav +
+   `<main>` landmark + mobile user block), Tabler guest `page-center`,
+   components (`card/stat/empty-state/flash/field/table-wrapper`) on Tabler
+   with identical props, all 17 page views rewritten with byte-identical
+   strings/forms/routes. `npm run build` OK (635 KB CSS / 243 KB JS);
+   suite → **929 tests, 0 failures** (1 intentional skip).
+
+## Iteration 2 (previous commit)
 
 5. **Scheduled sync placeholder → real reconciliation** —
    `ai-engine/app/workers/tasks.py::scheduled_data_sync`: nightly read-only

@@ -1,23 +1,23 @@
 @props(['title' => null, 'description' => null])
 
-<section {{ $attributes->merge(['class' => 'app-card']) }}>
+<div {{ $attributes->merge(['class' => 'card']) }}>
     @if ($title || isset($actions))
-        <header class="app-card-header">
+        <div class="card-header">
             <div>
                 @if ($title)
-                    <h2 class="text-base font-semibold text-slate-900">{{ $title }}</h2>
+                    <h2 class="card-title">{{ $title }}</h2>
                 @endif
 
                 @if ($description)
-                    <p class="mt-1 text-sm text-slate-500">{{ $description }}</p>
+                    <div class="card-subtitle">{{ $description }}</div>
                 @endif
             </div>
 
             @isset($actions)
-                <div class="flex flex-wrap items-center gap-2">{{ $actions }}</div>
+                <div class="card-actions">{{ $actions }}</div>
             @endisset
-        </header>
+        </div>
     @endif
 
-    <div class="app-card-body">{{ $slot }}</div>
-</section>
+    <div class="card-body">{{ $slot }}</div>
+</div>

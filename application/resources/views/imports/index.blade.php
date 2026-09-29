@@ -7,9 +7,9 @@
         $typeLabels = config('ai_engine.dataset_type_labels', []);
     @endphp
 
-    <div class="mb-6">
-        <h1 class="text-2xl font-semibold text-slate-900">Impor</h1>
-        <p class="mt-1 text-sm text-slate-500">
+    <div class="page-header">
+        <h1 class="page-title">Impor</h1>
+        <p class="page-subtitle">
             Dataset yang sudah memiliki job impor. Buka salah satu untuk memantau progres baris yang diproses oleh worker.
         </p>
     </div>
@@ -23,21 +23,21 @@
                 <x-slot:action>
                     <a
                         href="{{ route('datasets.index') }}"
-                        class="inline-flex rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                        class="btn"
                     >Lihat dataset</a>
                 </x-slot:action>
             </x-empty-state>
         @else
             <x-table-wrapper label="Daftar job impor">
-                <table class="app-table">
+                <table class="table table-vcenter card-table">
                     <thead>
                         <tr>
                             <th scope="col">Dataset</th>
                             <th scope="col">Status alur</th>
-                            <th scope="col" class="text-right">Job ID</th>
-                            <th scope="col" class="text-right">Baris</th>
-                            <th scope="col" class="text-right">Diperbarui</th>
-                            <th scope="col"><span class="sr-only">Aksi</span></th>
+                            <th scope="col" class="text-end">Job ID</th>
+                            <th scope="col" class="text-end">Baris</th>
+                            <th scope="col" class="text-end">Diperbarui</th>
+                            <th scope="col"><span class="visually-hidden">Aksi</span></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -47,24 +47,24 @@
                                 <td>
                                     <a
                                         href="{{ route('imports.show', $dataset) }}"
-                                        class="rounded font-medium text-slate-900 hover:text-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                                        class="fw-bold text-secondary"
                                     >{{ $dataset->name }}</a>
-                                    <span class="mt-1 block text-xs text-slate-500">{{ $typeLabels[$dataset->dataset_type] ?? $dataset->dataset_type }}</span>
+                                    <span class="text-secondary">{{ $typeLabels[$dataset->dataset_type] ?? $dataset->dataset_type }}</span>
                                 </td>
                                 <td><x-badge :class="$status->badgeClass()">{{ $status->localizedLabel() }}</x-badge></td>
-                                <td class="text-right tabular-nums">{{ number_format((int) $dataset->import_job_id, 0, ',', '.') }}</td>
-                                <td class="text-right tabular-nums">{{ number_format((int) $dataset->row_count, 0, ',', '.') }}</td>
-                                <td class="text-right">
+                                <td class="text-end">{{ number_format((int) $dataset->import_job_id, 0, ',', '.') }}</td>
+                                <td class="text-end">{{ number_format((int) $dataset->row_count, 0, ',', '.') }}</td>
+                                <td class="text-end">
                                     @if ($dataset->updated_at)
-                                        <span class="text-xs text-slate-500">{{ $dataset->updated_at->locale('id')->translatedFormat('d M Y H:i') }}</span>
+                                        <span class="text-secondary">{{ $dataset->updated_at->locale('id')->translatedFormat('d M Y H:i') }}</span>
                                     @else
-                                        <span class="text-xs text-slate-400">Tidak diketahui</span>
+                                        <span class="text-secondary">Tidak diketahui</span>
                                     @endif
                                 </td>
-                                <td class="text-right">
+                                <td class="text-end">
                                     <a
                                         href="{{ route('imports.show', $dataset) }}"
-                                        class="rounded-md border border-slate-300 px-3 py-1 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                                        class="btn"
                                     >Detail</a>
                                 </td>
                             </tr>
@@ -73,7 +73,7 @@
                 </table>
             </x-table-wrapper>
 
-            <div class="mt-4">
+            <div>
                 {{ $datasets->links() }}
             </div>
         @endif

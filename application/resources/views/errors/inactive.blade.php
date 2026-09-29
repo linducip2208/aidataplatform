@@ -3,17 +3,19 @@
 @section('title', 'Akun dinonaktifkan')
 
 @section('content')
-    <div class="w-full max-w-lg rounded-xl border border-slate-200 bg-white p-6">
-        <h1 class="text-lg font-semibold text-slate-900">Akun dinonaktifkan</h1>
+    <div class="card card-md">
+        <div class="card-body">
+            <h1 class="card-title">Akun dinonaktifkan</h1>
 
-        <p class="mt-2 text-sm text-slate-600">
-            Akun ini sudah dinonaktifkan, jadi tidak dapat dipakai lagi. Hubungi administrator
-            untuk mengaktifkannya kembali.
-        </p>
+            <p class="text-secondary">
+                Akun ini sudah dinonaktifkan, jadi tidak dapat dipakai lagi. Hubungi administrator
+                untuk mengaktifkannya kembali.
+            </p>
 
-        <a href="{{ route('login') }}"
-           class="mt-6 inline-block rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">
-            Kembali ke halaman masuk
-        </a>
+            <a href="{{ route('login') }}"
+               class="btn btn-primary mt-3">
+                Kembali ke halaman masuk
+            </a>
+        </div>
     </div>
 @endsection
