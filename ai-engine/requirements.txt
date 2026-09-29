@@ -34,7 +34,7 @@ PyMySQL>=1.1
 # Imported inside try/except, but /readiness reports on Redis and celery workers
 # need it -- keep pinned or the queue silently degrades to the inline stub.
 redis>=5.0
-celery[redis]>=5.4
+celery[redis]>=5.6.3
 
 pandas>=2.2
 numpy>=1.26
