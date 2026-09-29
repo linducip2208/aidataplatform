@@ -4,8 +4,9 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api.v1 import (
-    ai, alerts, analytics, anomaly, customers, forecast, health, imports,
-    inventory, models, rag, recommendation, training,
+    ai, alerts, analytics, anomaly, customers, decision, forecast, health,
+    imports, ingestion, inventory, models, quality, rag, recommendation,
+    training,
 )
 
 router = APIRouter(prefix="/api/v1")
@@ -22,3 +23,6 @@ router.include_router(training.router)
 router.include_router(ai.router)
 router.include_router(rag.router)
 router.include_router(alerts.router)
+router.include_router(decision.router)
+router.include_router(ingestion.router)
+router.include_router(quality.router)

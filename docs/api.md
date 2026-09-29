@@ -156,9 +156,55 @@ All accept `date_from`, `date_to`, `branch`, `category`, `granularity`
 | Method | Path | Auth | Notes |
 |---|---|---|---|
 | POST | `/api/agent/chat` | bearer | `{message,conversation_id?}` → `data` carries `reply` **and** `answer` (same value), `conversation_id`, `evidence[]`, `steps` |
+| GET | `/api/ai/usage` | bearer | usage ledger proxy for `GET /api/v1/ai/usage`, `?conversation_id=` optional |
 | POST | `/api/rag/query` | bearer | `{question or query,top_k?}` → `{answer,citations[]}` |
 
 `reply` is kept as an alias of `answer` so older clients keep working.
+
+## Data catalog (Laravel)
+
+| Method | Path | Role | Notes |
+|---|---|---|---|
+| GET | `/api/catalog/datasets/{uuid}` | admin, analyst, viewer | catalog entry with `schema_hash`, counts, contract presence |
+| GET | `/api/catalog/datasets/{uuid}/columns` | admin, analyst, viewer | column metadata ordered by name |
+| GET | `/api/catalog/datasets/{uuid}/versions` | admin, analyst, viewer | version history, newest last |
+| GET | `/api/catalog/datasets/{uuid}/contracts` | admin, analyst, viewer | active contract plus `evaluation`; `404` with `contract_not_found` when none |
+| GET | `/api/catalog/datasets/{uuid}/health` | admin, analyst, viewer | freshness, quality, contract and drift summary |
+| GET | `/api/schema-registry/datasets/{uuid}` | admin, analyst, viewer | registry schema plus `schema_hash` |
+| POST | `/api/catalog/datasets/{uuid}/versions` | admin, analyst | register a version snapshot; `201` |
+| POST | `/api/catalog/datasets/{uuid}/columns/{column}/annotate` | admin, analyst | annotate `business_description`, `sensitivity`, `is_pii`; `201` |
+| POST | `/api/catalog/datasets/{uuid}/contracts` | admin, analyst | upsert the data contract; `201` |
+| POST | `/api/schema-registry/datasets/{uuid}/drift` | admin, analyst | compute-only schema drift check, nothing persisted |
+
+## Lineage (Laravel)
+
+| Method | Path | Role | Notes |
+|---|---|---|---|
+| GET | `/api/lineage/datasets/{uuid}/graph` | admin, analyst, viewer | lineage graph both directions, `?depth=` 1-10 default 3 |
+| GET | `/api/lineage/{nodeType}/{nodeId}/upstream` | admin, analyst, viewer | upstream traversal, `?depth=` 1-10 default 5 |
+| GET | `/api/lineage/{nodeType}/{nodeId}/downstream` | admin, analyst, viewer | downstream traversal, `?depth=` 1-10 default 5 |
+| POST | `/api/lineage` | admin, analyst | record one lineage edge; `201`, idempotent on identical edge |
+
+## Data quality governance (Laravel proxies the engine for evaluate/history)
+
+| Method | Path | Role | Notes |
+|---|---|---|---|
+| GET | `/api/quality/rules` | any | list local rules; filters `dataset_type`, `rule_type`, `active` |
+| POST | `/api/quality/rules` | admin, analyst | create a rule; `201` |
+| POST | `/api/quality/evaluate` | admin, analyst | evaluate via `POST /api/v1/quality/evaluate`; `201` |
+| GET | `/api/quality/history` | any | engine history via `GET /api/v1/quality/history`; read-only |
+| GET | `/api/quality/runs/{id}` | any | run detail; read-only |
+
+## AI decisions (Laravel proxies the engine)
+
+| Method | Path | Role | Notes |
+|---|---|---|---|
+| GET | `/api/decisions/rules` | any | rule vocabulary with `RULES_VERSION`; read-only |
+| GET | `/api/decisions` | any | case headers, `?limit=` 1-200; read-only |
+| GET | `/api/decisions/{id}` | any | case detail; read-only, `404` with `not_found` when unknown |
+| POST | `/api/decisions/recommend` | admin, analyst | compute plus persist on the engine; `201` with the stored case |
+| POST | `/api/decisions/scenarios/run` | admin, analyst | compute-only scenario; unsupported shapes pass through untouched |
+| POST | `/api/decisions/{id}/audit` | admin, analyst | append a human decision audit row; `201` |
 
 ## Engine endpoints with no Laravel proxy
 
@@ -182,6 +228,21 @@ envelope; `App\Services\AiEngineClient` has a method for each one.
 | POST | `/api/v1/inventory/health` | key | `{}` |
 | POST | `/api/v1/anomaly/detect` | key | `{series[],sensitivity}` |
 | POST | `/api/v1/recommend` | key | `{customer_id,product_id,top_k}` |
+| POST | `/api/v1/decision/recommend` | key | `{subject}` → compute plus persist a case |
+| GET | `/api/v1/decision/cases` | key | read-only case headers |
+| GET | `/api/v1/decision/cases/{case_id}` | key | read-only case detail |
+| POST | `/api/v1/decision/scenarios/run` | key | `{type,params,subject}` compute-only |
+| POST | `/api/v1/decision/cases/{case_id}/audit` | key | `{actor,decision,rationale}` append audit |
+| GET | `/api/v1/decision/rules` | key | rule vocabulary with `RULES_VERSION` |
+| POST | `/api/v1/quality/rules` | key | create a quality rule |
+| GET | `/api/v1/quality/rules` | key | list quality rules |
+| POST | `/api/v1/quality/evaluate` | key | evaluate a dataset or job, persists the run |
+| GET | `/api/v1/quality/history` | key | evaluation history |
+| GET | `/api/v1/quality/runs/{run_id}` | key | run detail |
+| POST | `/api/v1/imports/{job_id}/cancel` | key | cancel a queued import |
+| POST | `/api/v1/imports/{job_id}/resume` | key | resume a cancelled import |
+| GET | `/api/v1/imports/{job_id}/checkpoints` | key | chunk checkpoints for resume |
+| GET | `/api/v1/imports/{job_id}/dead-letter` | key | malformed rows quarantine |
 
 ## Alerting (engine, service key)
 
