@@ -14,7 +14,7 @@ pydantic>=2.7
 # SettingsConfigDict(env_file=".env") in app/core/config.py loads .env through
 # python-dotenv; pydantic-settings errors at construction without it.
 python-dotenv>=1.0
-pydantic-settings>=2.3
+pydantic-settings>=2.15.0
 # FastAPI raises at route registration (not import) without python-multipart.
 # app/api/v1/imports.py declares File(...) and Form(...) on /imports/upload.
 python-multipart>=0.0.9
