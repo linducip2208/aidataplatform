@@ -6,6 +6,7 @@ use App\Models\Dataset;
 use App\Services\DatasetIngestionService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 
 /**
  * The three-step ingestion flow from `docs/api.md`: profile the file, confirm
@@ -17,6 +18,8 @@ class DatasetWorkflowController extends Controller
 
     public function preview(Request $request, Dataset $dataset): RedirectResponse
     {
+        Gate::authorize('update', $dataset);
+
         $preview = $this->ingestion->preview($dataset);
 
         $rows = (int) ($preview['row_count'] ?? 0);
@@ -27,6 +30,8 @@ class DatasetWorkflowController extends Controller
 
     public function mapping(Request $request, Dataset $dataset): RedirectResponse
     {
+        Gate::authorize('update', $dataset);
+
         $validated = $request->validate([
             'mappings' => ['required', 'array'],
             'mappings.*' => ['nullable', 'string', 'max:100'],
@@ -53,6 +58,8 @@ class DatasetWorkflowController extends Controller
 
     public function quality(Request $request, Dataset $dataset): RedirectResponse
     {
+        Gate::authorize('update', $dataset);
+
         $result = $this->ingestion->runQuality($dataset);
 
         $score = number_format($result['score'] * 100, 1);
@@ -67,6 +74,8 @@ class DatasetWorkflowController extends Controller
 
     public function commit(Request $request, Dataset $dataset): RedirectResponse
     {
+        Gate::authorize('update', $dataset);
+
         $request->validate([
             'run_async' => ['nullable', 'boolean'],
         ], [], [

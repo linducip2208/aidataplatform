@@ -10,6 +10,7 @@ use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 
@@ -77,6 +78,8 @@ class DatasetController extends Controller
 
     public function quality(Dataset $dataset): JsonResponse
     {
+        Gate::authorize('update', $dataset);
+
         $result = $this->ingestion->runQuality($dataset);
 
         return ApiResponse::data([
@@ -92,6 +95,8 @@ class DatasetController extends Controller
 
     public function mapping(Request $request, Dataset $dataset): JsonResponse
     {
+        Gate::authorize('update', $dataset);
+
         $validated = $request->validate([
             'mappings' => ['required', 'array'],
             'mappings.*' => ['nullable', 'string', 'max:100'],
@@ -119,6 +124,8 @@ class DatasetController extends Controller
 
     public function commit(Request $request, Dataset $dataset): JsonResponse
     {
+        Gate::authorize('update', $dataset);
+
         $result = $this->ingestion->commit($dataset, $request->boolean('run_async', true));
 
         return ApiResponse::data([
@@ -130,6 +137,8 @@ class DatasetController extends Controller
 
     public function destroy(Request $request, Dataset $dataset): JsonResponse
     {
+        Gate::authorize('delete', $dataset);
+
         $name = $dataset->name;
         $size = $dataset->size_bytes;
         $filename = $dataset->source_filename;

@@ -600,17 +600,36 @@ class WebWorkflowTest extends TestCase
     #[DataProvider('writeRoutes')]
     public function test_every_write_route_is_accepted_for_an_analyst(string $routeName, string $method): void
     {
-        $analyst = User::factory()->analyst()->create();
+        // The dataset helper attributes the row to $this->analyst, so the
+        // owner acts here: ownership enforcement (DatasetPolicy) lets the
+        // owner through exactly as the old open surface did.
         $dataset = $this->dataset();
 
         // A redirect with no validation errors is the browser-level "the role
         // gate let this through and the action ran" answer: the wizard routes
         // redirect rather than render.
-        $this->actingAs($analyst)
+        $this->actingAs($this->analyst)
             ->from(route('datasets.show', $dataset))
             ->call($method, $this->writeUri($routeName, $dataset), $this->writePayload($routeName))
             ->assertRedirect()
             ->assertSessionDoesntHaveErrors();
+    }
+
+    #[DataProvider('writeRoutes')]
+    public function test_write_routes_are_forbidden_for_a_non_owner_analyst(string $routeName, string $method): void
+    {
+        // Upload is a create (no dataset to own); every analyst may upload.
+        if ($routeName === 'datasets.store') {
+            $this->markTestSkipped('upload is owner-independent by design.');
+        }
+
+        $dataset = $this->dataset();
+        $other = User::factory()->analyst()->create();
+
+        $this->actingAs($other)
+            ->from(route('datasets.show', $dataset))
+            ->call($method, $this->writeUri($routeName, $dataset), $this->writePayload($routeName))
+            ->assertForbidden();
     }
 
     protected function writeUri(string $routeName, Dataset $dataset): string

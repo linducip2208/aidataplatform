@@ -10,6 +10,7 @@ use App\Support\ApiResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
@@ -148,6 +149,8 @@ class DatasetController extends Controller
 
     public function destroy(Request $request, Dataset $dataset): RedirectResponse
     {
+        Gate::authorize('delete', $dataset);
+
         $name = $dataset->name;
         $size = $dataset->size_bytes;
         $filename = $dataset->source_filename;

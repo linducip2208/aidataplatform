@@ -11,6 +11,7 @@ use App\Services\CatalogService;
 use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 
 /**
  * Read endpoints for the data catalog (`GET /api/catalog/*`,
@@ -112,6 +113,8 @@ class CatalogController extends Controller
 
     public function storeVersion(Request $request, Dataset $dataset): JsonResponse
     {
+        Gate::authorize('update', $dataset);
+
         $validated = $request->validate([
             'schema' => ['nullable', 'array'],
             'schema.*' => ['array'],
@@ -138,6 +141,8 @@ class CatalogController extends Controller
 
     public function annotate(Request $request, Dataset $dataset, string $column): JsonResponse
     {
+        Gate::authorize('update', $dataset);
+
         $validated = $request->validate([
             'business_description' => ['nullable', 'string', 'max:2000'],
             'sensitivity' => ['nullable', 'string', 'in:'.implode(',', ColumnMetadata::sensitivities())],
@@ -159,6 +164,8 @@ class CatalogController extends Controller
 
     public function upsertContract(Request $request, Dataset $dataset): JsonResponse
     {
+        Gate::authorize('update', $dataset);
+
         $validated = $request->validate([
             'owner' => ['required', 'string', 'max:191'],
             'schema_hash' => ['nullable', 'string', 'max:64'],

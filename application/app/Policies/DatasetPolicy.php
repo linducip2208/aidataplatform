@@ -8,15 +8,19 @@ use App\Models\User;
 /**
  * Intended ownership policy for datasets.
  *
- * STATUS: defined here, NOT YET ENFORCED. The controllers
- * (`DatasetController` web + `Api\DatasetController`, `DatasetWorkflowController`)
- * currently perform no per-row ownership check: any authenticated user can
- * list/view any dataset, and any `admin`/`analyst` can mutate or delete any
- * dataset. That is AUDIT FINDING A8-03 (see `docs/security.md` §8) — the fix
- * is for master to call these methods from the controllers, which TIGHTENS
- * the surface (never loosens it: everything the policy allows, the
- * controllers already allow today, except cross-owner write/delete which the
- * policy refuses).
+ * STATUS: ENFORCED on dataset write/delete paths since iteration 3.
+ * `Api\DatasetController` (quality/mapping/commit/destroy),
+ * `Api\CatalogController` (versions/annotate/contracts), the web
+ * `DatasetWorkflowController` (preview/mapping/quality/commit) and the web
+ * `DatasetController@destroy` call `Gate::authorize('update'|'delete')`.
+ * Reads stay global (shared catalog). That closed AUDIT FINDING A8-03
+ * (see `docs/security.md` §8) for owned datasets.
+ *
+ * LEGACY RULE: rows with `user_id = null` (pre-ownership uploads, factory
+ * rows in older tests) remain writable by any active analyst, exactly as
+ * before — otherwise every historical row would lock overnight. All new
+ * uploads carry `user_id` (`DatasetIngestionService::createFromUpload`), so
+ * the owner check applies to everything created going forward.
  *
  * Intended matrix (enforced once wired):
  *
@@ -66,8 +70,16 @@ class DatasetPolicy
             return true;
         }
 
-        return $user->role()->value === 'analyst'
-            && (int) $dataset->user_id === (int) $user->getKey();
+        if ($user->role()->value !== 'analyst') {
+            return false;
+        }
+
+        // Legacy rows without an owner stay writable by any analyst.
+        if ($dataset->user_id === null) {
+            return true;
+        }
+
+        return (int) $dataset->user_id === (int) $user->getKey();
     }
 
     public function delete(User $user, Dataset $dataset): bool
