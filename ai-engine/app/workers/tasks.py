@@ -5,24 +5,53 @@ to a job row or the result backend is redacted first.
 """
 from __future__ import annotations
 
+import functools
 import re
-from typing import Any, Dict
+from typing import Any, Callable, Dict
 
 from app.workers.celery_app import celery_app
 
-# "scheme://user:password@host" -> "scheme://user:***@host"
-_URL_CREDENTIALS_RE = re.compile(r"(://[^:/@\s]+:)([^@/\s]+)(@)")
-# "api_key=sk-live-...", "password: hunter2", "token=abc"
-_SECRET_ASSIGNMENT_RE = re.compile(
-    r"(?i)\b(api[_-]?key|secret|password|passwd|token|authorization)\b(\s*[=:]\s*)(\S+)"
-)
+# A filesystem path. The lookbehind keeps `redis://host:6379/1` and `12/34`
+# intact: a match may only start at a `/`, `\` or `.` that is not preceded by a
+# word character, a colon or a slash. Uploads are stored as
+# `<uuid>_<original filename>` (see api/v1/imports.py::_save_upload), so the
+# path carries the uploader's own file name.
+_PATH_RE = re.compile(r"(?<![\w:/])(?:[A-Za-z]:)?[./\\][^\s'\"]*")
 
 
 def _safe_error(exc: BaseException) -> str:
-    """Render an exception without leaking credentials from DSNs or messages."""
-    text = f"{type(exc).__name__}: {exc}"
-    text = _URL_CREDENTIALS_RE.sub(r"\1***\3", text)
-    return _SECRET_ASSIGNMENT_RE.sub(r"\1\2***", text)
+    """Render an exception without leaking credentials, DSNs or upload paths.
+
+    `app.core.errors.redact_secrets` is the redactor the rest of the engine
+    uses. It has to run first: a naive key/value rule rewrites the word "Bearer"
+    in `Authorization: Bearer <token>` and leaves the token itself in clear
+    text, which is the leak this function used to have.
+    """
+    from app.core.errors import redact_secrets
+
+    return _PATH_RE.sub("[path]", redact_secrets(f"{type(exc).__name__}: {exc}"))
+
+
+def _redacted_failure(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """Redact an escaping exception in place before it reaches the result backend.
+
+    Celery serialises `str(exc)` for a FAILURE state and logs the traceback, so
+    an unredacted message publishes a DSN or an upload path to both. Rewriting
+    `args` keeps the exception type and traceback while scrubbing the text.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return fn(*args, **kwargs)
+        except Exception as exc:
+            try:
+                exc.args = (_safe_error(exc),)
+            except Exception:
+                pass
+            raise
+
+    return wrapper
 
 
 def _db() -> Any:
@@ -69,6 +98,39 @@ def _set_job(job_id: int, **fields: Any) -> None:
             _close(db)
 
 
+def _mark_failed(job_id: int, reason: str) -> None:
+    """Mark the job failed, appending the reason to the ETL's error log.
+
+    `_set_job` assigns fields verbatim, so a blanket `error_log=[...]` here
+    would discard the up-to-200 per-chunk entries `run_etl` has already
+    persisted, which are the only record of which chunks failed and why.
+    """
+    if not job_id:
+        return
+    db = None
+    try:
+        from app.database.models import ImportJob
+
+        db = _db()
+        job = db.query(ImportJob).filter_by(id=job_id).first()
+        if job is None:
+            return
+        entries = list(job.error_log or [])
+        entries.append({"error": reason})
+        job.status = "failed"
+        job.error_log = entries[:200]
+        db.commit()
+    except Exception:
+        if db is not None:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+    finally:
+        if db is not None:
+            _close(db)
+
+
 def _progress(self: Any, progress: float, msg: str = "") -> None:
     if not hasattr(self, "update_state"):
         return
@@ -97,13 +159,28 @@ def import_file(self: Any, file_path: str, dataset_type: str = "sales",
             _progress(self, p, msg)
 
         res = run_etl(file_path, dataset_type, mappings or {}, import_job_id, db, progress=cb)
+        # `run_etl` owns the rich terminal states ("done" / "done_with_errors"),
+        # which it only writes when it was handed a session and a job id. A
+        # clean run is additionally marked "succeeded" here so the task, not
+        # only the ETL, discharges the success half of the contract: that token
+        # is the one the Laravel client treats as a finished import. A run with
+        # row-level errors keeps the ETL's "done_with_errors" so the failure
+        # detail is not laundered into a clean success.
+        if import_job_id and not res.get("error_log"):
+            _set_job(import_job_id, status="succeeded", progress=1.0)
         return res
     except Exception as exc:
         if import_job_id:
-            _set_job(import_job_id, status="failed", error_log=[{"error": _safe_error(exc)}])
+            _mark_failed(import_job_id, _safe_error(exc))
         # self.retry() raises Retry when a retry is scheduled and re-raises the
         # original error once the budget is spent. Both MUST propagate: swallowing
         # them here would report the task as successful and silently drop retries.
+        # The reason is scrubbed first because the re-raised exception is what
+        # Celery writes to the result backend and to the worker log.
+        try:
+            exc.args = (_safe_error(exc),)
+        except Exception:
+            pass
         self.retry(exc=exc)
         raise
     finally:
@@ -112,6 +189,7 @@ def import_file(self: Any, file_path: str, dataset_type: str = "sales",
 
 
 @celery_app.task(name="app.workers.tasks.validate_dataset")
+@_redacted_failure
 def validate_dataset(file_path: str) -> Dict[str, Any]:
     from app.ingestion.validator import validate_file
 
@@ -119,13 +197,23 @@ def validate_dataset(file_path: str) -> Dict[str, Any]:
 
 
 @celery_app.task(name="app.workers.tasks.transform_dataset")
+@_redacted_failure
 def transform_dataset(file_path: str, dataset_type: str = "sales", mappings: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    """Map, clean and quality-check a file *without* writing to the warehouse.
+
+    This is a dry run by construction, and it has to stay one. `run_etl` keys
+    its idempotency on `import_job_id` (purge-then-insert under a Postgres
+    advisory lock) and skips the purge entirely when the id is None, so passing
+    a session here without a job id would let a redelivered message append a
+    second copy of every fact row. Persisting an import is `import_file`.
+    """
     from app.ingestion.etl import run_etl
 
     return run_etl(file_path, dataset_type, mappings or {}, None, None)
 
 
 @celery_app.task(name="app.workers.tasks.train_model")
+@_redacted_failure
 def train_model(model_type: str, name: str = "model", params: Dict[str, Any] | None = None,
                 dataset: Any | None = None) -> Dict[str, Any]:
     from app.ml.training import train_model as _train
@@ -134,6 +222,7 @@ def train_model(model_type: str, name: str = "model", params: Dict[str, Any] | N
 
 
 @celery_app.task(name="app.workers.tasks.generate_forecast")
+@_redacted_failure
 def generate_forecast(history: Any, horizon: int = 30) -> Dict[str, Any]:
     from app.ml.forecasting import forecast
 
@@ -141,6 +230,7 @@ def generate_forecast(history: Any, horizon: int = 30) -> Dict[str, Any]:
 
 
 @celery_app.task(name="app.workers.tasks.calculate_customer_features")
+@_redacted_failure
 def calculate_customer_features(sales_rows: Any) -> Any:
     import pandas as pd
 
@@ -153,6 +243,7 @@ def calculate_customer_features(sales_rows: Any) -> Any:
 
 
 @celery_app.task(name="app.workers.tasks.anomaly_detection")
+@_redacted_failure
 def anomaly_detection(series: Any, sensitivity: float = 2.5) -> Dict[str, Any]:
     from app.ml.anomaly import detect_anomalies
 
@@ -160,6 +251,7 @@ def anomaly_detection(series: Any, sensitivity: float = 2.5) -> Dict[str, Any]:
 
 
 @celery_app.task(name="app.workers.tasks.generate_ai_report")
+@_redacted_failure
 def generate_ai_report(period: str = "weekly") -> Dict[str, Any]:
     from app.ai.reporting import executive_summary
 
@@ -171,14 +263,30 @@ def generate_ai_report(period: str = "weekly") -> Dict[str, Any]:
 
 
 @celery_app.task(name="app.workers.tasks.generate_embeddings")
+@_redacted_failure
 def generate_embeddings(title: str, content: str, source: str = "api") -> Dict[str, Any]:
+    """Chunk, embed and store one document.
+
+    `ingest_text` swallows a failed write and returns
+    `{"status": "failed", "document_id": None}` instead of raising, so the
+    return value is inspected here: without the check a rolled-back ingest is
+    recorded in the result backend as a successful task and nothing is stored.
+    An identical redelivery is safe -- `ingest_text` hashes the body and
+    returns the existing document with status "unchanged".
+    """
     from app.ai.rag import ingest_text
 
     db = _db()
     try:
-        return ingest_text(title, content, source, db_session=db)
+        res = ingest_text(title, content, source, db_session=db)
     finally:
         _close(db)
+    if res.get("status") == "failed":
+        raise RuntimeError(
+            f"rag ingest failed for doc_type={res.get('doc_type', 'txt')!r} "
+            f"truncated={res.get('truncated')}"
+        )
+    return res
 
 
 @celery_app.task(name="app.workers.tasks.scheduled_data_sync")

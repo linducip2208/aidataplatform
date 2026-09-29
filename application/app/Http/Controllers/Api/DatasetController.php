@@ -9,7 +9,9 @@ use App\Services\DatasetIngestionService;
 use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Token API mirror of the Blade dataset flow. Response envelope follows
@@ -101,8 +103,13 @@ class DatasetController extends Controller
             static fn (string $value): bool => $value !== '',
         );
 
+        // The doc promises a 422 whose `errors` are keyed by field, so the
+        // failure is reported against `mappings` rather than as a body with an
+        // empty `errors` object the client cannot act on.
         if ($mappings === []) {
-            return ApiResponse::error('Minimal satu kolom harus dipetakan.', 422, 'validation_failed');
+            throw ValidationException::withMessages([
+                'mappings' => ['Minimal satu kolom harus dipetakan.'],
+            ]);
         }
 
         $this->ingestion->suggestMapping($dataset, $mappings, $validated['save_as_template'] ?? null);
@@ -167,7 +174,14 @@ class DatasetController extends Controller
         if ($detailed) {
             $payload['columns'] = $dataset->columns ?? [];
             $payload['mappings'] = $dataset->mappings ?? [];
-            $payload['metadata'] = $dataset->metadata ?? [];
+            // `metadata` is documented as a key on this response, so it stays.
+            // What it must not do is hand out the upload validator's own report
+            // verbatim: that blob carries the sha256 of the uploaded business
+            // file, the byte count the engine read, and its own stored filename.
+            // The dataset row already holds the checksum, and this presenter
+            // deliberately does not publish it, so shipping it nested inside an
+            // engine-internal structure is the leak.
+            $payload['metadata'] = Arr::except((array) ($dataset->metadata ?? []), ['validation']);
         }
 
         return $payload;

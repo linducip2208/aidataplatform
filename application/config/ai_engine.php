@@ -73,4 +73,97 @@ return [
     // lists disagreed with the other side.
     'dataset_types' => ['sales', 'inventory', 'purchases', 'expenses', 'customers', 'products'],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Wording for the engine vocabulary
+    |--------------------------------------------------------------------------
+    |
+    | The engine answers in machine keys: `sales`, `total_cogs`, `PRODUCTION`.
+    | These maps are the single place where a key becomes something a user
+    | reads, so no Blade template carries its own copy of the dictionary.
+    | Every key here must exist in the vocabulary it labels; a missing entry
+    | falls back to the raw key rather than rendering an empty label.
+    |
+    */
+
+    'dataset_type_labels' => [
+        'sales' => 'Penjualan',
+        'inventory' => 'Inventori',
+        'purchases' => 'Pembelian',
+        'expenses' => 'Beban',
+        'customers' => 'Pelanggan',
+        'products' => 'Produk',
+    ],
+
+    'model_type_labels' => [
+        'forecast' => 'Prakiraan',
+        'churn' => 'Perpindahan pelanggan',
+        'segmentation' => 'Segmentasi',
+        'anomaly' => 'Anomali',
+        'recommend' => 'Rekomendasi',
+    ],
+
+    // Mirrors the statuses in `ai-engine/app/ml/registry.py` plus the STAGED
+    // target that `MlController::promote()` accepts.
+    'model_version_statuses' => [
+        'DRAFT' => ['label' => 'Draf', 'badge' => 'badge-neutral'],
+        'TRAINING' => ['label' => 'Sedang dilatih', 'badge' => 'badge-warning'],
+        'VALIDATED' => ['label' => 'Tervalidasi', 'badge' => 'badge-info'],
+        'STAGED' => ['label' => 'Disiapkan', 'badge' => 'badge-info'],
+        'PRODUCTION' => ['label' => 'Produksi', 'badge' => 'badge-success'],
+        'ARCHIVED' => ['label' => 'Diarsipkan', 'badge' => 'badge-neutral'],
+        'FAILED' => ['label' => 'Gagal', 'badge' => 'badge-danger'],
+    ],
+
+    // The report period and the analytics granularity are the same vocabulary.
+    'period_labels' => [
+        'daily' => 'Harian',
+        'weekly' => 'Mingguan',
+        'monthly' => 'Bulanan',
+    ],
+
+    // The finance envelope of `ai-engine/app/analytics/finance.py`.
+    'finance_labels' => [
+        'total_revenue' => 'Total pendapatan',
+        'total_cogs' => 'Total harga pokok penjualan',
+        'total_expenses' => 'Total beban',
+        'gross_profit' => 'Laba kotor',
+        'net_profit' => 'Laba bersih',
+        'margin_pct' => 'Margin',
+    ],
+
+    /*
+    | The import job endpoint answers with a free-form status string, so the
+    | spellings it actually uses are listed here. Anything unlisted falls back
+    | to a neutral badge instead of printing the raw token to the user.
+    */
+
+    'import_job_statuses' => [
+        'succeeded' => ['label' => 'Selesai', 'badge' => 'badge-success'],
+        'success' => ['label' => 'Selesai', 'badge' => 'badge-success'],
+        'completed' => ['label' => 'Selesai', 'badge' => 'badge-success'],
+        'done' => ['label' => 'Selesai', 'badge' => 'badge-success'],
+        'failed' => ['label' => 'Gagal', 'badge' => 'badge-danger'],
+        'error' => ['label' => 'Gagal', 'badge' => 'badge-danger'],
+        'queued' => ['label' => 'Antre', 'badge' => 'badge-info'],
+        'pending' => ['label' => 'Antre', 'badge' => 'badge-info'],
+        'running' => ['label' => 'Diproses', 'badge' => 'badge-warning'],
+        'processing' => ['label' => 'Diproses', 'badge' => 'badge-warning'],
+    ],
+
+    // The report block of an import job, per `ai-engine/app/ingestion/etl.py`.
+    'import_job_report_labels' => [
+        'import_job_id' => 'ID job impor',
+        'dataset_type' => 'Tipe dataset',
+        'total_rows' => 'Total baris',
+        'processed_rows' => 'Baris diproses',
+        'error_rows' => 'Baris bermasalah',
+        'quality' => 'Kualitas',
+        'error_log' => 'Catatan galat',
+        'stage' => 'Tahap',
+        'status' => 'Status',
+        'progress' => 'Progres',
+        'error' => 'Galat',
+    ],
+
 ];

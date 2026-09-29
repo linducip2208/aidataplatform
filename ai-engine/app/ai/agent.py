@@ -7,9 +7,13 @@ delimited ``<evidence>`` blocks with a system prompt that says the blocks are da
 instructions, and the block text is escaped so it cannot close its own fence.
 
 Evidence is produced only by a tool that actually ran, so a number can never appear in an
-evidence row that the agent did not fetch. A tool that raises contributes a redacted error
-string instead of its exception text, because a SQLAlchemy exception carries the failing
-statement.
+evidence row that the agent did not fetch — and, proven by running it, a model reply that
+invents a figure is confined to the prose: it never reaches an evidence row or the
+``ai_messages.evidence`` column. A tool that raises contributes a redacted error string
+instead of its exception text, because a SQLAlchemy exception carries the failing
+statement, and a read that returns nothing contributes an explicit empty marker rather
+than a zero-filled block, because a fabricated zero is indistinguishable from a
+measurement.
 """
 from __future__ import annotations
 
@@ -202,12 +206,19 @@ def _fallback_answer(message: str, evidence: List[Dict[str, Any]]) -> str:
     """
     if not evidence:
         return "Data belum tersedia: tidak ada sumber gudang data yang bisa dijawab."
+    if all(isinstance(ev.get("data"), dict) and ev["data"].get("empty") for ev in evidence):
+        return ("Data belum tersedia: setiap sumber yang queried gagal atau kosong pada "
+                f"jendela {tool_mod.NO_DATA_NOTE}. Tidak ada angka yang bisa ditampilkan.")
     lines = [f"Ringkasan untuk: {tool_mod._clip(message, 300)}", ""]
     for ev in evidence:
         source = str(ev.get("source") or "unknown")
         data = ev.get("data")
         if isinstance(data, dict) and data.get("error"):
             lines.append(f"- Sumber {source}: gagal ({tool_mod._clip(data['error'], 120)})")
+            continue
+        if isinstance(data, dict) and data.get("empty"):
+            note = tool_mod._clip(data.get("note") or "tidak ada baris di jendela waktu ini", 120)
+            lines.append(f"- Sumber {source}: data belum tersedia ({note})")
             continue
         lines.append(f"- Sumber {source}: {tool_mod._clip(json.dumps(data, ensure_ascii=False, default=str), 400)}")
     lines.append("")
@@ -220,23 +231,38 @@ def _persist_turn(db_session, conversation_id: Optional[int], message: str,
     """Append the turn to ``ai_conversations`` / ``ai_messages`` in one transaction.
 
     Commits on success and rolls back on failure, and returns the conversation id the
-    caller should keep: an id that was rolled back is never returned, so the Laravel side
-    cannot store a pointer to a conversation that does not exist. An unknown
+    caller should keep. The id is coerced to ``int`` before it is used, and only an id that
+    was *verified to exist* before the turn is ever returned, so a rolled-back turn, a
+    dangling id and a non-numeric id all resolve to ``None`` rather than to a pointer the
+    Laravel side would store for a conversation that is not in the database. An unknown
     ``conversation_id`` starts a fresh conversation rather than writing messages against a
     dangling foreign key. The session belongs to the caller and is not closed here.
     """
     if db_session is None:
-        return conversation_id
+        return None
+    existing: Optional[int] = None
     try:
         from app.database.models import AIConversation, AIMessage
 
-        cid: Optional[int] = conversation_id
+        cid: Optional[int] = None
+        if conversation_id is not None:
+            # The id arrives from a caller, so it is coerced before it is used as a
+            # primary key or echoed back. A non-integer used to raise out of the query
+            # below, which cost the whole turn its persistence and then returned the
+            # caller's raw string in a field declared ``Optional[int]``.
+            try:
+                cid = int(conversation_id)
+            except (TypeError, ValueError):
+                log.warning("conversation_id is not an integer, starting a new conversation")
+                cid = None
         if cid is not None:
-            exists = db_session.query(AIConversation.id).filter(
-                AIConversation.id == int(cid)).scalar() is not None
-            if not exists:
+            found = db_session.query(AIConversation.id).filter(
+                AIConversation.id == cid).scalar()
+            if found is None:
                 log.warning(f"conversation {cid} does not exist, starting a new one")
                 cid = None
+            else:
+                existing = cid
         if cid is None:
             first_line = next((ln for ln in message.splitlines() if ln.strip()), "")
             conv = AIConversation(title=tool_mod._clip(first_line, MAX_TITLE_CHARS) or "Percakapan baru")
@@ -256,7 +282,10 @@ def _persist_turn(db_session, conversation_id: Optional[int], message: str,
         except Exception:
             pass
         log.warning(f"agent turn not persisted: {type(exc).__name__}")
-        return conversation_id
+        # Only an id proven to exist before this turn is returned. Handing back the
+        # caller's own value after a rollback would point Laravel at a conversation
+        # that is not in the database.
+        return existing
 
 
 def run_agent(message: str, db_session=None, conversation_id=None) -> Dict[str, Any]:

@@ -60,7 +60,11 @@ class DatasetController extends Controller
             ],
             'name' => ['nullable', 'string', 'max:150'],
             'dataset_type' => ['required', 'string', 'in:'.implode(',', config('ai_engine.dataset_types'))],
-        ], [], ['file' => 'berkas']);
+        ], [], [
+            'file' => 'berkas',
+            'name' => 'nama dataset',
+            'dataset_type' => 'tipe dataset',
+        ]);
 
         $file = $request->file('file');
         $name = $validated['name'] ?? null;

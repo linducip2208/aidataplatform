@@ -3,8 +3,8 @@
 {{--
     The variant class is only emitted when `variant` is given. A caller that
     passes an enum-supplied class (`badge-success`, `badge-danger`, ...) through
-    :class must not also receive `badge-info`, because app.css declares
-    `.badge-info` after `.badge-success` at equal specificity and the later
-    rule would win, painting a committed dataset in the info colour.
+    :class must not also receive `badge-info`: app.css resolves the conflict
+    with compound `.badge.badge-<variant>` selectors rather than by rule order,
+    but an element carrying two colours is still a bug worth not writing.
 --}}
 <span {{ $attributes->merge(['class' => trim('badge '.($variant ? 'badge-'.$variant : ''))]) }}>{{ $slot }}</span>

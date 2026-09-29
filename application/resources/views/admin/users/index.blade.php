@@ -30,10 +30,10 @@
                     name="role"
                     class="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
                 >
-                    <option value="">Semua peran</option>
-                    @foreach ($roles as $role)
-                        <option value="{{ $role->value }}" @selected(($filters['role'] ?? '') === $role->value)>{{ $role->label() }}</option>
-                    @endforeach
+                        <option value="">Semua peran</option>
+                        @foreach ($roles as $role)
+                            <option value="{{ $role->value }}" @selected(($filters['role'] ?? '') === $role->value)>{{ $role->localizedLabel() }}</option>
+                        @endforeach
                 </select>
             </x-field>
 
@@ -45,14 +45,14 @@
                 <a
                     href="{{ route('admin.users.index') }}"
                     class="inline-flex items-center justify-center rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
-                >Reset</a>
+                >Atur ulang</a>
             </div>
         </form>
     </x-card>
 
     <div class="grid gap-6 lg:grid-cols-3">
         <div class="space-y-6 lg:col-span-2">
-            <x-card title="Daftar pengguna" description="{{ number_format($users->total()) }} akun terdaftar.">
+            <x-card title="Daftar pengguna" description="{{ number_format($users->total(), 0, ',', '.') }} akun terdaftar.">
                 @if ($users->isEmpty())
                 <x-empty-state
                     title="Belum ada pengguna"
@@ -76,7 +76,7 @@
                                     <dl class="mt-3 space-y-2 text-sm">
                                         <div class="flex flex-wrap items-center gap-2">
                                             <dt class="font-medium text-slate-500">Peran</dt>
-                                            <dd><x-badge variant="info">{{ $user->role()->label() }}</x-badge></dd>
+                                            <dd><x-badge variant="info">{{ $user->role()->localizedLabel() }}</x-badge></dd>
                                         </div>
                                         <div class="flex flex-wrap items-center gap-2">
                                             <dt class="font-medium text-slate-500">Status</dt>
@@ -138,7 +138,7 @@
                                         >
                                             @foreach ($roles as $role)
                                                 <option value="{{ $role->value }}" @selected(old('role', $user->role->value) === $role->value)>
-                                                    {{ $role->label() }}
+                                                    {{ $role->localizedLabel() }}
                                                 </option>
                                             @endforeach
                                         </select>
@@ -255,7 +255,7 @@
                         >
                             @foreach ($roles as $role)
                                 <option value="{{ $role->value }}" @selected(old('role') === $role->value)>
-                                    {{ $role->label() }} - {{ $role->description() }}
+                                    {{ $role->localizedLabel() }} - {{ $role->description() }}
                                 </option>
                             @endforeach
                         </select>
@@ -272,7 +272,7 @@
                 <ul class="space-y-3 text-sm">
                     @foreach ($roles as $role)
                         <li>
-                            <p class="font-semibold text-slate-900">{{ $role->label() }}</p>
+                            <p class="font-semibold text-slate-900">{{ $role->localizedLabel() }}</p>
                             <p class="mt-1 text-slate-600">{{ $role->description() }}</p>
                         </li>
                     @endforeach

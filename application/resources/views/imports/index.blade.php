@@ -1,20 +1,24 @@
 @extends('layouts.app')
 
-@section('title', 'Imports')
+@section('title', 'Impor')
 
 @section('content')
+    @php
+        $typeLabels = config('ai_engine.dataset_type_labels', []);
+    @endphp
+
     <div class="mb-6">
-        <h1 class="text-2xl font-semibold text-slate-900">Imports</h1>
+        <h1 class="text-2xl font-semibold text-slate-900">Impor</h1>
         <p class="mt-1 text-sm text-slate-500">
-            Dataset yang sudah memiliki job import. Buka salah satu untuk memantau progres baris yang diproses worker.
+            Dataset yang sudah memiliki job impor. Buka salah satu untuk memantau progres baris yang diproses oleh worker.
         </p>
     </div>
 
-    <x-card title="Job import" description="{{ number_format($datasets->total()) }} dataset memiliki job import.">
+    <x-card title="Job impor" description="{{ number_format($datasets->total(), 0, ',', '.') }} dataset memiliki job impor.">
         @if ($datasets->isEmpty())
             <x-empty-state
-                title="Belum ada job import"
-                description="Job import dibuat otomatis saat dataset diunggah dan di-commit ke gudang analytics."
+                title="Belum ada job impor"
+                description="Job impor dibuat otomatis saat dataset diunggah dan dikomit ke gudang data."
             >
                 <x-slot:action>
                     <a
@@ -24,7 +28,7 @@
                 </x-slot:action>
             </x-empty-state>
         @else
-            <x-table-wrapper label="Daftar job import">
+            <x-table-wrapper label="Daftar job impor">
                 <table class="app-table">
                     <thead>
                         <tr>
@@ -45,11 +49,11 @@
                                         href="{{ route('imports.show', $dataset) }}"
                                         class="rounded font-medium text-slate-900 hover:text-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
                                     >{{ $dataset->name }}</a>
-                                    <span class="mt-1 block text-xs text-slate-500">{{ $dataset->dataset_type }}</span>
+                                    <span class="mt-1 block text-xs text-slate-500">{{ $typeLabels[$dataset->dataset_type] ?? $dataset->dataset_type }}</span>
                                 </td>
-                                <td><x-badge :class="$status->badgeClass()">{{ $status->label() }}</x-badge></td>
-                                <td class="text-right tabular-nums">{{ number_format((int) $dataset->import_job_id) }}</td>
-                                <td class="text-right tabular-nums">{{ number_format((int) $dataset->row_count) }}</td>
+                                <td><x-badge :class="$status->badgeClass()">{{ $status->localizedLabel() }}</x-badge></td>
+                                <td class="text-right tabular-nums">{{ number_format((int) $dataset->import_job_id, 0, ',', '.') }}</td>
+                                <td class="text-right tabular-nums">{{ number_format((int) $dataset->row_count, 0, ',', '.') }}</td>
                                 <td class="text-right">
                                     @if ($dataset->updated_at)
                                         <span class="text-xs text-slate-500">{{ $dataset->updated_at->locale('id')->translatedFormat('d M Y H:i') }}</span>

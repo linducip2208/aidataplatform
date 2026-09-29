@@ -97,22 +97,31 @@ def webhook_configured() -> bool:
 
 
 def _safe_label(url: str) -> str:
-    """Return host + path of ``url`` with any credentials redacted.
+    """Return a log-safe host label for ``url``; never a path segment value.
 
-    A webhook URL frequently carries a token in the path or as basic-auth user
-    info, so it is reduced to scheme://host/path-with-credentials-removed before
-    it can reach a log line.
+    A webhook URL carries its secret in the *path*, not in the query string
+    (``https://hooks.example/services/T0/B0/XYZ...`` is the Slack and Teams
+    shape), and it may also carry basic-auth user info. So this keeps only
+    ``scheme://host[:port]`` plus the *shape* of the path -- its length and how
+    many segments it has -- and drops every segment value, the query and the
+    fragment. What survives is enough to tell two configured webhooks apart in a
+    log line and not enough to be a credential.
     """
     try:
         parts = urlsplit(url)
     except ValueError:  # pragma: no cover - defensive
         return "<webhook>"
-    if parts.username or parts.password:
-        host = parts.hostname or ""
+    if not parts.scheme or not parts.netloc:
+        return "<webhook>"
+    host = parts.hostname or ""
+    try:
         if parts.port:
             host = f"{host}:{parts.port}"
-        return f"{parts.scheme}://{host}{redact_secrets(parts.path)}"
-    return f"{parts.scheme}://{parts.netloc}{parts.path}"
+    except ValueError:  # malformed port; the host alone is still safe
+        pass
+    segments = [s for s in parts.path.split("/") if s]
+    path_shape = f"/<{len(segments)} segment(s)>" if segments else ""
+    return f"{parts.scheme}://{host}{path_shape}"
 
 
 def _post(url: str, body: Mapping[str, Any]) -> DeliveryResult:

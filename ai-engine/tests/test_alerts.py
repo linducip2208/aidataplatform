@@ -15,17 +15,22 @@ from app.alerts.rules import (
     ACTION_OPEN,
     ACTION_RESOLVE,
     EVALUATION_WINDOW_DAYS,
+    MESSAGE_MAX_CHARS,
     METRICS,
     OPERATORS,
     SEVERITIES,
+    UNSUPPORTED_RULE_FIELDS,
     AlertConfigurationError,
     AlertStateMachine,
     AlertStateMachineError,
     apply_operator,
+    clip_metric,
     coerce_threshold,
+    compose_message,
     metric_catalog,
     normalize_condition,
     plan_transition,
+    reject_unsupported_fields,
     require_metric,
     resolve_metric,
     resolve_severity,
@@ -260,3 +265,165 @@ def test_an_out_of_vocabulary_registry_value_falls_back_to_the_model_default():
 # --------------------------------------------------------------------------
 def test_operator_vocabulary_is_exactly_the_documented_six():
     assert sorted(set(OPERATORS.values())) == ["!=", "<", "<=", "==", ">", ">="]
+
+
+# --------------------------------------------------------------------------
+# a second observe() before the bind is the window where a duplicate could be born
+# --------------------------------------------------------------------------
+def test_a_second_true_observation_before_the_bind_cannot_open_a_second_alert():
+    """The insert-then-bind gap is the one place a duplicate could be created.
+
+    ``ACTION_OPEN`` reserves the row with a sentinel before the caller inserts it,
+    so a second evaluation arriving inside that window must already see "open".
+    """
+    machine = AlertStateMachine()
+    first = machine.observe(True)
+    assert first.action == ACTION_OPEN
+    assert machine.has_open_alert           # reserved, though no id exists yet
+    assert machine.current_alert_id is None
+
+    # Whatever happens next, no second open may be produced.
+    second = machine.observe(True)
+    assert second.action == ACTION_KEEP
+    assert second.has_open_alert is True
+    third = machine.observe(True)
+    assert third.action == ACTION_KEEP
+
+    # The reserved row is still bindable exactly once.
+    machine.bind(42)
+    assert machine.current_alert_id == 42
+    assert machine.observe(True).action == ACTION_KEEP
+    assert machine.current_alert_id == 42
+
+    with pytest.raises(AlertStateMachineError):
+        machine.bind(43)
+
+
+def test_a_pending_open_alert_is_closed_by_a_false_observation_before_the_bind():
+    """A rule that recovers inside the insert window must not leave a stale reservation.
+
+    The caller has already inserted the row, so the next evaluation resolving is the
+    path that would otherwise strand an alert the rule no longer deserves.
+    """
+    machine = AlertStateMachine()
+    machine.observe(True)
+    assert machine.has_open_alert
+    assert machine.observe(False).action == ACTION_RESOLVE
+    assert not machine.has_open_alert
+    # The reservation is gone, so the next fire legitimately opens a new one.
+    assert machine.observe(True).action == ACTION_OPEN
+
+
+def test_bind_is_refused_outside_the_window_right_after_an_open():
+    """Only the pending state accepts a bind -- not a clean machine, not a resolved one."""
+    clean = AlertStateMachine()
+    with pytest.raises(AlertStateMachineError):
+        clean.bind(1)
+
+    machine = AlertStateMachine()
+    machine.observe(True)
+    machine.bind(5)
+    machine.observe(False)  # resolved
+    with pytest.raises(AlertStateMachineError):
+        machine.bind(6)
+
+
+def test_a_transition_reports_the_state_it_was_evaluated_against():
+    """``fires``/``has_open_alert`` are the inputs, so a caller can audit a decision."""
+    assert (plan_transition(False, True).fires, plan_transition(False, True).has_open_alert) == (True, False)
+    assert (plan_transition(True, True).fires, plan_transition(True, True).has_open_alert) == (True, True)
+    assert (plan_transition(True, False).fires, plan_transition(True, False).has_open_alert) == (False, True)
+    assert (plan_transition(False, False).fires, plan_transition(False, False).has_open_alert) == (False, False)
+
+    assert plan_transition(False, True).inserts is True
+    for transition in (plan_transition(True, True), plan_transition(True, False), plan_transition(False, False)):
+        assert transition.inserts is False
+
+
+def test_a_constructed_machine_starts_clean_and_accepts_no_id():
+    machine = AlertStateMachine()
+    assert machine.has_open_alert is False
+    assert machine.current_alert_id is None
+    assert machine.observe(False).action == ACTION_NONE
+
+
+# --------------------------------------------------------------------------
+# a rule body that asks for a column the table does not have is refused, not dropped
+# --------------------------------------------------------------------------
+def test_unsupported_rule_fields_are_refused_by_name_with_the_ddl_that_would_fix_them():
+    """A 200 on a filter that was thrown away is worse than an error the caller can act on."""
+    with pytest.raises(AlertConfigurationError) as exc:
+        reject_unsupported_fields({"severity": "high"}, operation="create_rule")
+    assert exc.value.code == "ALERT_UNSUPPORTED_FIELD"
+    assert exc.value.details["rejected"] == ["severity"]
+    assert "reasons" in exc.value.details and "required_migration" in exc.value.details
+
+
+@pytest.mark.parametrize("field", sorted(UNSUPPORTED_RULE_FIELDS))
+def test_every_declared_unsupported_field_is_actually_refused(field):
+    with pytest.raises(AlertConfigurationError) as exc:
+        reject_unsupported_fields({field: "some-value"}, operation="update_rule")
+    assert exc.value.details["rejected"] == [field]
+
+
+@pytest.mark.parametrize("empty", [None, "", [], {}])
+def test_an_unsupported_field_sent_empty_is_not_a_rejection(empty):
+    """Deliberately lenient: only a field the client actually asked for is refused."""
+    reject_unsupported_fields({"severity": empty, "window_days": empty}, operation="create_rule")
+
+
+def test_a_non_mapping_body_is_ignored_rather_than_raising():
+    """Deliberately lenient: an absent body is not an error, the required-field
+    check downstream is what rejects a rule with nothing in it."""
+    for body in (None, "severity=high", 5, []):
+        reject_unsupported_fields(body, operation="create_rule")
+
+
+def test_a_rule_body_carrying_only_supported_fields_passes():
+    reject_unsupported_fields(
+        {"name": "Revenue", "metric": "sales.revenue", "condition": ">", "threshold": 1,
+         "is_active": True, "unit": "IDR"},
+        operation="create_rule",
+    )
+
+
+# --------------------------------------------------------------------------
+# the message that is copied onto every subsequent update
+# --------------------------------------------------------------------------
+def test_compose_message_is_single_line_prefixed_with_severity_and_clipped():
+    spec = require_metric("sales.revenue")
+    text = compose_message("Revenue tinggi", spec, 1234.5, ">", 100.0, EVALUATION_WINDOW_DAYS)
+    assert text.startswith("[HIGH] ")
+    assert spec.key in text and "1234.50" in text and "> 100.00" in text
+    assert "\n" not in text and "\r" not in text
+    assert len(text) <= MESSAGE_MAX_CHARS
+
+
+def test_compose_message_clips_a_runaway_rule_name():
+    spec = require_metric("sales.aov")
+    text = compose_message("N" * 10_000, spec, 1.0, "<", 0.0, EVALUATION_WINDOW_DAYS)
+    assert len(text) <= MESSAGE_MAX_CHARS
+    assert "N" * 10_000 not in text
+
+
+def test_clip_metric_drops_control_characters_so_a_metric_cannot_forge_a_log_record():
+    assert clip_metric("sales.revenue\nFAKE LOG LINE") == "sales.revenueFAKE LOG LINE"
+    assert clip_metric("x" * 500) == "x" * 64
+
+
+# --------------------------------------------------------------------------
+# the client-facing catalog, which needs no database
+# --------------------------------------------------------------------------
+def test_the_service_catalog_is_the_registry_the_evaluator_uses():
+    from app.alerts.service import catalog
+
+    c = catalog()
+    assert set(c) == {"metrics", "operators", "severities", "statuses", "window_days"}
+    assert c["window_days"] == EVALUATION_WINDOW_DAYS
+    # A client that builds its form from the catalog must be able to build every
+    # rule the evaluator accepts, so the two vocabularies cannot drift.
+    assert c["operators"] == sorted(set(OPERATORS.values()))
+    assert c["severities"] == list(SEVERITIES)
+    assert [row["metric"] for row in c["metrics"]] == sorted(METRICS)
+    assert all(row["severity"] in SEVERITIES for row in c["metrics"])
+    assert c["statuses"] == ["open", "acknowledged", "resolved"]

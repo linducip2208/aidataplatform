@@ -12,16 +12,29 @@ enum DatasetStatus: string
     case Quarantined = 'quarantined';
     case Failed = 'failed';
 
+    /**
+     * The machine-facing label. It stays English and equal to the backing
+     * value so logs, API payloads and the enum contract test keep working.
+     */
     public function label(): string
     {
+        return ucfirst($this->value);
+    }
+
+    /**
+     * The wording a user reads. Kept apart from label() because the views are
+     * Indonesian while the values, the columns and this contract are English.
+     */
+    public function localizedLabel(): string
+    {
         return match ($this) {
-            self::Uploaded => 'Uploaded',
-            self::Previewing => 'Previewing',
-            self::Mapped => 'Mapped',
-            self::Importing => 'Importing',
-            self::Committed => 'Committed',
-            self::Quarantined => 'Quarantined',
-            self::Failed => 'Failed',
+            self::Uploaded => 'Terunggah',
+            self::Previewing => 'Sedang dipratinjau',
+            self::Mapped => 'Dipetakan',
+            self::Importing => 'Sedang diimpor',
+            self::Committed => 'Dikomit',
+            self::Quarantined => 'Dikarantina',
+            self::Failed => 'Gagal',
         };
     }
 

@@ -1,5 +1,7 @@
 @extends('layouts.guest')
 
+@section('title', 'Akun dinonaktifkan')
+
 @section('content')
     <div class="w-full max-w-lg rounded-xl border border-slate-200 bg-white p-6">
         <h1 class="text-lg font-semibold text-slate-900">Akun dinonaktifkan</h1>

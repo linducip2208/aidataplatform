@@ -31,6 +31,10 @@ class DatasetWorkflowController extends Controller
             'mappings' => ['required', 'array'],
             'mappings.*' => ['nullable', 'string', 'max:100'],
             'save_as_template' => ['nullable', 'string', 'max:120'],
+        ], [], [
+            'mappings' => 'pemetaan kolom',
+            'mappings.*' => 'pemetaan kolom',
+            'save_as_template' => 'nama template',
         ]);
 
         $mappings = array_filter(
@@ -63,14 +67,22 @@ class DatasetWorkflowController extends Controller
 
     public function commit(Request $request, Dataset $dataset): RedirectResponse
     {
-        $validated = $request->validate([
+        $request->validate([
             'run_async' => ['nullable', 'boolean'],
+        ], [], [
+            'run_async' => 'proses di latar belakang',
         ]);
 
-        $this->ingestion->commit($dataset, $request->boolean('run_async', true));
+        // An unchecked HTML checkbox is not submitted at all, so "absent" is the
+        // one value that means `false`. Defaulting the missing field to `true`
+        // made the "run synchronously" box un-tickable: the commit was always
+        // queued no matter what the user did with the checkbox.
+        $this->ingestion->commit($dataset, $runAsync = $request->boolean('run_async'));
 
         return redirect()
             ->route('imports.show', $dataset)
-            ->with('status', 'Import diproses worker. Pantau progres di halaman Imports.');
+            ->with('status', $runAsync
+                ? 'Import diproses worker. Pantau progres di halaman Imports.'
+                : 'Import diproses sinkron. Hasilnya sudah tercatat di halaman Imports.');
     }
 }

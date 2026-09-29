@@ -8,6 +8,7 @@ use App\Services\AiEngineClient;
 use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class AnalyticsController extends Controller
 {
@@ -60,15 +61,37 @@ class AnalyticsController extends Controller
         return ApiResponse::data($engine->finance());
     }
 
-    /** @return array<string, mixed> */
+    /**
+     * The documented filter set, validated before it is forwarded.
+     *
+     * `granularity` is documented as a closed set and every one of these is
+     * passed straight to the engine, where an unchecked value becomes a
+     * grouping key in the warehouse query. Validating here also means the
+     * documented promise — a 422 with `errors` keyed by field — holds for the
+     * analytics routes as it does everywhere else.
+     *
+     * @return array<string, mixed>
+     */
     private function filter(Request $request): array
     {
+        $validated = $request->validate([
+            'date_from' => ['nullable', 'date_format:Y-m-d'],
+            'date_to' => ['nullable', 'date_format:Y-m-d'],
+            'branch' => ['nullable', 'string', 'max:50'],
+            'category' => ['nullable', 'string', 'max:50'],
+            'granularity' => ['nullable', 'string', Rule::in(['daily', 'weekly', 'monthly'])],
+        ], [], [
+            'date_from' => 'date from',
+            'date_to' => 'date to',
+            'granularity' => 'granularity',
+        ]);
+
         return array_filter([
-            'date_from' => $request->query('date_from'),
-            'date_to' => $request->query('date_to'),
-            'branch' => $request->query('branch'),
-            'category' => $request->query('category'),
-            'granularity' => (string) $request->query('granularity', 'daily'),
+            'date_from' => $validated['date_from'] ?? null,
+            'date_to' => $validated['date_to'] ?? null,
+            'branch' => $validated['branch'] ?? null,
+            'category' => $validated['category'] ?? null,
+            'granularity' => (string) ($validated['granularity'] ?? 'daily'),
         ], static fn (mixed $value): bool => $value !== null && $value !== '');
     }
 }

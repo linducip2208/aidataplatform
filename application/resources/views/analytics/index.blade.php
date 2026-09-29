@@ -14,11 +14,9 @@
 
         $branchOptions = $branchOptions->unique()->sort()->values();
 
-        $granularityOptions = [
-            'daily' => 'Harian',
-            'weekly' => 'Mingguan',
-            'monthly' => 'Bulanan',
-        ];
+        $periodLabels = config('ai_engine.period_labels', []);
+        $financeLabels = config('ai_engine.finance_labels', []);
+
         $rfmColumns = [
             'customer' => 'Pelanggan',
             'recency_days' => 'Recency (hari)',
@@ -105,7 +103,7 @@
                     name="granularity"
                     class="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
                 >
-                    @foreach ($granularityOptions as $value => $label)
+                    @foreach ($periodLabels as $value => $label)
                         <option value="{{ $value }}" @selected(($filters['granularity'] ?? 'daily') === $value)>{{ $label }}</option>
                     @endforeach
                 </select>
@@ -119,7 +117,7 @@
                 <a
                     href="{{ route('analytics.index') }}"
                     class="inline-flex items-center justify-center rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
-                >Reset</a>
+                >Atur ulang</a>
             </div>
         </form>
     </x-card>
@@ -127,7 +125,7 @@
     <x-card class="mb-6" title="KPI periode" description="Ringkasan angka penjualan untuk filter yang dipilih.">
         <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <x-stat label="Pendapatan" :value="\Illuminate\Support\Number::currency((float) ($kpi['revenue'] ?? 0), in: 'idr', locale: 'id', precision: 0)" />
-            <x-stat label="Jumlah pesanan" :value="number_format((int) ($kpi['orders'] ?? 0))" />
+            <x-stat label="Jumlah pesanan" :value="number_format((int) ($kpi['orders'] ?? 0), 0, ',', '.')" />
             <x-stat label="Unit terjual" :value="number_format((float) ($kpi['units'] ?? 0), 0, ',', '.')" />
             <x-stat label="Nilai pesanan rata-rata" :value="\Illuminate\Support\Number::currency((float) ($kpi['aov'] ?? 0), in: 'idr', locale: 'id', precision: 0)" />
             <x-stat
@@ -165,7 +163,7 @@
                             <tr>
                                 <td class="font-medium text-slate-900">{{ $point['period'] ?? 'Tidak diketahui' }}</td>
                                 <td class="text-right tabular-nums">{{ \Illuminate\Support\Number::currency((float) ($point['revenue'] ?? 0), in: 'idr', locale: 'id', precision: 0) }}</td>
-                                <td class="text-right tabular-nums">{{ number_format((int) ($point['orders'] ?? 0)) }}</td>
+                                <td class="text-right tabular-nums">{{ number_format((int) ($point['orders'] ?? 0), 0, ',', '.') }}</td>
                                 <td class="text-right tabular-nums">{{ number_format((float) ($point['units'] ?? 0), 0, ',', '.') }}</td>
                             </tr>
                         @endforeach
@@ -195,7 +193,7 @@
                                 <tr>
                                     <td class="font-medium text-slate-900">{{ $row['branch'] ?? 'Tidak diketahui' }}</td>
                                     <td class="text-right tabular-nums">{{ \Illuminate\Support\Number::currency((float) ($row['revenue'] ?? 0), in: 'idr', locale: 'id', precision: 0) }}</td>
-                                    <td class="text-right tabular-nums">{{ number_format((int) ($row['orders'] ?? 0)) }}</td>
+                                    <td class="text-right tabular-nums">{{ number_format((int) ($row['orders'] ?? 0), 0, ',', '.') }}</td>
                                     <td class="text-right tabular-nums">{{ \Illuminate\Support\Number::percentage((float) ($row['share_pct'] ?? 0), precision: 1, locale: 'id') }}</td>
                                 </tr>
                             @endforeach
@@ -213,7 +211,7 @@
                     @foreach ($finance as $key => $value)
                         @php $isMoney = ! in_array($key, ['margin_pct'], true); @endphp
                         <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2 last:border-b-0 last:pb-0">
-                            <dt class="font-medium text-slate-500">{{ \Illuminate\Support\Str::headline((string) $key) }}</dt>
+                            <dt class="font-medium text-slate-500">{{ $financeLabels[$key] ?? \Illuminate\Support\Str::headline((string) $key) }}</dt>
                             <dd class="tabular-nums text-slate-900">
                                 @if (is_bool($value))
                                     {{ $value ? 'Ya' : 'Tidak' }}
@@ -278,7 +276,7 @@
                             <th scope="col" class="text-right">Pendapatan</th>
                             <th scope="col" class="text-right">Porsi</th>
                             <th scope="col" class="text-right">Kumulatif</th>
-                            <th scope="col">Grade</th>
+                            <th scope="col">Kelas</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -291,7 +289,7 @@
                                 <td class="text-right tabular-nums">{{ \Illuminate\Support\Number::percentage((float) ($row['cumulative_pct'] ?? 0), precision: 1, locale: 'id') }}</td>
                                 <td>
                                     <x-badge variant="{{ $grade === 'A' ? 'success' : ($grade === 'B' ? 'info' : 'neutral') }}">
-                                        Grade {{ $grade }}
+                                        Kelas {{ $grade }}
                                     </x-badge>
                                 </td>
                             </tr>
@@ -358,7 +356,7 @@
                                                 {{ \Illuminate\Support\Number::percentage((float) ($cell['retention_pct'] ?? 0), precision: 1, locale: 'id') }}
                                             </span>
                                             <span class="mt-1 block text-xs text-slate-500">
-                                                {{ number_format((int) ($cell['active_customers'] ?? 0)) }} pelanggan
+                                                {{ number_format((int) ($cell['active_customers'] ?? 0), 0, ',', '.') }} pelanggan
                                             </span>
                                         @endif
                                     </td>

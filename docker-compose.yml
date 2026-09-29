@@ -27,7 +27,12 @@ x-laravel-environment: &laravel-environment
   APP_ENV: ${APP_ENV:-production}
   APP_DEBUG: ${APP_DEBUG:-false}
   APP_URL: ${APP_URL:-http://localhost}
-  APP_KEY: ${APP_KEY:-}
+  # Deliberately NOT injected. `APP_KEY: ${APP_KEY:-}` would set an empty
+  # string, which overrides application/.env (the container env wins), and the
+  # entrypoint then dies on an unencrypted key — a crash loop that takes
+  # laravel-queue, laravel-schedule and nginx down with it. Generate it once with
+  # `php artisan key:generate`; .env.example documents it as required.
+  # APP_KEY: ${APP_KEY}
   DB_CONNECTION: pgsql
   DB_HOST: postgres
   DB_PORT: 5432
@@ -315,7 +320,12 @@ services:
       # Published for tests/run.sh (BASE_AI). Not intended for a public host.
       - "${FASTAPI_PORT:-8001}:8000"
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/v1/health', timeout=5).status==200 else 1)\""]
+      # Probes readiness and checks the reported verdict, not the status code:
+      # /api/v1/readiness answers 200 whether or not it is ready, and
+      # /api/v1/health is a static liveness string. Gating the stack on either
+      # one marks a service with no schema as healthy. The entrypoint also
+      # tolerates a failed `alembic upgrade head`, so this is the only signal.
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; r=urllib.request.urlopen('http://localhost:8000/api/v1/readiness', timeout=5); sys.exit(0 if b'\\\"ready\\\": true' in r.read() or b'\\\"ready\\\":true' in r.read() else 1)\""]
       interval: 15s
       timeout: 10s
       retries: 5

@@ -1,10 +1,22 @@
 """Customer analytics: RFM quintiles, CLV, cohort retention."""
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Dict, List
 
 import pandas as pd
+
+#: Upper edges of the five RFM percentile bands, in score order.
+_BAND_EDGES = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
+_BAND_LABELS = [1, 2, 3, 4, 5]
+
+
+def _naive(ts: pd.Timestamp) -> pd.Timestamp:
+    """Return ``ts`` as a tz-naive UTC instant. The warehouse stores dates without a
+    zone, so a tz-aware reference date has to be flattened before it is subtracted
+    from them; mixing the two raises inside pandas rather than returning a number."""
+    if isinstance(ts, pd.Timestamp) and ts.tzinfo is not None:
+        return ts.tz_convert("UTC").tz_localize(None)
+    return ts
 
 
 def _prep(df: pd.DataFrame) -> pd.DataFrame:
@@ -23,6 +35,8 @@ def _prep(df: pd.DataFrame) -> pd.DataFrame:
         d["customer_name"] = d.get("customer_code", "UNKNOWN").astype(str) if "customer_code" in d.columns else "UNKNOWN"
     if "transaction_date" in d.columns:
         d["transaction_date"] = pd.to_datetime(d["transaction_date"], errors="coerce")
+        if getattr(d["transaction_date"].dtype, "tz", None) is not None:
+            d["transaction_date"] = d["transaction_date"].dt.tz_convert("UTC").dt.tz_localize(None)
     if "revenue" in d.columns:
         d["revenue"] = pd.to_numeric(d["revenue"], errors="coerce").fillna(0)
     else:
@@ -31,24 +45,41 @@ def _prep(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _quintile_score(s: pd.Series, reverse: bool = False) -> pd.Series:
-    """Return an int Series scored 1..5. NaN inputs collapse to the midpoint so a
-    rank never reaches `.astype(int)` as a float NaN."""
+    """Return an int Series scored 1..5 by percentile band of the average rank.
+
+    Ranking with ``method="average"`` is what makes the banding deterministic:
+    tied values share a rank, so two customers with an identical recency,
+    frequency and monetary always land in the same band. Ranking with
+    ``method="first"`` instead broke every tie by position, which scored the same
+    customer differently depending on where the groupby happened to sort it.
+
+    A series with no spread at all -- one customer, or every value equal, e.g. a
+    frame with no date column where everyone scores recency 0 -- scores 5 across
+    the board, and stays 5 under ``reverse``: a tied value cannot be worse than
+    itself, so a lone customer is the most recent customer there is rather than
+    the stalest.
+    """
     s = pd.to_numeric(s, errors="coerce").fillna(0)
-    try:
-        q = pd.qcut(s.rank(method="first"), 5, labels=[1, 2, 3, 4, 5])
-        scores = q.astype(int)
-    except Exception:
-        # fallback: rank-based linear scaling (also covers <5 distinct values)
-        r = s.rank(pct=True).fillna(0)
-        scores = (r * 5).clip(1, 5).round().fillna(3).astype(int)
-    if reverse:
-        scores = 6 - scores
-    return scores
+    if s.shape[0] == 0:
+        return pd.Series(dtype="int64")
+    if s.nunique() <= 1:
+        return pd.Series(5, index=s.index, dtype="int64")
+    pct = s.rank(method="average", pct=True)
+    scores = pd.cut(pct, bins=_BAND_EDGES, labels=_BAND_LABELS,
+                    include_lowest=True).astype("int64")
+    return 6 - scores if reverse else scores
 
 
 def rfm(df: pd.DataFrame, ref_date=None) -> List[Dict[str, Any]]:
     """Return a list of {customer, recency_days, frequency, monetary, r_score,
-    f_score, m_score, segment} rows sorted by monetary desc. Empty input yields []."""
+    f_score, m_score, segment} rows sorted by monetary desc. Empty input yields [].
+
+    ``ref_date`` is the instant recency is measured back from; when it is missing
+    or unparseable the last observed transaction is used, and when the frame
+    carries no date at all every customer scores recency 0. Rows with an
+    unparseable date are dropped, so a customer whose orders are all undated is
+    absent from the report rather than scored on a recency nobody knows.
+    """
     d = _prep(df)
     if d.empty:
         return []
@@ -58,15 +89,16 @@ def rfm(df: pd.DataFrame, ref_date=None) -> List[Dict[str, Any]]:
         d = d.dropna(subset=["transaction_date"]).copy()
         if d.empty:
             return []
-    if ref_date is not None:
-        ref = pd.to_datetime(ref_date, errors="coerce")
-        if pd.isna(ref):
-            ref = pd.Timestamp.now()
-    elif "transaction_date" in d.columns:
-        ref = d["transaction_date"].max()
-        if pd.isna(ref):
-            ref = pd.Timestamp.now()
-    else:
+    try:
+        ref = _naive(pd.to_datetime(ref_date, errors="coerce")) if ref_date is not None else pd.NaT
+        usable = bool(pd.notna(ref))
+    except (TypeError, ValueError):
+        ref, usable = pd.NaT, False
+    if not usable:
+        # An unusable ref_date must not age every customer by the age of the
+        # dataset, so fall back to the newest row actually present.
+        ref = d["transaction_date"].max() if "transaction_date" in d.columns else pd.NaT
+    if pd.isna(ref):
         ref = pd.Timestamp.now()
     if "transaction_date" not in d.columns:
         d["transaction_date"] = ref
@@ -114,11 +146,15 @@ def clv(df: pd.DataFrame) -> List[Dict[str, Any]]:
 
 def cohort_retention(df: pd.DataFrame) -> List[Dict[str, Any]]:
     """Return a list of {cohort, period_offset, retention_pct, active_customers}
-    rows keyed on each customer's first purchase month. Empty/undated input yields []."""
+    rows keyed on each customer's first purchase month. Empty/undated input yields [].
+    ``retention_pct`` is measured against the cohort size at offset 0, which is
+    every customer in the cohort by construction."""
     d = _prep(df)
     if d.empty or "transaction_date" not in d.columns:
         return []
     d = d.dropna(subset=["transaction_date"]).copy()
+    if d.empty:
+        return []
     d["cohort"] = d.groupby("customer_name")["transaction_date"].transform("min").dt.to_period("M")
     d["period"] = d["transaction_date"].dt.to_period("M")
     d["offset"] = (d["period"].astype(int) - d["cohort"].astype(int))

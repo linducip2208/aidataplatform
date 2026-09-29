@@ -3,15 +3,31 @@
 Every public call degrades instead of raising: with no API key, or when the provider is
 unreachable, :func:`chat` returns a grounded-by-nothing offline marker with
 ``offline=True`` so the caller can build its own answer from real data instead of showing a
-model error. The API key, the base URL and the provider's error text never leave this module
-in a log line or a response body: failures are reported by exception type and HTTP status
-only.
+model error.
+
+Four properties this module guarantees, each of them verified against a stub server:
+
+* **No credential leaves the module.** The key is read in :func:`_headers` and nowhere else,
+  it is only ever attached to a request whose URL passed the scheme and userinfo checks in
+  :func:`_base_url`, and :func:`_scrub` removes it from any string that reaches a log line or
+  a return value. The provider's own body is never handed back either: ``raw`` is reduced to
+  a fixed set of non-sensitive fields, so a provider that echoes the key it was sent cannot
+  reflect it into an answer, an ``ai_messages`` row or a report.
+* **Retries back off instead of amplifying.** A 429 or 503 is retried after an exponential
+  wait that honours ``Retry-After``; a 400/401/403/404 is not retried at all, because
+  repeating a request the provider has already rejected only adds load.
+* **A hung provider cannot pin a worker.** The per-attempt timeout is set on the client and
+  the whole loop is additionally bounded by :data:`MAX_TOTAL_SECONDS`.
+* **An empty or filtered completion is a degradation, not an answer.** A blank body, a
+  ``content_filter`` stop and a body that is not a JSON object all return ``offline=True``.
 """
 from __future__ import annotations
 
 import hashlib
+import random
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
@@ -27,13 +43,80 @@ HASH_EMBED_DIM = 128
 HASH_EMBED_MAX_TOKENS = 20000
 OFFLINE_NOTE = "[offline-llm] Model bahasa tidak dikonfigurasi atau tidak terjangkau."
 
+# A provider that answers with 200 KB of text is not producing an answer. The body is
+# rejected before it is parsed so a runaway completion cannot become an ai_messages row, a
+# report narrative or a Celery result payload.
+MAX_RESPONSE_BYTES = 512 * 1024
+MAX_CONTENT_CHARS = 20000
+# Upper bound for the whole retry loop. The per-attempt timeout alone would let a worker
+# thread sit for attempts x timeout, which is 25 minutes at the configured maxima.
+MAX_TOTAL_SECONDS = 120.0
+MAX_BACKOFF_SECONDS = 8.0
+RETRY_BASE_SECONDS = 0.5
+# Statuses worth repeating. Everything else in 4xx is the provider rejecting the request
+# itself: a second identical request gets the same rejection and doubles the load.
+RETRYABLE_STATUS = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
+# finish_reason values that mean "the model declined", not "the model answered".
+REFUSAL_REASONS = frozenset({"content_filter"})
+ALLOWED_SCHEMES = frozenset({"http", "https"})
+
+
+def _api_key() -> str:
+    """The effective key, or "" when none is configured. Never logged, never returned."""
+    return str(settings.effective_llm_api_key() or "")
+
+
+def _scrub(value: Any) -> Any:
+    """Return ``value`` with the configured API key removed from any string inside it.
+
+    A defensive last line, not the primary control: an ``httpx`` traceback embeds the
+    request headers, and a provider error body can echo the bearer token it received, so
+    every string that leaves this module goes through here first.
+    """
+    key = _api_key()
+    if not key:
+        return value
+    if isinstance(value, str):
+        return value.replace(key, "***")
+    if isinstance(value, dict):
+        return {k: _scrub(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_scrub(v) for v in value]
+    return value
+
+
+def _base_url() -> str:
+    """Return the provider base URL, or "" when it is unusable.
+
+    Three checks matter for the key. A blank ``LLM_BASE_URL`` is refused outright rather
+    than falling through ``config.effective_llm_base_url`` to ``openai_base_url``: a blank
+    value is almost always a failed ``${VAR}`` substitution in compose, and the fallback
+    would ship the bearer token to api.openai.com, which is not where a self-hosted
+    provider operator believes they are talking. Any ``user:password@`` userinfo is
+    stripped, because it would otherwise ride along in an exception message and in every
+    request this module makes. A scheme that is not http(s) rejects the URL rather than
+    letting httpx attach the ``Authorization`` header to it.
+    """
+    if settings.llm_provider.lower() != "openrouter" and not str(settings.llm_base_url or "").strip():
+        return ""
+    raw = str(settings.effective_llm_base_url() or "").strip()
+    if not raw:
+        return ""
+    try:
+        parts = urlsplit(raw)
+    except ValueError:
+        return ""
+    if parts.scheme.lower() not in ALLOWED_SCHEMES or not parts.netloc:
+        return ""
+    netloc = parts.netloc.rsplit("@", 1)[-1]
+    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+
 
 def _headers() -> Dict[str, str]:
     """Build the outbound auth headers. The key is read from settings, never logged."""
-    key = settings.effective_llm_api_key()
     h = {"Content-Type": "application/json"}
-    if key:
-        h["Authorization"] = f"Bearer {key}"
+    if _api_key():
+        h["Authorization"] = f"Bearer {_api_key()}"
     if settings.llm_provider.lower() == "openrouter":
         h["HTTP-Referer"] = "https://aidataplatform.local"
         h["X-Title"] = "AI Data Platform"
@@ -44,7 +127,7 @@ def _error_summary(exc: BaseException) -> str:
     """Describe a provider failure without leaking the URL, headers or response body."""
     status = getattr(getattr(exc, "response", None), "status_code", None)
     if status is not None:
-        return f"{type(exc).__name__} http_status={status}"
+        return str(_scrub(f"{type(exc).__name__} http_status={status}"))
     return type(exc).__name__
 
 
@@ -58,12 +141,98 @@ def _timeout() -> float:
     return max(1.0, min(300.0, float(settings.llm_timeout_seconds or 60)))
 
 
+def _retry_after_seconds(response: Optional[httpx.Response]) -> float:
+    """Read a delta-seconds ``Retry-After``, or 0.0 when the provider sent none."""
+    if response is None:
+        return 0.0
+    raw = (response.headers.get("Retry-After") or "").strip()
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return 0.0
+
+
+def _backoff(attempt: int, retry_after: float = 0.0) -> float:
+    """Seconds to wait before the next attempt: exponential, jittered, header-aware.
+
+    The jitter matters on a rate-limited provider: without it every concurrent worker
+    retries on the same schedule and the requests arrive as a burst. ``Retry-After`` wins
+    when the provider sent one, because it is the only value that knows the real quota
+    window.
+    """
+    wait = max(retry_after, RETRY_BASE_SECONDS * (2 ** max(0, attempt)))
+    return min(MAX_BACKOFF_SECONDS, wait) * (0.5 + random.random() / 2)
+
+
 def _offline(message: str, error: str = "") -> Dict[str, Any]:
     """Return the offline completion shape with no provider text in it."""
     raw: Dict[str, Any] = {"offline": True}
     if error:
-        raw["error"] = error
+        raw["error"] = str(_scrub(error))
     return {"content": message, "tool_calls": [], "raw": raw, "offline": True}
+
+
+def _summary(data: Dict[str, Any], content: str) -> Dict[str, Any]:
+    """Reduce a parsed completion to the non-sensitive fields worth keeping.
+
+    The provider's full body is deliberately dropped rather than returned: it can be
+    arbitrarily large, and an upstream that quotes the ``Authorization`` header back in an
+    error envelope would otherwise put the key into ``raw`` and from there into a log line,
+    an answer or a report.
+    """
+    choice = (data.get("choices") or [{}])[0]
+    if not isinstance(choice, dict):
+        choice = {}
+    usage = data.get("usage")
+    return {
+        "id": str(data.get("id") or "")[:128],
+        "model": str(data.get("model") or "")[:128],
+        "finish_reason": str(choice.get("finish_reason") or "")[:64],
+        "content_chars": len(content),
+        "usage": _scrub(usage) if isinstance(usage, dict) else {},
+        "truncated": len(content) >= MAX_CONTENT_CHARS,
+    }
+
+
+def _parse_completion(r: httpx.Response) -> Tuple[str, List[Any], Dict[str, Any]]:
+    """Return ``(content, tool_calls, summary)`` or raise ``ValueError`` for a bad body.
+
+    The body is checked three times before it is used: it must be within the size cap, it
+    must parse as JSON, and it must be a JSON *object*. A body that is a JSON array or a
+    bare string parses fine and then has no ``.get``, which used to surface as an
+    ``AttributeError`` from inside the retry loop.
+    """
+    declared = r.headers.get("Content-Length")
+    if declared and declared.isdigit() and int(declared) > MAX_RESPONSE_BYTES:
+        raise ValueError("response_too_large")
+    body = r.content
+    if len(body) > MAX_RESPONSE_BYTES:
+        raise ValueError("response_too_large")
+    try:
+        data = r.json()
+    except ValueError:
+        raise ValueError("invalid_json") from None
+    if not isinstance(data, dict):
+        raise ValueError("unexpected_payload")
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        raise ValueError("no_choices")
+    msg = choices[0].get("message")
+    if not isinstance(msg, dict):
+        raise ValueError("no_message")
+    finish = str(choices[0].get("finish_reason") or "")
+    if finish in REFUSAL_REASONS:
+        raise ValueError("refused")
+    content = msg.get("content")
+    if not isinstance(content, str) or not content.strip():
+        # An empty body is a degradation. Reporting it as a successful completion is how a
+        # refusal or a truncated response reaches the browser as if it were an answer.
+        raise ValueError("empty_content")
+    content = content[:MAX_CONTENT_CHARS]
+    tool_calls = msg.get("tool_calls")
+    if not isinstance(tool_calls, list):
+        tool_calls = []
+    return content, tool_calls, _summary(data, content)
 
 
 def chat(messages: List[Dict[str, str]], model: Optional[str] = None,
@@ -72,41 +241,62 @@ def chat(messages: List[Dict[str, str]], model: Optional[str] = None,
     """Run one chat completion.
 
     Returns ``{"content": str, "tool_calls": list, "raw": dict, "offline": bool}``. When no
-    API key is configured, or every attempt fails, ``offline`` is ``True`` and ``content``
-    is :data:`OFFLINE_NOTE` — a caller must then answer from its own data instead of showing
-    this string. The provider's error text is reduced to an exception type and HTTP status
-    and lives only in ``raw["error"]`` and the log.
+    API key is configured, the base URL is unusable, or every attempt fails, ``offline`` is
+    ``True`` and ``content`` is :data:`OFFLINE_NOTE` — a caller must then answer from its own
+    data instead of showing this string. The same is true of an empty, oversized or filtered
+    completion, which are degradations rather than answers. The provider's error text is
+    reduced to an exception type and HTTP status and lives only in ``raw["error"]`` and the
+    log.
     """
     mdl = model or settings.llm_model
-    base = settings.effective_llm_base_url().rstrip("/")
-    url = f"{base}/chat/completions"
+    base = _base_url()
+    if not _api_key():
+        return _offline(OFFLINE_NOTE)
+    if not base:
+        log.error("llm chat skipped: LLM_BASE_URL is empty or not an http(s) URL")
+        return _offline(OFFLINE_NOTE, error="invalid_base_url")
+    url = f"{base.rstrip('/')}/chat/completions"
     payload: Dict[str, Any] = {"model": mdl, "messages": messages,
                                "max_tokens": max(1, int(max_tokens)), "temperature": temperature}
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
     if tools:
         payload["tools"] = tools
-    if not settings.effective_llm_api_key():
-        return _offline(OFFLINE_NOTE)
 
     attempts = _attempts()
     last_err = "not attempted"
+    deadline = time.monotonic() + MAX_TOTAL_SECONDS
     with httpx.Client(timeout=_timeout()) as client:
         for attempt in range(attempts):
             try:
                 r = client.post(url, json=payload, headers=_headers())
                 r.raise_for_status()
-                data = r.json()
-                choice = (data.get("choices") or [{}])[0]
-                msg = choice.get("message") or {}
-                return {"content": msg.get("content") or "",
-                        "tool_calls": msg.get("tool_calls") or [],
-                        "raw": data, "offline": False}
+                content, tool_calls, summary = _parse_completion(r)
+                return {"content": content, "tool_calls": tool_calls,
+                        "raw": summary, "offline": False}
+            except httpx.HTTPStatusError as exc:
+                last_err = _error_summary(exc)
+                status = exc.response.status_code
+                # A 4xx the provider will answer identically forever is not retried; that
+                # is load added to a rate-limited or rejecting provider for no gain.
+                if status not in RETRYABLE_STATUS:
+                    log.error(f"llm chat rejected (not retried): {last_err}")
+                    return _offline(OFFLINE_NOTE, error=last_err)
+                log.error(f"llm chat attempt {attempt + 1}/{attempts} failed: {last_err}")
+                wait = _backoff(attempt, _retry_after_seconds(exc.response))
+            except ValueError as exc:
+                # A malformed body does not become well-formed on a retry, and the request
+                # already succeeded, so repeating it only multiplies provider load.
+                last_err = f"malformed_response {exc}"
+                log.error(f"llm chat attempt {attempt + 1}/{attempts} failed: {last_err}")
+                return _offline(OFFLINE_NOTE, error=last_err)
             except Exception as exc:
                 last_err = _error_summary(exc)
                 log.error(f"llm chat attempt {attempt + 1}/{attempts} failed: {last_err}")
-                if attempt < attempts - 1:
-                    time.sleep(0.5 * (attempt + 1))
+                wait = _backoff(attempt)
+            if attempt >= attempts - 1 or time.monotonic() + wait > deadline:
+                break
+            time.sleep(wait)
     return _offline(OFFLINE_NOTE, error=last_err)
 
 
@@ -115,8 +305,10 @@ def embed(texts: List[str], model: Optional[str] = None) -> List[List[float]]:
 
     Calls the provider in batches when a key is configured. Any batch that fails, or that
     comes back short or malformed, falls back to the deterministic :func:`_hash_embed` for
-    exactly those texts, so the result always has the same length as the input. Without a
-    key the whole batch is hashed, which is why the platform still works offline.
+    exactly those texts, so the result always has the same length as the input. A batch that
+    did succeed keeps its vectors: one failed batch out of eight must not silently discard
+    the other seven. Without a key the whole batch is hashed, which is why the platform still
+    works offline.
     """
     if not texts:
         return []
@@ -126,36 +318,66 @@ def embed(texts: List[str], model: Optional[str] = None) -> List[List[float]]:
     provider_items = items[:MAX_EMBED_TEXTS]
     mdl = model or settings.llm_embedding_model
     vectors: List[List[float]] = []
+    filled = 0
 
-    if settings.effective_llm_api_key() and provider_items:
-        base = settings.effective_llm_base_url().rstrip("/")
-        try:
-            with httpx.Client(timeout=_timeout()) as client:
-                for start in range(0, len(provider_items), EMBED_BATCH_SIZE):
-                    batch = provider_items[start:start + EMBED_BATCH_SIZE]
-                    r = client.post(f"{base}/embeddings", json={"model": mdl, "input": batch},
-                                    headers=_headers())
-                    r.raise_for_status()
-                    rows = r.json().get("data") or []
-                    # A provider may return rows out of order, or fewer than asked for, so
-                    # the position is taken from "index" and every text gets one slot.
-                    by_index: Dict[int, List[float]] = {}
-                    for pos, row in enumerate(rows):
-                        idx = row.get("index")
-                        if not isinstance(idx, int) or not 0 <= idx < len(batch):
-                            idx = pos
-                        vec = row.get("embedding")
-                        if isinstance(vec, list) and vec:
-                            by_index[idx] = [float(x) for x in vec if isinstance(x, (int, float))]
-                    for i in range(len(batch)):
-                        vectors.append(by_index.get(i, []))
-        except Exception as exc:
-            log.error(f"embeddings failed, falling back to hash vectors: {_error_summary(exc)}")
-            return [_hash_embed(t) for t in items]
+    if _api_key() and provider_items:
+        base = _base_url()
+        if not base:
+            log.error("embeddings skipped: LLM_BASE_URL is empty or not an http(s) URL")
+        else:
+            try:
+                with httpx.Client(timeout=_timeout()) as client:
+                    for start in range(0, len(provider_items), EMBED_BATCH_SIZE):
+                        batch = provider_items[start:start + EMBED_BATCH_SIZE]
+                        try:
+                            r = client.post(f"{base.rstrip('/')}/embeddings",
+                                            json={"model": mdl, "input": batch},
+                                            headers=_headers())
+                            r.raise_for_status()
+                            data = r.json()
+                        except Exception as exc:
+                            # Per batch, not per call: the batches that already returned
+                            # keep their vectors instead of the whole ingest degrading.
+                            log.error(f"embeddings batch {start // EMBED_BATCH_SIZE} failed, "
+                                      f"hashing those texts: {_error_summary(exc)}")
+                            break
+                        rows = data.get("data") if isinstance(data, dict) else None
+                        if not isinstance(rows, list):
+                            log.error(f"embeddings batch {start // EMBED_BATCH_SIZE} returned an "
+                                      f"unexpected payload, hashing those texts")
+                            break
+                        # A provider may return rows out of order, or fewer than asked for, so
+                        # the position is taken from "index" and every text gets one slot.
+                        by_index: Dict[int, List[float]] = {}
+                        dim = 0
+                        for pos, row in enumerate(rows):
+                            if not isinstance(row, dict):
+                                continue
+                            idx = row.get("index")
+                            if not isinstance(idx, int) or not 0 <= idx < len(batch):
+                                idx = pos
+                            vec = row.get("embedding")
+                            if not isinstance(vec, list) or not vec:
+                                continue
+                            values = [float(x) for x in vec if isinstance(x, (int, float))]
+                            if len(values) != len(vec):
+                                continue
+                            if not dim:
+                                dim = len(values)
+                            elif len(values) != dim:
+                                # A ragged batch would write two different widths into the
+                                # embedding column; the offending row is hashed instead.
+                                continue
+                            by_index[idx] = values
+                        for i in range(len(batch)):
+                            vec = by_index.get(i) or []
+                            filled += 1 if vec else 0
+                            vectors.append(vec)
+            except Exception as exc:
+                log.error(f"embeddings transport failed, hashing the rest: {_error_summary(exc)}")
 
     if len(vectors) < len(items):
         vectors.extend([] for _ in range(len(items) - len(vectors)))
-    filled = sum(1 for v in vectors if v)
     if filled < len(items):
         log.warning(f"embeddings returned {filled}/{len(items)} usable vectors, hashing the rest")
     return [v if v else _hash_embed(items[i]) for i, v in enumerate(vectors)]

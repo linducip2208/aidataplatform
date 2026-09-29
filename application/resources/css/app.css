@@ -74,31 +74,42 @@
         @apply border-b-0;
     }
 
-    .badge,
-    .badge-success,
-    .badge-danger,
-    .badge-warning,
-    .badge-info,
-    .badge-neutral {
+    .badge {
         @apply inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-1 text-xs font-semibold;
     }
 
+    /*
+     * The colour rules are declared twice on purpose: once as the compound
+     * `.badge.badge-<variant>` and once as the bare `.badge-<variant>`.
+     *
+     * Every rule in this file has the same specificity, so the later
+     * declaration wins. That is exactly how a committed dataset ended up
+     * painted in the info colour: the badge carried `badge-success` and, from
+     * a caller that also passed a variant, `badge-info`, which is declared
+     * last. The compound selector scores higher than any single-class rule,
+     * so no ordering change can make one status repaint another.
+     */
+    .badge.badge-success,
     .badge-success {
         @apply border-emerald-600/30 bg-emerald-50 text-emerald-800;
     }
 
+    .badge.badge-danger,
     .badge-danger {
         @apply border-rose-600/30 bg-rose-50 text-rose-800;
     }
 
+    .badge.badge-warning,
     .badge-warning {
         @apply border-amber-600/30 bg-amber-50 text-amber-900;
     }
 
+    .badge.badge-info,
     .badge-info {
         @apply border-sky-600/30 bg-sky-50 text-sky-800;
     }
 
+    .badge.badge-neutral,
     .badge-neutral {
         @apply border-slate-500/30 bg-slate-100 text-slate-700;
     }

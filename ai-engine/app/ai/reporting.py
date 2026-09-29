@@ -6,6 +6,11 @@ before they are interpolated into the document: the ``html`` key is rendered as
 ``HTMLResponse`` by ``app/api/v1/ai.py`` and must stay safe even if a future Blade view is
 ever pointed at it with ``{!! !!}``. The Blade reports page escapes ``narrative`` and
 ``sections`` itself, so the values here are plain text, never markup.
+
+The function never raises. It backs the reports page, and a 500 there takes out a screen
+whose warehouse numbers are still perfectly good, so a failing tool, an unreachable provider
+and a partial completion all resolve to the same thing: a complete report built from the
+numbers, with ``degraded`` set.
 """
 from __future__ import annotations
 
@@ -16,6 +21,9 @@ from typing import Any, Dict, List
 
 from app.ai import llm as llm_client
 from app.ai.tools import _clip, _jsonable
+from app.core.logging import get_logger
+
+log = get_logger("ai.reporting", "executive_summary")
 
 PERIODS = ("daily", "weekly", "monthly")
 DEFAULT_PERIOD = "weekly"
@@ -52,6 +60,27 @@ def _as_rows(data: Any) -> List[Any]:
         rows = data.get("rows")
         return rows if isinstance(rows, list) else []
     return data if isinstance(data, list) else []
+
+
+def _tool_data(tool_mod: Any, name: str, args: Dict[str, Any], db_session: Any) -> Any:
+    """Run one tool and return its ``data`` payload, or ``{}`` when the tool cannot answer.
+
+    ``executive_summary`` is the backing call for the reports page, so a tool that raises --
+    an analytics import that fails, a session that has already been closed, a shape change
+    in ``execute_tool`` -- must not propagate. An uncaught exception here is a 500 on a page
+    whose numbers would otherwise still render. Only the exception type is logged, never the
+    message: a SQLAlchemy error text carries the statement, its bound parameters and
+    sometimes the DSN.
+    """
+    try:
+        result = tool_mod.execute_tool(name, args, db_session=db_session)
+    except Exception as exc:
+        log.warning(f"report tool {name} failed, reporting it as empty: {type(exc).__name__}")
+        return {}
+    if not isinstance(result, dict):
+        log.warning(f"report tool {name} returned {type(result).__name__}, not a mapping")
+        return {}
+    return result.get("data", {})
 
 
 def _clean_text(value: Any, limit: int) -> str:
@@ -135,13 +164,17 @@ def _parse_sections(content: str) -> Dict[str, Any]:
 def _render_html(period: str, narrative: str) -> str:
     """Wrap an escaped narrative in a fixed document skeleton.
 
-    Both interpolated values are escaped, so model output cannot introduce an element,
-    an attribute or a ``javascript:`` URL into the response.
+    ``period`` is re-validated through :func:`_normalise_period` on the way in as well as
+    escaped, so the two controls are independent: the allow-list is what makes the value
+    known, the escaping is what makes it safe if the allow-list is ever widened. Both
+    interpolated values are escaped, so model output cannot introduce an element, an
+    attribute or a ``javascript:`` URL into the response.
     """
+    safe_period = html_lib.escape(_normalise_period(period))
     return (
         "<!DOCTYPE html><html lang=\"id\"><head><meta charset=\"utf-8\">"
-        f"<title>Executive Summary ({html_lib.escape(period)})</title></head><body>"
-        f"<h1>Executive Summary ({html_lib.escape(period)})</h1>"
+        f"<title>Executive Summary ({safe_period})</title></head><body>"
+        f"<h1>Executive Summary ({safe_period})</h1>"
         f"<p>{html_lib.escape(narrative).replace(chr(10), '<br>')}</p>"
         "</body></html>"
     )
@@ -154,17 +187,26 @@ def executive_summary(db_session=None, period: str = DEFAULT_PERIOD) -> Dict[str
     {"highlight": [...], "risiko": [...], "rekomendasi": [...]}, "html": str, "degraded":
     bool}`` — the keys ``app/api/v1/ai.py`` forwards and ``reports/index.blade.php``
     renders. Every value is JSON-serialisable because the Celery task returns this mapping
-    through the result backend. With no ``LLM_API_KEY`` the narrative and the sections are
-    built from the KPI values and ``degraded`` is ``True``; the report still renders.
+    through the result backend.
+
+    This function never raises. Every tool call is isolated by :func:`_tool_data`, the
+    completion is optional, and a missing narrative or a missing section is filled from the
+    same warehouse numbers, so an environment with no ``LLM_API_KEY``, an unreachable
+    provider or a failing analytics import still renders a complete report with
+    ``degraded=True``.
+
+    ``period`` is the only caller-supplied value that reaches the document. There is no
+    ``branch`` parameter: ``ReportRequest`` accepts one, but ``app/api/v1/ai.py`` does not
+    forward it, so today no branch name can reach this HTML. When that is wired up it has to
+    go through the same ``_normalise_period`` allow-list plus ``html.escape``.
     """
     from app.ai import tools as tool_mod
 
     period = _normalise_period(period)
-    kpi_raw = tool_mod.execute_tool("get_kpi", {}, db_session=db_session).get("data", {})
-    sales_raw = tool_mod.execute_tool("query_sales", {"granularity": "daily"},
-                                      db_session=db_session).get("data", {})
-    inv_raw = tool_mod.execute_tool("query_inventory", {}, db_session=db_session).get("data", {})
-    fin_raw = tool_mod.execute_tool("query_finance", {}, db_session=db_session).get("data", {})
+    kpi_raw = _tool_data(tool_mod, "get_kpi", {}, db_session)
+    sales_raw = _tool_data(tool_mod, "query_sales", {"granularity": "daily"}, db_session)
+    inv_raw = _tool_data(tool_mod, "query_inventory", {}, db_session)
+    fin_raw = _tool_data(tool_mod, "query_finance", {}, db_session)
 
     kpi = _jsonable(kpi_raw) if isinstance(kpi_raw, dict) else {}
     finance = _jsonable(fin_raw) if isinstance(fin_raw, dict) else {}
@@ -184,17 +226,27 @@ def executive_summary(db_session=None, period: str = DEFAULT_PERIOD) -> Dict[str
                 "<data>\n" + fact_text + "\n</data>\n"
                 "Format: narrative, highlight, risiko, rekomendasi (3-5 poin tiap bagian).")},
         ], json_mode=True)
-        if not out.get("offline"):
+        if isinstance(out, dict) and not out.get("offline"):
             parsed = _parse_sections(out.get("content") or "")
             narrative = _clean_text(parsed.get("narrative") or "", MAX_NARRATIVE_CHARS)
             sections = {k: _clean_items(parsed.get(k)) for k in SECTION_KEYS}
-    except Exception:
+    except Exception as exc:
+        log.warning(f"report narration failed, using warehouse numbers: {type(exc).__name__}")
         narrative = ""
 
+    # A completion that carries only a narrative is a partial answer, not a finished
+    # report. Any missing piece is filled from the same numbers, and the report is marked
+    # degraded so the page can say so rather than rendering three empty sections.
+    fallback_narrative = _fallback_narrative(period, kpi, finance)
+    fallback_sections = _fallback_sections(kpi, finance, period)
     degraded = not narrative
     if degraded:
-        narrative = _fallback_narrative(period, kpi, finance)
-        sections = _fallback_sections(kpi, finance, period)
+        narrative = fallback_narrative
+    for key in SECTION_KEYS:
+        if not sections.get(key):
+            sections[key] = fallback_sections[key]
+            degraded = True
+    narrative = _clean_text(narrative, MAX_NARRATIVE_CHARS) or fallback_narrative
 
     return {"period": period, "kpi": kpi, "finance": finance, "narrative": narrative,
             "sections": sections, "html": _render_html(period, narrative),

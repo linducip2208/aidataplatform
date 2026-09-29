@@ -20,18 +20,26 @@ Three facts about the schema drive the whole design, all verified against
    the moment it was resolved.
 3. There is no unique index on ``alerts (rule_id) WHERE status IN (...)``, so
    "one open alert per rule" is an application invariant. See
-   :func:`plan_transition` and :class:`AlertStateMachine`.
+   :func:`plan_transition` and :class:`AlertStateMachine`. The durable fix is
+   DDL this package does not own: see :data:`OPEN_ALERT_UNIQUE_INDEX_SQL` and
+   :data:`RULE_CASCADE_SQL`.
 
 The schema also cannot store a per-rule dimension/filter (branch, category) or
 a per-rule evaluation window, so both are deployment-wide constants here:
 :data:`EVALUATION_WINDOW_DAYS`. That is a schema limitation, not a design
 choice, and it is reported in the handoff notes.
+
+Because those three things (severity, filter, window) cannot be persisted, a
+caller that sends them is *refused* by :func:`reject_unsupported_fields` rather
+than quietly ignored. A silently dropped field reads as "it was applied"; the
+columns needed are in :data:`SEVERITY_COLUMN_SQL` and
+:data:`RULE_DIMENSION_COLUMNS_SQL`.
 """
 from __future__ import annotations
 
 import operator
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 from app.core.errors import COMMON_RESOLUTIONS, AppError, redact_secrets
@@ -47,12 +55,17 @@ __all__ = [
     "EVALUATION_WINDOW_DAYS",
     "MetricData",
     "MetricSpec",
+    "OPEN_ALERT_UNIQUE_INDEX_SQL",
     "OPEN_STATUSES",
     "OPERATORS",
+    "RULE_CASCADE_SQL",
+    "RULE_DIMENSION_COLUMNS_SQL",
+    "SEVERITY_COLUMN_SQL",
     "SEVERITIES",
     "STATUS_ACKNOWLEDGED",
     "STATUS_OPEN",
     "STATUS_RESOLVED",
+    "UNSUPPORTED_RULE_FIELDS",
     "Transition",
     "apply_operator",
     "build_metric_data",
@@ -62,6 +75,8 @@ __all__ = [
     "metric_catalog",
     "normalize_condition",
     "plan_transition",
+    "reject_unsupported_fields",
+    "require_metric",
     "resolve_metric",
     "resolve_severity",
 ]
@@ -128,6 +143,84 @@ METRIC_ECHO_MAX_CHARS = 64
 # ``alert_rules.name`` is String(128) and is copied into alerts.message.
 NAME_ECHO_MAX_CHARS = 128
 
+# --------------------------------------------------------------------------
+# DDL this package needs but does not own
+# --------------------------------------------------------------------------
+# Alembic 0001/0002 and app/database/models.py are owned elsewhere. Each
+# constant below is the exact statement the migration owner has to run, kept
+# next to the code that depends on it so the two cannot drift apart silently.
+#
+# The dedup invariant. :class:`AlertStateMachine` plus the row lock in
+# ``app.alerts.service._lock_rule`` already prevent a duplicate in every
+# interleaving reachable from this codebase, but they cannot make that a
+# database property: they are advisory, and any future writer that does not take
+# the same lock reopens the race. This index makes "one un-resolved alert per
+# rule" a constraint instead of a convention, and it is partial so resolved
+# history is free to accumulate.
+OPEN_ALERT_UNIQUE_INDEX_SQL = (
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_alerts_one_open_per_rule "
+    "ON alerts (rule_id) "
+    f"WHERE status IN ({', '.join(repr(s) for s in OPEN_STATUSES)});"
+)
+# Same index: without it Postgres would still have to scan alerts for the
+# "is there an open alert for this rule" lookup on every evaluation. The
+# partial index serves exactly that query, so no separate child-side index is
+# needed for the open-alert path.
+#
+# Why the delete is refused instead of cascading: ``alert_events.alert_id`` is
+# NOT NULL and also has no ON DELETE CASCADE, so adding CASCADE on
+# alerts.rule_id alone would move the failure one level down -- deleting a rule
+# would cascade to its alerts and then fail on their events with the same
+# opaque IntegrityError. Deleting alert history is a retention decision, not a
+# side effect of renaming a rule, so ``delete_rule`` refuses with ALERT_RULE_IN_USE.
+# If the product later wants cascade, these three statements are the whole
+# change (in that order, and only after deciding event retention):
+#
+#   ALTER TABLE alert_events DROP CONSTRAINT IF EXISTS alert_events_alert_id_fkey;
+#   ALTER TABLE alert_events
+#       ADD CONSTRAINT alert_events_alert_id_fkey
+#       FOREIGN KEY (alert_id) REFERENCES alerts(id) ON DELETE CASCADE;
+#   ALTER TABLE alerts DROP CONSTRAINT IF EXISTS alerts_rule_id_fkey;
+#   ALTER TABLE alerts
+#       ADD CONSTRAINT alerts_rule_id_fkey
+#       FOREIGN KEY (rule_id) REFERENCES alert_rules(id) ON DELETE CASCADE;
+RULE_CASCADE_SQL = (
+    "ALTER TABLE alerts DROP CONSTRAINT IF EXISTS alerts_rule_id_fkey, "
+    "ADD CONSTRAINT alerts_rule_id_fkey FOREIGN KEY (rule_id) "
+    "REFERENCES alert_rules(id) ON DELETE CASCADE;"
+)
+# The column ``alert_rules`` would need for per-rule severity. Until it exists,
+# severity is a property of the metric (see :data:`METRICS`) and any attempt to
+# set it per rule is refused by :func:`reject_unsupported_fields`.
+SEVERITY_COLUMN_SQL = (
+    "ALTER TABLE alert_rules "
+    "ADD COLUMN IF NOT EXISTS severity VARCHAR(16) NOT NULL DEFAULT 'medium';"
+)
+# The columns ``alert_rules`` would need for a per-branch / per-category rule and
+# a per-rule evaluation window. Without them both are deployment-wide constants.
+RULE_DIMENSION_COLUMNS_SQL = (
+    "ALTER TABLE alert_rules "
+    "ADD COLUMN IF NOT EXISTS branch_code VARCHAR(64) NOT NULL DEFAULT '', "
+    "ADD COLUMN IF NOT EXISTS category VARCHAR(128) NOT NULL DEFAULT '', "
+    "ADD COLUMN IF NOT EXISTS window_days INTEGER NOT NULL DEFAULT 1;"
+)
+# Body keys a client may reasonably send that the schema cannot honour. They are
+# refused by name rather than dropped, because "200 Created" on a filter that was
+# thrown away is worse than an error the caller can act on.
+UNSUPPORTED_RULE_FIELDS: Dict[str, str] = {
+    "severity": "alert_rules has no severity column; severity is derived from the metric",
+    "branch": "alert_rules has no branch column; the evaluation window is deployment-wide",
+    "branch_id": "alert_rules has no branch column; the evaluation window is deployment-wide",
+    "branch_code": "alert_rules has no branch column; the evaluation window is deployment-wide",
+    "category": "alert_rules has no category column; the evaluation window is deployment-wide",
+    "filter": "alert_rules has no filter column; the evaluation window is deployment-wide",
+    "filters": "alert_rules has no filter column; the evaluation window is deployment-wide",
+    "window": "alert_rules has no window column; the window is EVALUATION_WINDOW_DAYS",
+    "window_days": "alert_rules has no window column; the window is EVALUATION_WINDOW_DAYS",
+    "granularity": "alert_rules has no granularity column; the window is EVALUATION_WINDOW_DAYS",
+    "period": "alert_rules has no period column; the window is EVALUATION_WINDOW_DAYS",
+}
+
 
 class AlertConfigurationError(AppError):
     """A rule is misconfigured: unknown metric, unknown operator, bad threshold.
@@ -180,6 +273,43 @@ def clip_metric(metric: Any) -> str:
     """Return ``metric`` as a single-line string no wider than the column."""
     text = "".join(ch for ch in str(metric or "") if ch.isprintable())
     return text[:METRIC_ECHO_MAX_CHARS]
+
+
+def reject_unsupported_fields(fields: Any, *, operation: str,
+                              rule_id: Optional[int] = None) -> None:
+    """Raise when ``fields`` asks for something ``alert_rules`` cannot store.
+
+    A severity override, a branch/category filter and a per-rule window are all
+    reasonable things for a client to send and all absent from the table. They
+    are named explicitly here so the caller gets "this build cannot do that,
+    here is the DDL that would" instead of a 200 on a field that was silently
+    discarded. Keys that are simply not supported at all are left to the
+    caller's own unknown-field check.
+    """
+    if not isinstance(fields, Mapping):
+        return
+    blocked = sorted(
+        k for k, v in fields.items()
+        if k in UNSUPPORTED_RULE_FIELDS and v not in (None, "", [], {})
+    )
+    if not blocked:
+        return
+    reasons = "; ".join(f"{k}: {UNSUPPORTED_RULE_FIELDS[k]}" for k in blocked)
+    raise AlertConfigurationError(
+        f"Alert rule field(s) not supported by the current schema -- {reasons}.",
+        operation=operation,
+        error_type="unsupported_field",
+        code="ALERT_UNSUPPORTED_FIELD",
+        details={
+            "rule_id": rule_id,
+            "rejected": blocked,
+            "reasons": {k: UNSUPPORTED_RULE_FIELDS[k] for k in blocked},
+            "required_migration": {
+                "severity": SEVERITY_COLUMN_SQL,
+                "dimensions": RULE_DIMENSION_COLUMNS_SQL,
+            },
+        },
+    )
 
 
 # --------------------------------------------------------------------------
@@ -456,13 +586,21 @@ def resolve_severity(spec: MetricSpec) -> str:
 
 
 def metric_catalog() -> List[Dict[str, Any]]:
-    """Return the API-facing metric list: one dict per supported metric."""
+    """Return the API-facing metric list: one dict per supported metric.
+
+    ``severity_source`` is always ``"metric"``: ``alert_rules`` has no severity
+    column, so the value below is what an alert opened by this metric will
+    carry. It is stated in the payload rather than left to be inferred, because a
+    client that reads ``severity`` as a per-rule setting would otherwise build a
+    form the engine silently ignores.
+    """
     return [
         {
             "metric": spec.key,
             "source": spec.source,
             "unit": spec.unit,
             "severity": resolve_severity(spec),
+            "severity_source": "metric",
             "windowed": spec.windowed,
             "description": spec.description,
         }
@@ -478,16 +616,28 @@ def build_metric_data(db: Any, window_days: int = EVALUATION_WINDOW_DAYS) -> Met
     date bound in the analytics layer). Frame loading is the one the routers and
     the AI tools already use, so an alert and ``/analytics/kpi`` cannot disagree
     about what the data means.
+
+    The window is bounded in *local* civil time, not UTC, and that is not a
+    style choice. ``fact_sales.transaction_date`` is a ``DATE`` column with no
+    timezone, ``_load_frame`` selects it with ``date.today()``, and rows are
+    written with the local calendar date. Bounding the window with
+    ``datetime.now(timezone.utc)`` therefore drifts by the UTC offset: for every
+    deployment east of UTC, an evaluation that runs between 00:00 and 07:00 UTC
+    is a local day ahead of the bound, sees no rows for "today", and reports
+    0.0 for every sales metric -- which reads downstream as a perfectly healthy
+    rule. Same data, same rule, and the alert opens or not depending on the hour
+    the beat schedule happened to fire.
     """
     from app.ai.tools import _load_frame
     from app.analytics import sales as sa
 
     sales_df = _load_frame("sales", db)
     if window_days and sales_df is not None and not sales_df.empty:
-        # Naive datetimes on purpose: fact_sales.transaction_date is a DATE
-        # column, so a tz-aware bound would raise on comparison.
-        end = datetime.now(timezone.utc).replace(tzinfo=None)
-        sales_df = sa.apply_filters(sales_df, end - timedelta(days=window_days), end)
+        # Local civil dates, matching the DATE column _load_frame already read.
+        today = date.today()
+        start = datetime.combine(today - timedelta(days=window_days), time.min)
+        end = datetime.combine(today, time.max)
+        sales_df = sa.apply_filters(sales_df, start, end)
     inventory_df = _load_frame("inventory", db)
     return MetricData(sales=sales_df, inventory=inventory_df, window_days=window_days)
 

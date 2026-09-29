@@ -4,6 +4,13 @@
 # "${VAR:-default}" string is not a valid model.Duration and the process refuses
 # to start, so the intervals below are literals. Change them here, or supply a
 # different file via --config.file.
+#
+# Every target below was checked against docker-compose.yml: the service name
+# exists, it is attached to the appnet network this container is also on (so
+# Docker's embedded DNS resolves it), and the port is the one that service
+# `expose`s. A target that is not reachable at its scrape address is worse than
+# no target: it sits permanently DOWN and teaches the operator to ignore the
+# one dashboard they have.
 
 global:
   scrape_interval: 15s
@@ -11,9 +18,27 @@ global:
 
 scrape_configs:
   # The engine exposes /metrics from app/main.py and registers the route without
-  # an auth dependency, so it needs no credentials. That is safe only while the
-  # engine stays on the private compose network (docker-compose.yml publishes no
-  # host port for it).
+  # an auth dependency, so it needs no credentials.
+  #
+  # It is reachable, but not public: app/main.py `_is_internal_client` refuses a
+  # scrape whose socket peer is a routable address, and METRICS_ALLOW_PUBLIC
+  # defaults to false. Note that docker-compose.yml DOES publish the engine on
+  # ${FASTAPI_PORT:-8001} for tests/run.sh, so a scrape arriving from the host
+  # over that port is a public peer and gets a 404 - the metric is not exposed
+  # off-box, but do not treat the published port as harmless.
+  #
+  # CAVEAT, and it is the reason the numbers on the dashboard are wrong today:
+  # the image runs `uvicorn --workers 2` (ai-engine/Dockerfile) and
+  # prometheus_client's default REGISTRY is per process. Each worker therefore
+  # answers /metrics with its own counters, and both workers publish the same
+  # label sets for http_requests_total and the process collector. Prometheus
+  # keeps one of the duplicates and drops the other, so every counter on this
+  # dashboard is an arbitrary sample of the two workers' values, and rate()
+  # over it is not a rate. The engine is a read-only target here: the fix is
+  # `--workers 1`, or prometheus_client's multiprocess mode with
+  # PROMETHEUS_MULTIPROC_DIR. Until then, treat the trends as indicative and
+  # the `up`/duplicate-sample evidence in the Prometheus targets page as the
+  # authoritative signal.
   - job_name: fastapi
     metrics_path: /metrics
     scrape_interval: 15s
@@ -40,6 +65,8 @@ scrape_configs:
   #     static_configs:
   #       - targets: ["postgres-exporter:9187"]
 
+  # Prometheus scrapes itself, which is what makes `up{job="prometheus"}` and
+  # `scrape_samples_scraped` available to compare against the engine job.
   - job_name: prometheus
     scrape_interval: 15s
     static_configs:

@@ -4,19 +4,7 @@
 
 @section('content')
     @php
-        $typeLabels = [
-            'sales' => 'Penjualan',
-            'inventory' => 'Inventori',
-            'purchases' => 'Pembelian',
-            'expenses' => 'Biaya',
-            'customers' => 'Pelanggan',
-            'generic' => 'Umum',
-        ];
-
-        $verdictLabels = [
-            'pass' => 'Lolos',
-            'quarantine' => 'Dikarantina',
-        ];
+        $typeLabels = config('ai_engine.dataset_type_labels', []);
     @endphp
 
     <div class="mb-6">
@@ -27,9 +15,17 @@
     </div>
 
     <div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <x-stat label="Lolos" :value="number_format((int) ($breakdown['pass'] ?? 0))" hint="Dataset di atas ambang minimum" />
-        <x-stat label="Dikarantina" :value="number_format((int) ($breakdown['quarantine'] ?? 0))" hint="Dataset di bawah ambang minimum" />
-        <x-stat label="Belum dinilai" :value="number_format((int) ($breakdown['unscored'] ?? 0))" hint="Dataset tanpa laporan kualitas" />
+        <x-stat
+            :label="\App\Enums\QualityVerdict::Pass->localizedLabel()"
+            :value="number_format((int) ($breakdown['pass'] ?? 0), 0, ',', '.')"
+            hint="Dataset di atas ambang minimum"
+        />
+        <x-stat
+            :label="\App\Enums\QualityVerdict::Quarantine->localizedLabel()"
+            :value="number_format((int) ($breakdown['quarantine'] ?? 0), 0, ',', '.')"
+            hint="Dataset di bawah ambang minimum"
+        />
+        <x-stat label="Belum dinilai" :value="number_format((int) ($breakdown['unscored'] ?? 0), 0, ',', '.')" hint="Dataset tanpa laporan kualitas" />
         <x-stat
             label="Ambang minimum"
             :value="\Illuminate\Support\Number::percentage($threshold * 100, precision: 1, locale: 'id')"
@@ -61,7 +57,7 @@
                     <option value="">Semua vonis</option>
                     @foreach ($verdicts as $verdict)
                         <option value="{{ $verdict->value }}" @selected(($filters['verdict'] ?? '') === $verdict->value)>
-                            {{ $verdictLabels[$verdict->value] ?? $verdict->value }}
+                            {{ $verdict->localizedLabel() }}
                         </option>
                     @endforeach
                 </select>
@@ -75,12 +71,12 @@
                 <a
                     href="{{ route('quality.index') }}"
                     class="inline-flex items-center justify-center rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
-                >Reset</a>
+                >Atur ulang</a>
             </div>
         </form>
     </x-card>
 
-    <x-card title="Hasil pemeriksaan" description="{{ number_format($datasets->total()) }} dataset punya laporan kualitas.">
+    <x-card title="Hasil pemeriksaan" description="{{ number_format($datasets->total(), 0, ',', '.') }} dataset punya laporan kualitas.">
         @if ($datasets->isEmpty())
             <x-empty-state
                 title="Belum ada laporan kualitas"
@@ -132,10 +128,10 @@
                                 </td>
                                 <td>
                                     <x-badge :class="$verdict ? $verdict->badgeClass() : 'badge-neutral'">
-                                        {{ $verdict ? ($verdictLabels[$verdict->value] ?? $verdict->value) : 'Tidak diketahui' }}
+                                        {{ $verdict ? $verdict->localizedLabel() : 'Tidak diketahui' }}
                                     </x-badge>
                                 </td>
-                                <td><x-badge :class="$status->badgeClass()">{{ $status->label() }}</x-badge></td>
+                                <td><x-badge :class="$status->badgeClass()">{{ $status->localizedLabel() }}</x-badge></td>
                                 <td class="text-right">
                                     @if ($dataset->quality_checked_at)
                                         <span class="text-xs text-slate-500">{{ $dataset->quality_checked_at->locale('id')->translatedFormat('d M Y H:i') }}</span>

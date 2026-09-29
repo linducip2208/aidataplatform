@@ -22,6 +22,10 @@ class ProfileController extends Controller
         $validated = $request->validate([
             'current_password' => ['required', 'string'],
             'password' => ['required', 'confirmed', Password::min(8)->letters()->numbers()],
+        ], [], [
+            'current_password' => 'password saat ini',
+            'password' => 'password baru',
+            'password_confirmation' => 'konfirmasi password baru',
         ]);
 
         $user = $request->user();

@@ -79,7 +79,7 @@
                 <div>
                     <dt class="font-medium text-slate-500">Peran</dt>
                     <dd class="mt-1">
-                        <x-badge variant="info">{{ $user->role()->label() }}</x-badge>
+                        <x-badge variant="info">{{ $user->role()->localizedLabel() }}</x-badge>
                     </dd>
                 </div>
                 <div>

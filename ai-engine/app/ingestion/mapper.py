@@ -32,6 +32,7 @@ ALIAS_MAP: Dict[str, str] = {
     "tanggal stok": "snapshot_date", "snapshot date": "snapshot_date",
     # customer
     "kd customer": "customer_code", "kode customer": "customer_code", "id customer": "customer_code",
+    "kode pelanggan": "customer_code", "kd pelanggan": "customer_code", "id pelanggan": "customer_code",
     "customer code": "customer_code", "customer id": "customer_code", "kd cust": "customer_code",
     "nm customer": "customer_name", "nama customer": "customer_name", "customer name": "customer_name",
     "nama pelanggan": "customer_name", "pelanggan": "customer_name", "customer": "customer_name",

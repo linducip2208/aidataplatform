@@ -16,11 +16,22 @@ Transaction contract, matching ``app/database/connection.py``:
 * :func:`evaluate_all` isolates each rule in a SAVEPOINT so one rule that blows
   up cannot roll back the alerts the rules before it already opened.
 
+The dedup invariant "one un-resolved alert per rule" is enforced in three
+places, because no single one is sufficient: the in-process mutex
+:data:`_RULE_LOCKS`, the ``FOR UPDATE`` on the rule row taken by
+:func:`_lock_rule` before the open alert is re-read (which covers a *different*
+process racing the first insert -- locking the alert row alone cannot, because
+on the first firing there is no alert row to lock), and the
+:func:`~app.alerts.rules.AlertStateMachine`. The fourth, durable layer is a
+partial unique index that this package does not own; the exact DDL is
+:data:`~app.alerts.rules.OPEN_ALERT_UNIQUE_INDEX_SQL`.
+
 Only the columns declared in ``app/database/models.py`` are written:
 ``alert_rules`` (name, metric, condition, threshold, is_active) by the CRUD
 functions, ``alerts`` (rule_id, severity, message, status) by the lifecycle
 functions, ``alert_events`` (alert_id, event_type, payload) by
-:func:`_record_event`.
+:func:`_record_event`. Fields that would need a column the table does not have
+(per-rule severity, branch filter, window) are refused, not dropped.
 """
 from __future__ import annotations
 
@@ -60,6 +71,7 @@ from app.alerts.rules import (
     compose_message,
     metric_catalog,
     normalize_condition,
+    reject_unsupported_fields,
     require_metric,
     resolve_metric,
     resolve_severity,
@@ -159,6 +171,25 @@ def _safe_name(name: Any) -> str:
     return redact_secrets(_printable(name, RULE_NAME_MAX_CHARS))
 
 
+def _clean_name(name: Any, *, operation: str, rule_id: Optional[int] = None) -> str:
+    """Return a storable rule name, or raise when there is no name at all.
+
+    Whitespace is stripped before the emptiness test: ``"   "`` is not a name,
+    and ``alert_rules.name`` is NOT NULL, so a blank row would otherwise be
+    stored and then copied into every ``alerts.message`` this rule ever writes.
+    """
+    clean = _printable(name, RULE_NAME_MAX_CHARS).strip()
+    if not clean:
+        raise AlertConfigurationError(
+            "Alert rule name is required.",
+            operation=operation,
+            error_type="invalid_name",
+            code="ALERT_INVALID_NAME",
+            details={"rule_id": rule_id},
+        )
+    return clean
+
+
 # --------------------------------------------------------------------------
 # serialisation
 # --------------------------------------------------------------------------
@@ -182,7 +213,11 @@ def rule_to_dict(rule: AlertRule) -> Dict[str, Any]:
         "operator": OPERATORS.get(condition.strip().lower(), condition),
         "threshold": _fmt(rule.threshold),
         "is_active": bool(rule.is_active),
+        # Derived, not stored: alert_rules has no severity column. severity_source
+        # says so in the payload so a client does not read this as a per-rule
+        # setting it can PATCH back.
         "severity": resolve_severity(spec) if spec else None,
+        "severity_source": "metric" if spec else None,
         "unit": spec.unit if spec else None,
         "created_at": _iso(rule.created_at),
         "updated_at": _iso(rule.updated_at),
@@ -253,22 +288,24 @@ def get_rule(db: Session, rule_id: int) -> Optional[Dict[str, Any]]:
 
 
 def create_rule(db: Session, *, name: Any, metric: Any, operator: Any,
-                threshold: Any, is_active: bool = True) -> Dict[str, Any]:
+                threshold: Any, is_active: bool = True,
+                severity: Any = None, branch: Any = None,
+                window_days: Any = None) -> Dict[str, Any]:
     """Insert one rule and return it as a dict. The session is not committed.
 
     Raises :class:`~app.alerts.rules.AlertConfigurationError` for an empty name,
     an unknown metric, an unsupported operator or a non-finite threshold, so a
-    rule that could never be evaluated is never stored.
+    rule that could never be evaluated is never stored. A per-rule ``severity``,
+    branch/category filter or window is refused for the same reason: the table
+    has no column for it, and a stored rule that looks filtered but is not would
+    be worse than no rule at all.
     """
-    clean = _printable(name, RULE_NAME_MAX_CHARS)
-    if not clean:
-        raise AlertConfigurationError(
-            "Alert rule name is required.",
-            operation="create_rule",
-            error_type="invalid_name",
-            code="ALERT_INVALID_NAME",
-        )
+    clean = _clean_name(name, operation="create_rule")
     spec = require_metric(metric)
+    reject_unsupported_fields(
+        {"severity": severity, "branch": branch, "window_days": window_days},
+        operation="create_rule",
+    )
     rule = AlertRule(
         name=clean,
         metric=spec.key,
@@ -287,11 +324,15 @@ def update_rule(db: Session, rule_id: int,
 
     ``changes`` accepts only the keys in :data:`RULE_FIELDS` (``operator`` is an
     alias of ``condition``); an unknown key is a configuration error, not a
-    silently dropped field. The session is not committed.
+    silently dropped field. A key the schema cannot store at all -- ``severity``,
+    ``branch``, ``window_days`` -- is refused with the DDL that would enable it
+    (see :func:`~app.alerts.rules.reject_unsupported_fields`). The session is not
+    committed.
     """
     rule = db.query(AlertRule).filter(AlertRule.id == rule_id).first()
     if rule is None:
         return None
+    reject_unsupported_fields(changes, operation="update_rule", rule_id=rule.id)
     unknown = sorted(k for k in changes if k not in RULE_FIELDS)
     if unknown:
         raise AlertConfigurationError(
@@ -302,16 +343,7 @@ def update_rule(db: Session, rule_id: int,
             details={"rule_id": rule_id, "supported": list(RULE_FIELDS)},
         )
     if "name" in changes:
-        clean = _printable(changes["name"], RULE_NAME_MAX_CHARS)
-        if not clean:
-            raise AlertConfigurationError(
-                "Alert rule name is required.",
-                operation="update_rule",
-                error_type="invalid_name",
-                code="ALERT_INVALID_NAME",
-                details={"rule_id": rule_id},
-            )
-        rule.name = clean
+        rule.name = _clean_name(changes["name"], operation="update_rule", rule_id=rule_id)
     if "metric" in changes:
         rule.metric = require_metric(changes["metric"], rule_id=rule.id).key
     if "condition" in changes or "operator" in changes:
@@ -328,25 +360,50 @@ def update_rule(db: Session, rule_id: int,
 def delete_rule(db: Session, rule_id: int) -> bool:
     """Delete one rule. True when a row was removed, False when absent.
 
-    Refuses while any ``alerts`` row references the rule: the foreign key has no
-    ON DELETE CASCADE, so the delete would fail at the database with an opaque
-    IntegrityError, and those alert rows are the audit trail. Resolved alerts
-    still block it -- the schema cannot detach them, which is a real limitation
-    of ``alert_rules``/``alerts`` as migrated.
+    **Refuses, does not detach.** A rule that has ever fired cannot be deleted,
+    and the response says exactly how many alerts are holding it.
+
+    Why refusal rather than detaching or cascading:
+
+    * ``alerts.rule_id`` is nullable but has no ``ON DELETE CASCADE``, so
+      detaching would have to rewrite every ``alerts`` row to NULL -- and
+      ``alerts.rule_id`` is exactly the column that says which rule fired, so
+      detaching destroys the audit trail silently.
+    * The caller therefore gets a 409 with the count, not an opaque
+      ``IntegrityError`` from the database.
+    * The rule row itself is locked ``FOR UPDATE`` for the count, so a
+      concurrent evaluation that is opening the very first alert cannot slip in
+      between the count and the delete and turn this into a FK violation.
+
+    The DDML that would change this -- should the product decide that deleting a
+    rule should delete its history -- is :data:`rules.RULE_CASCADE_SQL`, and it
+    needs the matching cascade on ``alert_events.alert_id`` as well.
     """
-    rule = db.query(AlertRule).filter(AlertRule.id == rule_id).first()
+    rule = (db.query(AlertRule)
+            .filter(AlertRule.id == rule_id)
+            .with_for_update()
+            .first())
     if rule is None:
         return False
     linked = db.query(Alert.id).filter(Alert.rule_id == rule_id).count()
     if linked:
+        open_left = (db.query(Alert.id)
+                     .filter(Alert.rule_id == rule_id, Alert.status.in_(OPEN_STATUSES))
+                     .count())
         raise AlertConfigurationError(
-            f"Alert rule {rule_id} still has {linked} alert(s) and cannot be "
-            f"deleted; that history is kept on purpose.",
+            f"Alert rule {rule_id} still has {linked} alert(s) "
+            f"({open_left} un-resolved) and cannot be deleted; that history is "
+            f"kept on purpose. Deactivate the rule instead.",
             operation="delete_rule",
             error_type="rule_in_use",
             code="ALERT_RULE_IN_USE",
             status_code=409,
-            details={"rule_id": rule_id, "alerts": linked},
+            details={
+                "rule_id": rule_id,
+                "alerts": linked,
+                "open_alerts": open_left,
+                "remedy": "set is_active=false to stop evaluating this rule",
+            },
         )
     db.delete(rule)
     db.flush()
@@ -437,6 +494,27 @@ def acknowledge_alert(db: Session, alert_id: int, *, actor: str,
 # --------------------------------------------------------------------------
 # evaluation
 # --------------------------------------------------------------------------
+def _lock_rule(db: Session, rule_id: int) -> Optional[AlertRule]:
+    """Take a write lock on the rule row and return it.
+
+    This is the cross-process half of the dedup guard. Locking the *open alert*
+    is not enough: on the very first firing of a rule there is no alert row to
+    lock, so two evaluators both read "none open" and both insert. The rule row
+    always exists, so locking it serialises the pair -- the second evaluator
+    blocks on the lock, and when it proceeds the re-read in :func:`_open_alert`
+    sees the row the first one committed. Order is always rule -> alert, so the
+    two locks cannot deadlock against each other.
+
+    ``with_for_update()`` emits ``FOR UPDATE`` on Postgres and is a silent no-op
+    on SQLite, which is why the in-process :data:`_RULE_LOCKS` mutex is kept
+    alongside it: neither guard covers the other's blind spot.
+    """
+    return (db.query(AlertRule)
+            .filter(AlertRule.id == rule_id)
+            .with_for_update()
+            .first())
+
+
 def _open_alert(db: Session, rule_id: int) -> Optional[Alert]:
     """Return the single un-resolved alert of a rule, or None.
 
@@ -525,6 +603,19 @@ def evaluate_rule(db: Session, rule: AlertRule, *,
     window_days = int(frame.window_days)
 
     with _rule_lock(rule.id):
+        # Lock the rule row first, then re-read the open alert. Taken in this
+        # order on every path, and inside the caller's transaction, so the
+        # first-insert race between two processes cannot produce two open rows.
+        locked = _lock_rule(db, rule.id)
+        if locked is None:  # deleted between the query above and the lock
+            raise AlertConfigurationError(
+                f"Alert rule {rule.id} no longer exists.",
+                operation="evaluate_rule",
+                error_type="rule_missing",
+                code="ALERT_RULE_MISSING",
+                status_code=409,
+                details={"rule_id": rule.id},
+            )
         current = _open_alert(db, rule.id)
         machine = AlertStateMachine(current.id if current is not None else None)
         transition = machine.observe(fired)

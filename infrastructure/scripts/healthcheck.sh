@@ -1,34 +1,79 @@
 #!/bin/sh
-# AIDataPlatform healthcheck.
+# AIDataPlatform healthcheck (POSIX sh; runs under dash and bash alike).
 #
-# Probes only endpoints that exist in this tree:
-#   laravel  GET  /up                     (bootstrap/app.php health: '/up')
-#   laravel  POST /api/login + GET /api/me  (token API, tests/run.sh contract)
-#   engine   GET  /api/v1/health          (ai-engine/app/api/v1/health.py)
-#   engine   GET  /api/v1/readiness       (same router; 200 even when not ready)
-#   engine   GET  /ai-api/api/v1/health   through nginx, proving the prefix strip
-#   nginx    GET  /health
-#   postgres      pg_isready
-#   redis         PING
-#   celery   worker + beat processes present
+# Probes only endpoints and services that exist in this tree. Every external
+# thing this script touches, with the code that has to agree with it:
 #
-# Usage: bash infrastructure/scripts/healthcheck.sh   (from anywhere)
-# Exit 0 when nothing failed. Warnings do not affect the exit code.
+#   compose services  postgres redis laravel laravel-queue laravel-schedule
+#                     fastapi celery-worker celery-beat nginx prometheus grafana
+#                     (the eleven `services:` blocks in docker-compose.yml)
+#   laravel  GET  /up                    bootstrap/app.php -> health: '/up'
+#   laravel  POST /api/login             application/routes/api.php:22
+#   laravel  GET  /api/me                application/routes/api.php:26
+#   engine   GET  /api/v1/health         ai-engine/app/api/v1/health.py:12
+#   engine   GET  /api/v1/readiness      ai-engine/app/api/v1/health.py:17
+#                                        -> 200 even when NOT ready, so the
+#                                           body has to be read, not the code
+#   nginx    GET  /health                infrastructure/nginx/default.conf:62
+#   nginx    GET  /ai-api/api/v1/health  default.conf:74 (the /ai-api prefix strip)
+#   postgres      pg_isready -U $POSTGRES_USER -d $POSTGRES_DB
+#   redis         redis-cli ping, with -a when REDIS_PASSWORD is set (compose
+#                 requires the password the moment it is non-empty)
+#   in-container CLIs: curl in `laravel` (laravel.Dockerfile:75), python in
+#                 `fastapi` (python:3.13-slim), wget in `nginx` (busybox),
+#                 pg_isready in `postgres` and redis-cli in `redis`
+#
+#   NOT probed, on purpose: the engine's /metrics (nginx 404s it) and any
+#   host-published port - every probe here goes through `docker compose exec`,
+#   so it works the same whether or not POSTGRES_PORT/LARAVEL_PORT are published.
+#
+# EXIT CODES - the three outcomes that have to be tellable apart at 03:00:
+#   0  every probe passed (warnings may still have been printed)
+#   1  the stack answered but at least one probe FAILED - something is broken
+#   2  the check could not be performed at all: no docker, no Compose v2, no
+#      project here, or no scratch directory. 2 means "no answer", never
+#      "all good", and it is deliberately different from 1.
+#
+# Usage: bash infrastructure/scripts/healthcheck.sh
 set -u
 
-ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-cd "$ROOT_DIR" || exit 1
+EXIT_OK=0
+EXIT_FAIL=1
+EXIT_ERROR=2
 
-# Load credentials once, up front. The previous version read POSTGRES_USER before
-# sourcing .env, so it always probed the default role and failed on any install
-# that renamed it.
+PROBE_TIMEOUT="${PROBE_TIMEOUT:-15}"
+
+ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd) || {
+    echo "[healthcheck] FATAL: cannot resolve the repository root from '$0'" >&2
+    exit "$EXIT_ERROR"
+}
+cd "$ROOT_DIR" || {
+    echo "[healthcheck] FATAL: cannot cd to '$ROOT_DIR'" >&2
+    exit "$EXIT_ERROR"
+}
+
+TMP_ROOT=${TMPDIR:-/tmp}
+WORK_DIR=$(mktemp -d "$TMP_ROOT/aidata-healthcheck.XXXXXX") || {
+    echo "[healthcheck] FATAL: cannot create a scratch directory under '$TMP_ROOT'" >&2
+    exit "$EXIT_ERROR"
+}
+ERR_FILE="$WORK_DIR/stderr"
+cleanup() {
+    case "$WORK_DIR" in
+        "$TMP_ROOT"/aidata-healthcheck.*) rm -rf "$WORK_DIR" ;;
+        *) echo "[healthcheck] WARN: refusing to remove '$WORK_DIR'" >&2 ;;
+    esac
+}
+trap cleanup EXIT INT TERM
+
+# Credentials come from the root .env, sourced BEFORE the defaults are applied,
+# so a renamed role or database is the one that gets probed.
 if [ -f .env ]; then
     set -a
     # shellcheck disable=SC1091
     . ./.env
     set +a
 fi
-
 PGUSER="${POSTGRES_USER:-aidata}"
 PGDB="${POSTGRES_DB:-aidata}"
 
@@ -39,118 +84,329 @@ ok()   { echo "  [OK]   $1"; PASS=$((PASS + 1)); }
 bad()  { echo "  [FAIL] $1${2:+ - $2}"; FAIL=$((FAIL + 1)); }
 warn() { echo "  [WARN] $1${2:+ - $2}"; WARN=$((WARN + 1)); }
 
-echo "== AIDataPlatform healthcheck =="
+# One line, so a multi-line HTML error page from a proxy cannot bury the
+# summary in the middle of the output.
+shorten() { printf '%s' "$1" | tr '\n\r' '  ' | cut -c1-220; }
 
-# 1) Laravel framework probe -----------------------------------------------------
-echo "-- laravel (GET /up) --"
-if docker compose exec -T laravel curl -fsS -o /dev/null --max-time 10 http://localhost:8000/up; then
-    ok "laravel /up"
-else
-    bad "laravel /up" "docker compose logs laravel | tail -50"
-fi
+# probe <service> <curl args...>
+#   Runs curl inside a container and classifies the result into three states an
+#   operator has to be able to tell apart:
+#     PC_STATUS=ok           HTTP 200
+#     PC_STATUS=unreachable  curl itself failed - the container is stopped, the
+#                           port is not listening, or curl is not installed
+#     PC_STATUS=bad-http     the server answered with a non-200 status
+#   PC_ERR carries curl's own message for the unreachable case, which is the
+#   only thing that separates "connection refused" from "curl: not found".
+probe() {
+    _p_svc=$1
+    shift
+    PC_BODY=$(docker compose exec -T "$_p_svc" curl -sS --max-time "$PROBE_TIMEOUT" \
+        -w '\n%{http_code}' "$@" 2>"$ERR_FILE")
+    _p_rc=$?
+    PC_ERR=$(cat "$ERR_FILE" 2>/dev/null)
+    PC_CODE=$(printf '%s\n' "$PC_BODY" | tail -n 1)
+    PC_BODY=$(printf '%s\n' "$PC_BODY" | sed '$d')
 
-# 2) Laravel token API -----------------------------------------------------------
-# A 401/422 means auth is answering correctly but the seeded demo user is absent
-# or the password changed; that is a data problem, not an outage, so it warns.
-# Any other outcome (connection refused, 500) is a real failure.
-echo "-- laravel token API (POST /api/login, GET /api/me) --"
-login_code=$(docker compose exec -T laravel curl -sS -o /tmp/aidata-login.json -w '%{http_code}' \
-    --max-time 15 -X POST http://localhost:8000/api/login \
-    -H 'Content-Type: application/json' \
-    -d '{"email":"admin@example.com","password":"Admin123!"}' 2>/dev/null || echo 000)
-if [ "$login_code" = "200" ]; then
-    token=$(tr ',' '\n' < /tmp/aidata-login.json 2>/dev/null | sed -n 's/.*"token":"\([^"]*\)".*/\1/p' | head -n 1)
-    if [ -z "$token" ]; then
-        warn "POST /api/login" "200 but no token in the response body"
-    else
-        me_code=$(docker compose exec -T laravel curl -sS -o /dev/null -w '%{http_code}' --max-time 15 \
-            http://localhost:8000/api/me -H "Authorization: Bearer $token" 2>/dev/null || echo 000)
-        if [ "$me_code" = "200" ]; then
-            ok "laravel token API (login + /api/me)"
-        else
-            bad "GET /api/me" "http=$me_code"
-        fi
-    fi
-elif [ "$login_code" = "422" ] || [ "$login_code" = "401" ]; then
-    warn "POST /api/login" "http=$login_code (no seeded admin@example.com? run: docker compose exec laravel php artisan db:seed --force)"
-elif [ "$login_code" = "000" ]; then
-    bad "POST /api/login" "laravel unreachable"
-else
-    bad "POST /api/login" "http=$login_code"
-fi
-
-# 3) Engine liveness -------------------------------------------------------------
-echo "-- engine (GET /api/v1/health) --"
-if docker compose exec -T fastapi python -c "import urllib.request; assert urllib.request.urlopen('http://localhost:8000/api/v1/health', timeout=10).status==200"; then
-    ok "engine /api/v1/health"
-else
-    bad "engine /api/v1/health" "docker compose logs fastapi | tail -50"
-fi
-
-# 4) Engine dependencies ---------------------------------------------------------
-# /api/v1/readiness answers 200 even when the database is unreachable, so the
-# body has to be read: {"ready": true|false, "checks": {"db": ..., "redis": ...}}
-echo "-- engine (GET /api/v1/readiness) --"
-if readiness=$(docker compose exec -T fastapi python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8000/api/v1/readiness', timeout=15).read().decode())" 2>/dev/null); then
-    ready_flag=$(printf '%s' "$readiness" | tr ',' '\n' | sed -n 's/.*"ready"://p' | head -n 1 | tr -d ' {}"')
-    case "$ready_flag" in
-        true)  ok "engine /api/v1/readiness ready=true" ;;
-        false) bad "engine /api/v1/readiness" "ready=false; checks: $readiness" ;;
-        *)     warn "engine /api/v1/readiness" "unparsable body: $readiness" ;;
+    case "$PC_CODE" in
+        [0-9][0-9][0-9]) ;;
+        *)
+            # A status line that is not three digits means the -w sentinel never
+            # arrived: the compose CLI wrote to stdout, or curl was never run.
+            PC_STATUS=unreachable
+            PC_ERR="$PC_ERR (no HTTP status line in the response)"
+            return 0
+            ;;
     esac
-else
-    bad "engine /api/v1/readiness" "request failed"
+
+    if [ "$_p_rc" -ne 0 ]; then
+        PC_STATUS=unreachable
+    elif [ "$PC_CODE" = "200" ]; then
+        PC_STATUS=ok
+    else
+        PC_STATUS=bad-http
+    fi
+}
+
+echo "== AIDataPlatform healthcheck =="
+echo "   repo: $ROOT_DIR"
+
+# ---------------------------------------------------------------------------
+# 0) Preflight. If this fails nothing below can produce a meaningful answer,
+#    and reporting it as nine FAILs would send the operator hunting for a
+#    broken service instead of a missing CLI.
+# ---------------------------------------------------------------------------
+echo "-- [0] preflight --"
+_preflight_ok=1
+
+if ! command -v docker >/dev/null 2>&1; then
+    echo "  [FAIL] the 'docker' CLI is not on PATH - no probe below can run" >&2
+    _preflight_ok=0
+elif ! docker compose version >/dev/null 2>&1; then
+    echo "  [FAIL] 'docker compose' is unavailable (Compose v2 plugin missing or daemon down)" >&2
+    _preflight_ok=0
+elif [ ! -f docker-compose.yml ] && [ ! -f compose.yml ]; then
+    echo "  [FAIL] no docker-compose.yml in $ROOT_DIR" >&2
+    _preflight_ok=0
+elif ! docker compose ps -a --format '{{.Service}}' >"$WORK_DIR/services" 2>"$ERR_FILE"; then
+    echo "  [FAIL] 'docker compose ps' failed: $(shorten "$(cat "$ERR_FILE")")" >&2
+    _preflight_ok=0
+elif [ ! -s "$WORK_DIR/services" ]; then
+    echo "  [FAIL] no compose services found for $ROOT_DIR - is the stack created here?" >&2
+    echo "         run: cd $ROOT_DIR && docker compose ps" >&2
+    _preflight_ok=0
 fi
 
-# 5) Nginx prefix strip ----------------------------------------------------------
-# The engine is not published on a host port, so this is the only way to prove
-# the /ai-api -> /api/v1 rewrite actually works from outside.
-echo "-- nginx (GET /ai-api/api/v1/health via the /ai-api prefix) --"
-if docker compose exec -T nginx wget -qO- --timeout=10 http://localhost/ai-api/api/v1/health | grep -q '"status"'; then
-    ok "nginx /ai-api/ prefix is stripped to /api/v1/"
-else
-    bad "nginx /ai-api/api/v1/health" "docker compose logs nginx | tail -20"
+if [ "$_preflight_ok" -ne 1 ]; then
+    echo "== result: preflight failed, 0 probes run (this is NOT an all-clear) ==" >&2
+    exit "$EXIT_ERROR"
 fi
+ok "docker + compose reachable, $(wc -l < "$WORK_DIR/services" | tr -d ' ') services known"
 
-# 6) Nginx liveness --------------------------------------------------------------
-echo "-- nginx (GET /health) --"
-if docker compose exec -T nginx wget -qO- --timeout=10 http://localhost/health >/dev/null; then
-    ok "nginx /health"
-else
-    bad "nginx /health" "docker compose logs nginx | tail -20"
-fi
-
-# 7) Postgres --------------------------------------------------------------------
-echo "-- postgres (pg_isready) --"
-if docker compose exec -T postgres pg_isready -U "$PGUSER" -d "$PGDB" >/dev/null 2>&1; then
-    ok "postgres pg_isready ($PGUSER/$PGDB)"
-else
-    bad "postgres pg_isready ($PGUSER/$PGDB)" "docker compose logs postgres | tail -30"
-fi
-
-# 8) Redis -----------------------------------------------------------------------
-# redis-cli needs the password whenever REDIS_PASSWORD is set; the base compose
-# healthcheck probes without one, so an authenticated install looks unhealthy.
-echo "-- redis (PING) --"
-if [ -n "${REDIS_PASSWORD:-}" ]; then
-    redis_ping=$(docker compose exec -T redis redis-cli -a "$REDIS_PASSWORD" --no-auth-warning ping 2>/dev/null || true)
-else
-    redis_ping=$(docker compose exec -T redis redis-cli ping 2>/dev/null || true)
-fi
-case "$redis_ping" in
-    *PONG*) ok "redis PING" ;;
-    *)      bad "redis PING" "reply='$redis_ping'; docker compose logs redis | tail -20" ;;
-esac
-
-# 9) Celery ----------------------------------------------------------------------
-echo "-- celery --"
-for svc in celery-worker celery-beat; do
-    status=$(docker compose ps "$svc" --format '{{.Status}}' 2>/dev/null | head -n 1)
+# ---------------------------------------------------------------------------
+# 1) Container roll-call. Reported before the HTTP probes so a container that
+#    is simply not running is named as such, instead of showing up as six
+#    identical "unreachable" lines further down.
+# ---------------------------------------------------------------------------
+echo "-- [1] container states --"
+for svc in postgres redis laravel laravel-queue laravel-schedule \
+           fastapi celery-worker celery-beat nginx prometheus grafana
+do
+    status=$(docker compose ps -a --format '{{.Service}} {{.Status}}' 2>/dev/null \
+        | awk -v s="$svc" '$1 == s { sub(/^[^ ]+ /, ""); print; exit }')
     case "$status" in
-        Up*|running*) ok "$svc $status" ;;
-        *)            bad "$svc" "status='$status'; docker compose logs $svc | tail -20" ;;
+        *"(unhealthy)"*)
+            bad "$svc" "unhealthy: $status - docker compose logs $svc | tail -50"
+            ;;
+        Up* | running*)
+            ok "$svc ($status)"
+            ;;
+        "")
+            bad "$svc" "absent from 'docker compose ps -a' - either the service is not in this compose project, or compose printed no status for it"
+            ;;
+        *)
+            bad "$svc" "status='$status' - docker compose logs $svc | tail -50"
+            ;;
     esac
 done
 
+# ---------------------------------------------------------------------------
+# 2) Laravel framework probe
+# ---------------------------------------------------------------------------
+echo "-- [2] laravel (GET /up) --"
+probe laravel -o /dev/null http://localhost:8000/up
+case "$PC_STATUS" in
+    ok)          ok "laravel /up" ;;
+    unreachable) bad "laravel /up" "probe could not run: $(shorten "$PC_ERR")" ;;
+    *)           bad "laravel /up" "http=$PC_CODE body=$(shorten "$PC_BODY")" ;;
+esac
+
+# ---------------------------------------------------------------------------
+# 3) Laravel token API. The body is read from the CONTAINER's stdout: the
+#    earlier version wrote it to /tmp inside the container and then re-read
+#    /tmp from the HOST, so the token was never found and /api/me was silently
+#    skipped as a warning on a perfectly healthy stack.
+# ---------------------------------------------------------------------------
+echo "-- [3] laravel token API (POST /api/login, GET /api/me) --"
+AUTH=""
+probe laravel -X POST http://localhost:8000/api/login \
+    -H 'Content-Type: application/json' \
+    -d '{"email":"admin@example.com","password":"Admin123!"}'
+case "$PC_STATUS" in
+    unreachable)
+        bad "POST /api/login" "probe could not run: $(shorten "$PC_ERR")"
+        ;;
+    bad-http)
+        case "$PC_CODE" in
+            401 | 422)
+                # Auth is answering; the seeded demo user is missing or its
+                # password changed. A data problem, not an outage.
+                warn "POST /api/login" "http=$PC_CODE body=$(shorten "$PC_BODY") | seed it: docker compose exec laravel php artisan db:seed --force"
+                ;;
+            429)
+                bad "POST /api/login" "http=429 - throttled (throttle:login, 5/min per email+IP). Wait a minute; the seeded-account warning above may be a throttle artefact."
+                ;;
+            *)
+                bad "POST /api/login" "http=$PC_CODE body=$(shorten "$PC_BODY")"
+                ;;
+        esac
+        ;;
+    ok)
+        token=$(printf '%s' "$PC_BODY" | sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
+        if [ -z "$token" ]; then
+            # 200 without a token: either the envelope moved or a proxy answered
+            # something that is not the documented {"data":{"token":...}}.
+            warn "POST /api/login" "http=200 but no \"token\" in the body: $(shorten "$PC_BODY")"
+        else
+            AUTH="Authorization: Bearer $token"
+            probe laravel -o /dev/null -H "$AUTH" http://localhost:8000/api/me
+            case "$PC_STATUS" in
+                ok)          ok "laravel token API (login + /api/me)" ;;
+                unreachable) bad "GET /api/me" "probe could not run: $(shorten "$PC_ERR")" ;;
+                *)           bad "GET /api/me" "http=$PC_CODE - the token was issued but rejected" ;;
+            esac
+        fi
+        ;;
+esac
+
+# ---------------------------------------------------------------------------
+# 4) Engine liveness. Status AND body: the engine's HealthResponse always
+#    carries "status":"ok", so a 200 from a proxy that is not the engine is
+#    caught here rather than passing silently.
+# ---------------------------------------------------------------------------
+echo "-- [4] engine (GET /api/v1/health) --"
+probe fastapi http://localhost:8000/api/v1/health
+case "$PC_STATUS" in
+    ok)
+        case "$PC_BODY" in
+            *'"status"'*) ok "engine /api/v1/health 200, body carries \"status\"" ;;
+            *) warn "engine /api/v1/health" "http=200 but the body is not the engine's HealthResponse: $(shorten "$PC_BODY")" ;;
+        esac
+        ;;
+    unreachable) bad "engine /api/v1/health" "probe could not run: $(shorten "$PC_ERR")" ;;
+    *)           bad "engine /api/v1/health" "http=$PC_CODE body=$(shorten "$PC_BODY")" ;;
+esac
+
+# ---------------------------------------------------------------------------
+# 5) Engine dependencies. /api/v1/readiness answers 200 even when the database
+#    is unreachable (health.py returns a plain dict), so the code proves
+#    nothing and the body is the only signal. "not JSON" is its own outcome:
+#    it means something between here and the app answered instead of the app.
+# ---------------------------------------------------------------------------
+echo "-- [5] engine (GET /api/v1/readiness) --"
+readiness=$(docker compose exec -T fastapi python -c '
+import json, sys, urllib.request
+try:
+    raw = urllib.request.urlopen("http://localhost:8000/api/v1/readiness", timeout=15).read().decode("utf-8", "replace")
+except Exception as exc:
+    print("UNREACHABLE:" + type(exc).__name__)
+    sys.exit(0)
+try:
+    d = json.loads(raw)
+except Exception:
+    print("NOTJSON")
+    sys.exit(0)
+if not isinstance(d, dict) or "ready" not in d:
+    print("NOTJSON")
+    sys.exit(0)
+checks = d.get("checks") if isinstance(d.get("checks"), dict) else {}
+print("READY:" + str(d.get("ready")))
+print("DB:" + str(checks.get("db")))
+print("REDIS:" + str(checks.get("redis")))
+' 2>"$ERR_FILE")
+_readiness_rc=$?
+if [ "$_readiness_rc" -ne 0 ]; then
+    bad "engine /api/v1/readiness" "probe could not run: $(shorten "$(cat "$ERR_FILE" 2>/dev/null)")"
+else
+    _r_state=$(printf '%s\n' "$readiness" | sed -n 's/^READY://p' | head -n 1)
+    _r_db=$(printf '%s\n' "$readiness" | sed -n 's/^DB://p' | head -n 1)
+    _r_redis=$(printf '%s\n' "$readiness" | sed -n 's/^REDIS://p' | head -n 1)
+    case "$readiness" in
+        UNREACHABLE:*)
+            # Checked first: the probe printed no 'ready' field at all, so it
+            # must not also be reported as "unparsable" - one probe, one verdict.
+            bad "engine /api/v1/readiness" "the engine did not answer (${readiness#UNREACHABLE:}): docker compose logs fastapi | tail -50"
+            ;;
+        NOTJSON)
+            bad "engine /api/v1/readiness" "the response was not JSON - something other than the engine answered"
+            ;;
+        *)
+            case "$_r_state" in
+                True | true)
+                    ok "engine /api/v1/readiness ready=true (db=${_r_db:-?} redis=${_r_redis:-?})"
+                    case "$_r_redis" in
+                        up) ;;
+                        "") warn "engine /api/v1/readiness" "ready=true but the body reported no redis check" ;;
+                        *)  warn "engine /api/v1/readiness" "ready=true but redis is ${_r_redis} - cache/session/queue calls will fail" ;;
+                    esac
+                    ;;
+                False | false)
+                    bad "engine /api/v1/readiness" "ready=false (db=${_r_db:-?} redis=${_r_redis:-?}) - docker compose logs fastapi | tail -50"
+                    ;;
+                "")
+                    bad "engine /api/v1/readiness" "no 'ready' field in the body: $(shorten "$readiness")"
+                    ;;
+                *)
+                    bad "engine /api/v1/readiness" "unexpected ready value '$_r_state': $(shorten "$readiness")"
+                    ;;
+            esac
+            ;;
+    esac
+fi
+
+# ---------------------------------------------------------------------------
+# 6) Nginx liveness. /health is answered locally and never touches an upstream,
+#    so it is the control for the next probe: if it fails, nginx itself is not
+#    answering; if it works, a failing /ai-api/ means the rewrite is broken.
+# ---------------------------------------------------------------------------
+echo "-- [6] nginx (GET /health) --"
+NGINX_UP=0
+docker compose exec -T nginx wget -qO- --timeout="$PROBE_TIMEOUT" http://localhost/health >"$WORK_DIR/nginx_health" 2>"$ERR_FILE"
+_nginx_rc=$?
+if [ "$_nginx_rc" -eq 0 ]; then
+    NGINX_UP=1
+    ok "nginx /health"
+else
+    bad "nginx /health" "wget rc=$_nginx_rc $(shorten "$(cat "$ERR_FILE" 2>/dev/null)") - docker compose logs nginx | tail -20"
+fi
+
+# ---------------------------------------------------------------------------
+# 7) The /ai-api prefix strip. The engine is not published on a host port in
+#    production, so this is the only end-to-end proof that /ai-api/... is
+#    rewritten to /api/v1/... and reaches the engine.
+# ---------------------------------------------------------------------------
+echo "-- [7] nginx (GET /ai-api/api/v1/health, proves the prefix strip) --"
+if [ "$NGINX_UP" -eq 0 ]; then
+    warn "nginx /ai-api/api/v1/health" "skipped - nginx did not answer /health, so this probe cannot say anything"
+else
+    docker compose exec -T nginx wget -qO- --timeout="$PROBE_TIMEOUT" \
+        http://localhost/ai-api/api/v1/health >"$WORK_DIR/nginx_aiapi" 2>"$ERR_FILE"
+    _aiapi_rc=$?
+    _aiapi_body=$(cat "$WORK_DIR/nginx_aiapi" 2>/dev/null)
+    if [ "$_aiapi_rc" -ne 0 ] && [ -z "$_aiapi_body" ]; then
+        bad "nginx /ai-api/api/v1/health" "wget rc=$_aiapi_rc and no body - nginx answered /health, so the rewrite or the fastapi upstream is broken: docker compose logs nginx | tail -20"
+    elif [ "$_aiapi_body" = "ok" ]; then
+        bad "nginx /ai-api/api/v1/health" "got nginx's own /health body ('ok') - the /ai-api/ location is not rewriting, the request fell through to laravel: docker compose logs nginx | tail -20"
+    else
+        case "$_aiapi_body" in
+            *'"status"'*) ok "nginx /ai-api/ prefix is stripped to /api/v1/" ;;
+            *)            bad "nginx /ai-api/api/v1/health" "rc=$_aiapi_rc body=$(shorten "$_aiapi_body") - docker compose logs nginx | tail -20" ;;
+        esac
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# 8) Postgres
+# ---------------------------------------------------------------------------
+echo "-- [8] postgres (pg_isready) --"
+if docker compose exec -T postgres pg_isready -U "$PGUSER" -d "$PGDB" >/dev/null 2>"$ERR_FILE"; then
+    ok "postgres pg_isready ($PGUSER/$PGDB)"
+else
+    bad "postgres pg_isready ($PGUSER/$PGDB)" "$(shorten "$(cat "$ERR_FILE" 2>/dev/null)") - docker compose logs postgres | tail -30"
+fi
+
+# ---------------------------------------------------------------------------
+# 9) Redis. redis-cli needs the password whenever REDIS_PASSWORD is set, and
+#    an empty REDIS_PASSWORD in compose means "no password at all", so the two
+#    cases have to be probed differently.
+# ---------------------------------------------------------------------------
+echo "-- [9] redis (PING) --"
+if [ -n "${REDIS_PASSWORD:-}" ]; then
+    _redis_ping=$(docker compose exec -T redis redis-cli -a "$REDIS_PASSWORD" --no-auth-warning ping 2>"$ERR_FILE")
+    _redis_mode="with REDIS_PASSWORD"
+else
+    _redis_ping=$(docker compose exec -T redis redis-cli ping 2>"$ERR_FILE")
+    _redis_mode="without password"
+fi
+case "$_redis_ping" in
+    *PONG*) ok "redis PING ($_redis_mode)" ;;
+    *NOAUTH* | *WRONGPASS* | *ERR*)
+        bad "redis PING" "$_redis_mode: $(shorten "$_redis_ping") - REDIS_PASSWORD does not match what the server was started with"
+        ;;
+    *)
+        bad "redis PING" "$_redis_mode: reply='$(shorten "$_redis_ping")' - docker compose logs redis | tail -20"
+        ;;
+esac
+
 echo "== result: $PASS passed, $FAIL failed, $WARN warnings =="
-[ "$FAIL" -eq 0 ]
+[ "$FAIL" -eq 0 ] && exit "$EXIT_OK"
+exit "$EXIT_FAIL"

@@ -34,6 +34,10 @@ class AiEngineException extends RuntimeException
     {
         return match (true) {
             $this->upstreamStatus === 404 => 404,
+            // A rate limit is a rate limit: reporting it as 422 tells the caller
+            // its request was malformed, which invites it to fix the payload
+            // rather than back off.
+            $this->upstreamStatus === 429 => 429,
             $this->upstreamStatus === 401, $this->upstreamStatus === 403 => 502,
             $this->upstreamStatus === 503 => 503,
             $this->upstreamStatus >= 500 => 502,

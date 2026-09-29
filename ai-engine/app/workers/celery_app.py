@@ -39,6 +39,12 @@ TASK_ROUTES: Dict[str, Dict[str, str]] = {
     "app.workers.tasks.generate_ai_report": {"queue": "agent"},
     "app.workers.tasks.generate_embeddings": {"queue": "rag"},
     "app.workers.tasks.scheduled_data_sync": {"queue": "default"},
+    # Registered in app/alerts/service.py, which is only reached through
+    # `include`. Routed explicitly rather than left on task_default_queue so
+    # that changing the default cannot silently strand a per-minute task on a
+    # queue the worker does not consume -- the failure that made an earlier
+    # `import_file` invisible.
+    "app.alerts.service.evaluate_alerts": {"queue": "agent"},
 }
 
 if _HAS_CELERY:

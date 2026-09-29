@@ -81,11 +81,15 @@ class AiEngineClient
      */
     public function uploadFile(UploadedFile $file, string $datasetType = 'sales'): array
     {
-        $response = $this->send(function (PendingRequest $http) use ($file, $datasetType) {
-            return $http->post($this->url('/imports/upload'), [
-                'file' => $file,
-                'dataset_type' => $datasetType,
-            ], ['multipart' => true]);
+        $response = $this->send(function () use ($file, $datasetType) {
+            // `attach()` rather than posting the file in a body array: the shared
+            // builder sets `asJson()`, and a JSON body is encoded before the
+            // multipart options are ever read, so `json_encode` threw on the
+            // UploadedFile and every upload failed. The file is streamed by
+            // Guzzle from its temp path, so a large CSV is not buffered in PHP.
+            return $this->http($this->uploadTimeout, asJson: false)
+                ->attach('file', $file, $file->getClientOriginalName())
+                ->post($this->url('/imports/upload'), ['dataset_type' => $datasetType]);
         }, 'imports.upload', $this->uploadTimeout);
 
         return $this->unwrap($response, 'imports.upload');
@@ -468,9 +472,11 @@ class AiEngineClient
         }
     }
 
-    private function http(?int $timeout = null): PendingRequest
+    private function http(?int $timeout = null, bool $asJson = true): PendingRequest
     {
-        return Http::asJson()
+        $request = $asJson ? Http::asJson() : Http::asMultipart();
+
+        return $request
             ->acceptJson()
             ->withHeaders([
                 $this->serviceKeyHeader => $this->serviceKey,
@@ -478,7 +484,16 @@ class AiEngineClient
             ])
             ->connectTimeout($this->connectTimeout)
             ->timeout($timeout ?? $this->timeout)
-            ->retry(2, 250, throw: false);
+            // Retried only for transport failures and 5xx/429. `retry()` with a
+            // `when` callback otherwise re-sent 401, 404 and 422, which doubled
+            // every non-retryable failure and logged it twice.
+            ->retry(
+                times: 2,
+                sleepMilliseconds: 250,
+                when: fn ($exception, $request) => $exception instanceof ConnectionException
+                    || ($request instanceof Response && ($request->serverError() || $request->status() === 429)),
+                throw: false,
+            );
     }
 
     /**
@@ -539,23 +554,49 @@ class AiEngineClient
     {
         $body = $response->json();
 
-        $message = is_array($body)
-            ? (data_get($body, 'error.message')
+        if (is_array($body)) {
+            $message = data_get($body, 'error.message')
                 ?? data_get($body, 'detail')
-                ?? data_get($body, 'message'))
-            : null;
+                ?? data_get($body, 'message');
 
-        if (is_string($message) && $message !== '') {
-            return $message;
+            if (is_string($message) && $message !== '') {
+                return $message;
+            }
+
+            // FastAPI's `RequestValidationError` serialises `detail` as a *list*
+            // of field errors, never a string, so the field-level reason was
+            // being dropped and every 422 read as the generic text below.
+            $detail = data_get($body, 'detail');
+
+            if (is_array($detail) && $detail !== []) {
+                $parts = [];
+
+                foreach ($detail as $item) {
+                    if (! is_array($item)) {
+                        continue;
+                    }
+
+                    $field = (string) (data_get($item, 'loc.1') ?? data_get($item, 'loc') ?? '');
+                    $reason = (string) (data_get($item, 'msg') ?? '');
+                    $parts[] = trim($field === '' ? $reason : "{$field}: {$reason}");
+                }
+
+                if ($parts !== []) {
+                    return 'AI engine rejected the request payload — '.implode('; ', $parts);
+                }
+            }
         }
 
         $status = $response->status();
 
-        return match ($status) {
-            401, 403 => 'AI engine rejected the service key. Check SERVICE_API_KEY matches on both services.',
-            404 => 'AI engine endpoint not found. Check AI_ENGINE_URL and the engine version.',
-            422 => 'AI engine rejected the request payload.',
-            429 => 'AI engine rate limit reached. Retry shortly.',
+        // `match (true)`, not `match ($status)`: a bare `$status >= 500` arm
+        // evaluates to a bool and is compared with `===`, so it never matched and
+        // every 5xx fell through to the generic message.
+        return match (true) {
+            in_array($status, [401, 403], true) => 'AI engine rejected the service key. Check SERVICE_API_KEY matches on both services.',
+            $status === 404 => 'AI engine endpoint not found. Check AI_ENGINE_URL and the engine version.',
+            $status === 422 => 'AI engine rejected the request payload.',
+            $status === 429 => 'AI engine rate limit reached. Retry shortly.',
             $status >= 500 => 'AI engine returned a server error ('.$status.').',
             default => 'AI engine request failed with status '.$status.'.',
         };

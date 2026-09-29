@@ -168,13 +168,16 @@ class DatasetIngestionService
             'quality_verdict' => $verdict->value,
             'quality_checked_at' => now(),
             'metadata' => array_merge((array) $dataset->metadata, ['quality' => $report]),
-            // A re-check must never walk a committed dataset back to `uploaded`:
-            // the nightly `sync:quality` sweep runs this on committed rows, and
-            // un-committing the whole mirror on every pass would be silent
-            // data loss in the UI.
+            // A re-check must not walk a committed dataset anywhere: its rows are
+            // already in the warehouse, and both re-check entry points
+            // (`SyncQualityCommand`, `RefreshQualityScoreJob`) then skip it
+            // because they only look at non-terminal rows — so a quarantine here
+            // would strand a committed row permanently. The verdict is still
+            // recorded, so `quality_score`/`quality_verdict` show the problem
+            // without misrepresenting the warehouse state.
             'status' => match (true) {
-                $verdict === QualityVerdict::Quarantine => DatasetStatus::Quarantined,
                 $dataset->status()->isTerminal() => $dataset->status(),
+                $verdict === QualityVerdict::Quarantine => DatasetStatus::Quarantined,
                 default => DatasetStatus::Uploaded,
             },
         ])->save();
@@ -241,9 +244,12 @@ class DatasetIngestionService
             $current === DatasetStatus::Quarantined => DatasetStatus::Quarantined,
             in_array($status, ['queued', 'uploaded', 'pending', ''], true) => $current,
             // An engine status this build does not recognise must not drive a
-            // transition at all. Guessing `importing` here silently rewrote a
-            // `previewing`/`mapped` row over a status string added upstream, and
-            // the wizard has no way back from that.
+            // transition at all. `done_with_errors` is a real one the engine
+            // writes for a partial load, and a `committed` row reaching the
+            // default below would be walked back to `importing` — a committed
+            // dataset losing its commit because of an upstream status string
+            // nobody here had heard of.
+            $current->isTerminal() => $current,
             in_array($current, [DatasetStatus::Previewing, DatasetStatus::Mapped, DatasetStatus::Uploaded], true) => $current,
             default => DatasetStatus::Importing,
         };

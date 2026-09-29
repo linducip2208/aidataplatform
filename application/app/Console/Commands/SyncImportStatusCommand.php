@@ -62,12 +62,13 @@ class SyncImportStatusCommand extends Command
         $changed = 0;
         $unchanged = 0;
         $failed = 0;
+        $notConsulted = 0;
 
         foreach ($datasets as $dataset) {
             $before = $dataset->status();
 
             if ($dryRun) {
-                $unchanged++;
+                $notConsulted++;
 
                 $this->line(sprintf(
                     '  <comment>dry-run</comment>  %s  %s  %s -> ?',
@@ -146,6 +147,19 @@ class SyncImportStatusCommand extends Command
         }
 
         $this->newLine();
+
+        // A dry run never asks the engine, so its rows are neither moved nor
+        // unchanged — counting them as unchanged told the operator their mirror
+        // was already in sync, which is precisely what they ran the dry run to
+        // find out. `SyncQualityCommand` reports the same case as "not checked".
+        if ($notConsulted > 0) {
+            $this->line(sprintf(
+                'Dry run: %d dataset(s) listed, %d not consulted (the engine was not called).',
+                $notConsulted,
+                $notConsulted,
+            ));
+        }
+
         $this->line(sprintf(
             'Reconciled %d dataset(s): %d moved, %d unchanged, %d failed.%s',
             $datasets->count(),

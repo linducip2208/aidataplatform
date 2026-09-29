@@ -27,6 +27,9 @@ class AuthController extends Controller
         $credentials = $request->validate([
             'email' => ['required', 'email'],
             'password' => ['required', 'string'],
+        ], [], [
+            'email' => 'email',
+            'password' => 'password',
         ]);
 
         $user = User::where('email', $credentials['email'])->first();
@@ -49,7 +52,9 @@ class AuthController extends Controller
 
         AuditLog::record('auth.login', 'user', $user->getKey(), ['remember' => $request->boolean('remember')]);
 
-        return redirect()->intended(route('dashboard'));
+        return redirect()
+            ->intended(route('dashboard'))
+            ->with('status', "Selamat datang, {$user->name}.");
     }
 
     public function destroy(Request $request): RedirectResponse
@@ -60,6 +65,6 @@ class AuthController extends Controller
         $request->session()->invalidate();
         $request->session()->regenerateToken();
 
-        return redirect()->route('login');
+        return redirect()->route('login')->with('status', 'Anda telah keluar.');
     }
 }

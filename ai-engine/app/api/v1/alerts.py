@@ -4,12 +4,27 @@ A thin adapter over :mod:`app.alerts.service`. The service owns the transition
 logic and returns plain JSON-safe dicts; nothing here queries the ORM directly
 or decides a status code beyond the documented 404/409 cases the service signals
 through :class:`~app.alerts.rules.AlertConfigurationError`.
+
+Status codes are split by *kind* of problem, which is the contract
+``docs/api.md`` documents:
+
+* **422** -- the request body is the wrong shape (not an object, a required
+  field missing, a field of the wrong type). FastAPI produces these from the
+  body models below, before any service call.
+* **400** -- the body is well formed but the rule is a configuration error:
+  unknown metric, unsupported operator, non-finite threshold. These come from
+  the service and are the caller's to fix by changing the values.
+* **404** -- the addressed rule or alert does not exist.
+* **409** -- the addressed row exists but is not in a state that allows the
+  operation (deleting a rule that has alerts, acknowledging a resolved alert).
+* **401** -- no service key.
 """
 from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, status
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.alerts import service
@@ -23,6 +38,60 @@ router = APIRouter(tags=["alerts"], prefix="/alerts")
 
 def _ok(data: Any, code: int = status.HTTP_200_OK) -> Dict[str, Any]:
     return {"success": True, "data": data}
+
+
+class RuleCreate(BaseModel):
+    """Body of ``POST /alerts/rules``.
+
+    Declared as a model rather than a bare ``dict`` so a missing or mistyped
+    field is a 422 from FastAPI and never reaches the service. ``condition`` is
+    accepted as an alias of ``operator``; whichever is present wins, and
+    ``operator`` is required either way, because a rule with no comparison is not
+    a rule.
+
+    ``extra="forbid"`` is load-bearing: this build has no column for a per-rule
+    ``severity``, ``branch`` or ``window_days``, and a silently ignored key
+    would be read as "applied". Forbidding extras turns that into a 422 naming
+    the field. PATCH keeps extras and routes them through the service, which
+    gives the richer ``ALERT_UNSUPPORTED_FIELD`` / ``ALERT_UNKNOWN_FIELD``
+    distinction ``docs/api.md`` documents.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    name: str = Field(..., min_length=1, max_length=128,
+                      description="Human label, copied into alerts.message.")
+    metric: str = Field(..., max_length=64, description="Metric key from /alerts/metrics.")
+    operator: Optional[str] = Field(default=None, max_length=16,
+                                    description=">, >=, <, <=, ==, != (aliases accepted).")
+    condition: Optional[str] = Field(default=None, max_length=16,
+                                     description="Alias of operator.")
+    threshold: float = Field(..., description="Comparison value; must be finite.")
+    is_active: bool = Field(default=True)
+
+    def operator_symbol(self) -> str:
+        """Return whichever of operator/condition the client actually sent."""
+        return self.operator if self.operator is not None else self.condition
+
+
+class RuleUpdate(BaseModel):
+    """Body of ``PATCH /alerts/rules/{id}``.
+
+    Every field is optional, but the payload must not be empty: a no-op PATCH
+    that reports success is indistinguishable from a bug. An unknown key is
+    rejected by the service (:data:`~app.alerts.service.RULE_FIELDS`), so a
+    caller who sent ``severity`` is told the table has no such column instead of
+    watching it be ignored.
+    """
+
+    model_config = {"extra": "allow"}
+
+    name: Optional[str] = Field(default=None, max_length=128)
+    metric: Optional[str] = Field(default=None, max_length=64)
+    operator: Optional[str] = Field(default=None, max_length=16)
+    condition: Optional[str] = Field(default=None, max_length=16)
+    threshold: Optional[float] = None
+    is_active: Optional[bool] = None
 
 
 @router.get("/metrics")
@@ -42,18 +111,18 @@ def list_rules(
 
 @router.post("/rules", status_code=status.HTTP_201_CREATED)
 def create_rule(
-    payload: Dict[str, Any] = Body(...),
+    payload: RuleCreate,
     db: Session = Depends(get_db),
     _: str = Depends(require_service_auth),
 ) -> Dict[str, Any]:
     """Create one rule. An unknown metric or operator is a 400, not a stored rule."""
     return _ok(_guard(lambda: service.create_rule(
         db,
-        name=payload.get("name"),
-        metric=payload.get("metric"),
-        operator=payload.get("operator", payload.get("condition")),
-        threshold=payload.get("threshold"),
-        is_active=bool(payload.get("is_active", True)),
+        name=payload.name,
+        metric=payload.metric,
+        operator=payload.operator_symbol(),
+        threshold=payload.threshold,
+        is_active=payload.is_active,
     )))
 
 
@@ -72,11 +141,16 @@ def get_rule(
 @router.patch("/rules/{rule_id}")
 def update_rule(
     rule_id: int,
-    payload: Dict[str, Any] = Body(...),
+    payload: RuleUpdate = Body(...),
     db: Session = Depends(get_db),
     _: str = Depends(require_service_auth),
 ) -> Dict[str, Any]:
-    return _ok(_guard(lambda: service.update_rule(db, rule_id, payload)) or {})
+    """Apply a partial update. A missing rule is a 404, not an empty 200."""
+    changes = payload.model_dump(exclude_unset=True, exclude_none=True)
+    updated = _guard(lambda: service.update_rule(db, rule_id, changes))
+    if updated is None:
+        raise HTTPException(status_code=404, detail=f"Alert rule {rule_id} not found")
+    return _ok(updated)
 
 
 @router.delete("/rules/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -2,11 +2,12 @@
   "uid": "aidata-overview",
   "id": null,
   "title": "AIDataPlatform Overview",
+  "description": "Every panel below queries a metric the AI engine actually exports, or a metric Prometheus generates for its own scrape. The complete inventory is: http_requests_total{method,path,status} (ai-engine/app/main.py:23), http_request_latency_seconds_bucket/_sum/_count{path} (main.py:24, prometheus_client default buckets, top finite bucket le=\"10\" then +Inf), and the prometheus_client default registry - process_cpu_seconds_total, process_resident_memory_bytes, process_start_time_bytes... (process_virtual_memory_bytes, process_start_time_seconds, process_open_fds, process_max_fds, python_info, python_gc_*) - which main.py exposes because generate_latest() is called with no registry argument. up and scrape_samples_scraped come from Prometheus itself.\n\nWhat is NOT available and must never be added as a panel: the alert engine's metric vocabulary (sales.revenue, finance.margin_pct and friends, app/alerts/rules.py:410-421) is a Python dict of business metrics computed from the database and served at /api/v1/alerts/metrics behind service auth. It is not a Prometheus registry and none of those names ever reach /metrics. Same for anything about the LLM, Celery, Redis, Postgres or model accuracy: no exporter publishes them.\n\nTWO CAVEATS THAT MAKE THE NUMBERS APPROXIMATE. (1) ai-engine/Dockerfile runs uvicorn with --workers 2 and prometheus_client's default registry is per process, so each worker answers /metrics with its own counters under identical label sets and Prometheus stores one arbitrary sample per scrape. rate() over that is not a rate. The engine is read-only to this dashboard's owner; the fix is --workers 1 or prometheus_client multiprocess mode. (2) http_requests_total is labelled with the raw request path, so the six /api/v1 routes that take an id (models/{model_id}, imports/jobs/{job_id}, imports/preview/{job_id}, imports/quality/{job_id}, rules/{rule_id}, alerts/{alert_id}/events) mint a new label value per id. The 'distinct path values' panel is there so that growth is visible instead of silent.\n\nNo panel carries a datasource uid on purpose. The datasource is provisioned by docker-compose.yml with isDefault: true and no explicit uid, and '${datasource}' is only substituted for a JSON exported from the UI that also carries an __inputs block - file provisioning substitutes nothing, so that literal would leave every panel pointing at a datasource that does not exist. Panels with no datasource resolve to the default. If the compose datasource ever gains a uid, pin it here instead.\n\neditable is false because the provider is configured with updateIntervalSeconds: 30 and allowUiUpdates: true: an edit made in the UI is silently overwritten from this file half a minute later. Edit the file.",
   "tags": ["aidata", "fastapi"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
-  "editable": true,
+  "version": 2,
+  "editable": false,
   "refresh": "30s",
   "time": { "from": "now-6h", "to": "now" },
   "annotations": { "list": [] },
@@ -16,8 +17,7 @@
       "id": 1,
       "type": "timeseries",
       "title": "Engine latency p95 / p99 (all routes)",
-      "description": "http_request_latency_seconds is a Histogram labelled by path; aggregating to le only keeps the series count low.",
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "http_request_latency_seconds is a Histogram labelled by path. Summing by le keeps the series count low, at the cost of mixing routes. Both quantiles saturate at 10 s - the last finite bucket - so a value pinned at 10 means 'slower than 10 s, unmeasured', not 'exactly 10 s'. See the 'slower than 10 s' panels below for the size of that overflow. Also subject to the two-worker caveat in the dashboard description.",
       "targets": [
         {
           "refId": "A",
@@ -37,7 +37,7 @@
       "id": 2,
       "type": "timeseries",
       "title": "Engine request rate by status",
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "http_requests_total{status} counts the response status the engine returned, including the 429 the rate limiter emits and the 307 Starlette emits for a slash mismatch. A 4xx here is a rejected request, not a served one.",
       "targets": [
         {
           "refId": "A",
@@ -51,13 +51,12 @@
     {
       "id": 3,
       "type": "timeseries",
-      "title": "Engine request rate by method and path",
-      "description": "path is the raw request path, so this panel gets busy; use it to spot a single hot endpoint.",
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "title": "Engine request rate by method and path (top 10)",
+      "description": "path is the raw request path, so routes with an id in them produce a series per id. topk bounds what is drawn; it does not bound what Prometheus stores - see the 'distinct path values' panel and the dashboard description. This panel was previously unbounded by (method, path) and became unreadable on the first id-bearing request.",
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (method, path) (rate(http_requests_total{job=\"fastapi\"}[5m]))",
+          "expr": "topk(10, sum by (method, path) (rate(http_requests_total{job=\"fastapi\"}[5m])))",
           "legendFormat": "{{method}} {{path}}"
         }
       ],
@@ -67,8 +66,8 @@
     {
       "id": 4,
       "type": "timeseries",
-      "title": "Engine latency p95 by path",
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "title": "Engine latency p95 by path (top 10)",
+      "description": "One histogram per path, so this is a per-route latency view. topk bounds the drawn series only: the per-path series exist in the TSDB whether or not they are shown, which is why the raw path label matters for capacity.",
       "targets": [
         {
           "refId": "A",
@@ -83,18 +82,18 @@
       "id": 5,
       "type": "stat",
       "title": "Total request rate",
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "sum(rate(...)) over every label combination. Under the two-worker setup this is one worker's traffic, not the engine's - read it as a trend, not a count.",
       "targets": [
         { "refId": "A", "expr": "sum(rate(http_requests_total{job=\"fastapi\"}[5m]))" }
       ],
       "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
-      "gridPos": { "x": 0, "y": 16, "w": 6, "h": 6 }
+      "gridPos": { "x": 0, "y": 16, "w": 4, "h": 6 }
     },
     {
       "id": 6,
       "type": "stat",
       "title": "Engine error rate (5xx)",
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "The engine's unhandled-exception handler returns 500 with a redacted body and logs the detail, so this panel is the only place a 500 becomes visible before someone reads the engine log.",
       "targets": [
         {
           "refId": "A",
@@ -115,18 +114,119 @@
         },
         "overrides": []
       },
-      "gridPos": { "x": 6, "y": 16, "w": 6, "h": 6 }
+      "gridPos": { "x": 4, "y": 16, "w": 4, "h": 6 }
     },
     {
       "id": 7,
+      "type": "stat",
+      "title": "Engine rate-limited (429)",
+      "description": "check_rate_limit in app/core/security.py buckets by credential fingerprint AND by path, and fails closed: any internal error becomes a 429 too. Laravel is the only legitimate caller, so a non-zero value here is either one client outrunning RATE_LIMIT_PER_MINUTE or a limiter that is failing on every request. It was invisible on this dashboard before.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(http_requests_total{job=\"fastapi\", status=\"429\"}[5m]))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.1 },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "x": 8, "y": 16, "w": 4, "h": 6 }
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "Engine scrape up",
+      "description": "up{job=\"fastapi\"} is generated by Prometheus, not the engine, and it is 1 whenever the HTTP fetch of /metrics returned 200 with a parseable body. It does NOT certify the values: with two workers publishing duplicate label sets, a scrape can be 'up' while the samples stored are one arbitrary worker's. For a trustworthy answer, read Prometheus -> Status -> Targets and check for duplicate samples on this job.",
+      "targets": [
+        { "refId": "A", "expr": "up{job=\"fastapi\"}" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "DOWN", "color": "red", "index": 0 },
+                "1": { "text": "UP", "color": "green", "index": 1 }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "x": 12, "y": 16, "w": 4, "h": 6 }
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Requests slower than 10 s",
+      "description": "count minus the le=\"10\" bucket: the observations the histogram cannot resolve. A 500 MB import or an LLM-backed report is expected here, so this is the number that tells you whether p95/p99 on the panel above are real.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(http_request_latency_seconds_count{job=\"fastapi\"}[5m])) - sum(rate(http_request_latency_seconds_bucket{job=\"fastapi\", le=\"10\"}[5m]))"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "gridPos": { "x": 0, "y": 22, "w": 4, "h": 6 }
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Slow-request share",
+      "description": "The same overflow as a fraction of all observations. clamp_min keeps the division from turning an idle engine into a NaN tile.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(sum(rate(http_request_latency_seconds_count{job=\"fastapi\"}[5m])) - sum(rate(http_request_latency_seconds_bucket{job=\"fastapi\", le=\"10\"}[5m]))) / clamp_min(sum(rate(http_request_latency_seconds_count{job=\"fastapi\"}[5m])), 0.001)"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] },
+      "gridPos": { "x": 4, "y": 22, "w": 4, "h": 6 }
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Distinct path label values",
+      "description": "count(count by (path) (http_requests_total)). The engine labels the counter with the raw request path, so every distinct id on the six id-bearing /api/v1 routes adds a permanent series here and in the engine's own in-memory registry. A number that climbs without bound while traffic does not is this defect, not growth.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count(count by (path) (http_requests_total{job=\"fastapi\"}))"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "x": 8, "y": 22, "w": 4, "h": 6 }
+    },
+    {
+      "id": 12,
       "type": "timeseries",
       "title": "Engine process CPU / RSS",
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "These two are real, not invented: prometheus_client's default registry includes its ProcessCollector, and main.py calls generate_latest() with no registry argument, so they are exported alongside the app's own two metrics. Both are per process, so under --workers 2 the two workers publish identical label sets, Prometheus keeps one arbitrarily, and this tile shows one worker's CPU and RSS rather than the container's. It is the panel most likely to read as a flat lie after a restart.",
       "targets": [
         {
           "refId": "A",
           "expr": "rate(process_cpu_seconds_total{job=\"fastapi\"}[5m])",
-          "legendFormat": "cpu cores"
+          "legendFormat": "cpu cores (1.0 = one core)"
         },
         {
           "refId": "B",
@@ -135,7 +235,7 @@
         }
       ],
       "fieldConfig": { "defaults": {}, "overrides": [] },
-      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 6 }
+      "gridPos": { "x": 12, "y": 22, "w": 12, "h": 6 }
     }
   ]
 }

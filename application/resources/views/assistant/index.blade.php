@@ -31,7 +31,7 @@
                 <ul class="space-y-4">
                     @if (! empty($messagesTruncated))
                         <li class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                            Menampilkan {{ $messages->count() }} pesan terbaru. Percakapan yang lebih panjang dipangkas agar halaman tetap cepat — riwayat penuh tidak ditampilkan.
+                            Menampilkan {{ number_format($messages->count(), 0, ',', '.') }} pesan terbaru. Percakapan yang lebih panjang dipangkas agar halaman tetap cepat — riwayat penuh tidak ditampilkan.
                         </li>
                     @endif
                     @foreach ($messages as $message)
@@ -47,7 +47,7 @@
                                         {{ $roleLabels[$role] ?? \Illuminate\Support\Str::headline($role) }}
                                     </span>
                                     @if ($message->steps)
-                                        <x-badge variant="neutral">{{ number_format((int) $message->steps) }} langkah</x-badge>
+                                        <x-badge variant="neutral">{{ number_format((int) $message->steps, 0, ',', '.') }} langkah</x-badge>
                                     @endif
                                 </div>
 
@@ -129,14 +129,14 @@
             @else
                 <div class="mt-6 border-t border-slate-200 pt-4">
                     <p class="text-sm text-slate-600">
-                        Peran <strong>{{ auth()->user()->role()->label() }}</strong> hanya dapat membaca percakapan.
-                        Mengirim pertanyaan tersedia untuk Administrator dan Analyst.
+                        Peran <strong>{{ auth()->user()->role()->localizedLabel() }}</strong> hanya dapat membaca percakapan.
+                        Mengirim pertanyaan tersedia untuk {{ \App\Enums\UserRole::Admin->localizedLabel() }} dan {{ \App\Enums\UserRole::Analyst->localizedLabel() }}.
                     </p>
                 </div>
             @endif
         </x-card>
 
-        <x-card title="Riwayat percakapan" description="{{ number_format($threads->count()) }} percakapan tersimpan.">
+        <x-card title="Riwayat percakapan" description="{{ number_format($threads->count(), 0, ',', '.') }} percakapan tersimpan.">
             @if ($threads->isEmpty())
                 <x-empty-state
                     title="Belum ada percakapan"
@@ -155,7 +155,7 @@
                                         class="block truncate rounded text-sm font-medium {{ $isCurrent ? 'text-brand-800' : 'text-slate-900 hover:text-brand-700' }} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
                                     >{{ $item->title ?: 'Percakapan tanpa judul' }}</a>
                                     <p class="mt-1 text-xs text-slate-500">
-                                        {{ number_format((int) $item->message_count) }} pesan
+                                        {{ number_format((int) $item->message_count, 0, ',', '.') }} pesan
                                         @if ($item->last_message_at)
                                             &middot; {{ $item->last_message_at->locale('id')->translatedFormat('d M Y H:i') }}
                                         @endif

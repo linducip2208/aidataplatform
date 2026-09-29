@@ -1,5 +1,7 @@
 @extends('layouts.guest')
 
+@section('title', 'Mesin AI tidak dapat dihubungi')
+
 @section('content')
     <div class="w-full max-w-lg rounded-xl border border-red-200 bg-red-50 p-6">
         <h1 class="text-lg font-semibold text-red-900">Mesin AI tidak dapat dihubungi</h1>

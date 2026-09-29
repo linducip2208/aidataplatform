@@ -71,9 +71,14 @@ ENV COMPOSER_ALLOW_SUPERUSER=1 \
 # The -dev packages are not removed afterwards: postgresql-dev/icu-dev/libzip-dev
 # and the gd stack each pull the shared library the loaded extension needs, and
 # dropping them would leave the extensions present but unloadable.
+#
+# $PHPIZE_DEPS is installed explicitly for the pecl step and then removed.
+# `docker-php-ext-install` brings it in only for the duration of its own run and
+# takes it back out, so `pecl install redis` right after it failed with
+# "phpize: not found" and no laravel image could be built at all.
 RUN apk add --no-cache \
       bash curl git unzip icu-dev libzip-dev postgresql-dev redis \
-      freetype-dev libjpeg-turbo-dev libpng-dev \
+      freetype-dev libjpeg-turbo-dev libpng-dev $PHPIZE_DEPS \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install -j$(nproc) \
       pdo pdo_pgsql pgsql bcmath intl zip gd opcache pcntl \
@@ -84,7 +89,9 @@ RUN apk add --no-cache \
     # PHP upload limits for MAX_UPLOAD_MB=500 datasets (see .env.example)
     && printf "upload_max_filesize=%s\npost_max_size=%s\nmemory_limit=%s\nmax_execution_time=300\n" \
          "$PHP_UPLOAD_MAX_FILESIZE" "$PHP_POST_MAX_SIZE" "$PHP_MEMORY_LIMIT" \
-         > /usr/local/etc/php/conf.d/uploads.ini
+         > /usr/local/etc/php/conf.d/uploads.ini \
+    # Everything the *runtime* image needs stays; only the build toolchain goes.
+    && apk del --no-network $PHPIZE_DEPS
 
 WORKDIR ${APP_DIR}
 

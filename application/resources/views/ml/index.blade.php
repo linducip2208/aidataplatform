@@ -1,49 +1,23 @@
 @extends('layouts.app')
 
-@section('title', 'Machine learning')
+@section('title', 'Pembelajaran mesin')
 
 @section('content')
     @php
-        $typeLabels = [
-            'forecast' => 'Forecast',
-            'churn' => 'Churn',
-            'segmentation' => 'Segmentasi',
-            'anomaly' => 'Anomali',
-            'recommend' => 'Rekomendasi',
-        ];
+        $typeLabels = config('ai_engine.model_type_labels', []);
 
-        $statusVariants = [
-            'DRAFT' => 'neutral',
-            'TRAINING' => 'warning',
-            'VALIDATED' => 'info',
-            'STAGED' => 'info',
-            'PRODUCTION' => 'success',
-            'ARCHIVED' => 'neutral',
-            'FAILED' => 'danger',
-        ];
+        // One entry per status the registry can report, carrying both the word
+        // a user reads and the badge it paints, so the two cannot drift apart.
+        $statuses = config('ai_engine.model_version_statuses', []);
 
-        $statusLabels = [
-            'DRAFT' => 'Draf',
-            'TRAINING' => 'Sedang dilatih',
-            'VALIDATED' => 'Tervalidasi',
-            'STAGED' => 'Disiapkan',
-            'PRODUCTION' => 'Produksi',
-            'ARCHIVED' => 'Diarsipkan',
-            'FAILED' => 'Gagal',
-        ];
-
-        $promoteTargets = [
-            'PRODUCTION' => 'Produksi',
-            'STAGED' => 'Disiapkan',
-            'ARCHIVED' => 'Diarsipkan',
-        ];
+        $promoteTargets = array_intersect_key($statuses, array_flip(['PRODUCTION', 'STAGED', 'ARCHIVED']));
 
         $selectedId = isset($selected['id']) ? (int) $selected['id'] : null;
         $versions = (array) ($selected['versions'] ?? []);
     @endphp
 
     <div class="mb-6">
-        <h1 class="text-2xl font-semibold text-slate-900">Machine learning</h1>
+        <h1 class="text-2xl font-semibold text-slate-900">Pembelajaran mesin</h1>
         <p class="mt-1 text-sm text-slate-500">
             Latih model, tinjau metrik setiap versi, dan promosikan versi terbaik ke produksi sesuai tata kelola model.
         </p>
@@ -91,12 +65,12 @@
                                         </td>
                                         <td>{{ $typeLabels[$model['model_type'] ?? ''] ?? ($model['model_type'] ?? 'Tidak diketahui') }}</td>
                                         <td>
-                                            <x-badge :class="'badge-'.($statusVariants[$statusKey] ?? 'neutral')">
-                                                {{ $statusLabels[$statusKey] ?? $statusKey }}
+                                            <x-badge :class="$statuses[$statusKey]['badge'] ?? 'badge-neutral'">
+                                                {{ $statuses[$statusKey]['label'] ?? 'Status tidak dikenal' }}
                                             </x-badge>
                                         </td>
                                         <td class="text-right tabular-nums">
-                                            {{ ! empty($model['production_version_id']) ? number_format((int) $model['production_version_id']) : 'Belum ada' }}
+                                            {{ ! empty($model['production_version_id']) ? number_format((int) $model['production_version_id'], 0, ',', '.') : 'Belum ada' }}
                                         </td>
                                         <td class="text-right">
                                             <form method="GET" action="{{ route('ml.index') }}">
@@ -150,8 +124,8 @@
                                             <span class="mt-1 block text-xs text-slate-500">ID {{ $versionId }}</span>
                                         </td>
                                         <td>
-                                            <x-badge :class="'badge-'.($statusVariants[$versionStatus] ?? 'neutral')">
-                                                {{ $statusLabels[$versionStatus] ?? $versionStatus }}
+                                            <x-badge :class="$statuses[$versionStatus]['badge'] ?? 'badge-neutral'">
+                                                {{ $statuses[$versionStatus]['label'] ?? 'Status tidak dikenal' }}
                                             </x-badge>
                                         </td>
                                         <td>
@@ -188,8 +162,8 @@
                                                         name="to_status"
                                                         class="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
                                                     >
-                                                        @foreach ($promoteTargets as $value => $label)
-                                                            <option value="{{ $value }}" @selected(old('to_status', 'PRODUCTION') === $value)>{{ $label }}</option>
+                                                        @foreach ($promoteTargets as $value => $target)
+                                                            <option value="{{ $value }}" @selected(old('to_status', 'PRODUCTION') === $value)>{{ $target['label'] }}</option>
                                                         @endforeach
                                                     </select>
 
@@ -269,17 +243,17 @@
             @else
                 <x-card title="Akses baca saja">
                     <p class="text-sm text-slate-600">
-                        Peran <strong>{{ auth()->user()->role()->label() }}</strong> tidak dapat menjalankan pelatihan model.
-                        Training tersedia untuk Administrator dan Analyst.
+                        Peran <strong>{{ auth()->user()->role()->localizedLabel() }}</strong> tidak dapat menjalankan pelatihan model.
+                        Pelatihan tersedia untuk {{ \App\Enums\UserRole::Admin->localizedLabel() }} dan {{ \App\Enums\UserRole::Analyst->localizedLabel() }}.
                     </p>
                 </x-card>
             @endif
 
-            <x-card title="Tata kelola model" description="Aturan promotions versi model.">
+            <x-card title="Tata kelola model" description="Aturan promosi versi model.">
                 <ul class="space-y-2 text-sm text-slate-600">
-                    <li>Hanya Administrator yang dapat menaikkan versi model ke status produksi.</li>
+                    <li>Hanya {{ \App\Enums\UserRole::Admin->localizedLabel() }} yang dapat menaikkan versi model ke produksi.</li>
                     <li>Setiap versi menyimpan metrik evaluasi hasil validasi.</li>
-                    <li>Model produksi dipakai prediksi dan analitik otomatis.</li>
+                    <li>Model produksi dipakai untuk prediksi dan analitik otomatis.</li>
                 </ul>
             </x-card>
         </div>

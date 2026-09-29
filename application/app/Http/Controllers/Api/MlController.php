@@ -9,6 +9,7 @@ use App\Services\AiEngineClient;
 use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Validation\ValidationException;
 
 class MlController extends Controller
@@ -22,10 +23,14 @@ class MlController extends Controller
         return ApiResponse::data($engine->models());
     }
 
-    public function show(Request $request, AiEngineClient $engine, int $modelId): JsonResponse
+    public function show(Request $request, AiEngineClient $engine, string $modelId): JsonResponse
     {
+        if (! $this->isModelId($modelId)) {
+            return $this->invalidModelId();
+        }
+
         try {
-            return ApiResponse::data($engine->model($modelId));
+            $model = $engine->model((int) $modelId);
         } catch (AiEngineException $exception) {
             if ($exception->upstreamStatus() === 404) {
                 return ApiResponse::error('Model not found.', 404, 'not_found');
@@ -33,6 +38,17 @@ class MlController extends Controller
 
             throw $exception;
         }
+
+        // The engine decorates every version row with the artifact path it was
+        // loaded from. That is the server's own filesystem layout, and it is not
+        // in the documented response ("model + `versions[]`"), so it is dropped
+        // rather than proxied.
+        $model['versions'] = array_map(
+            static fn (array $version): array => Arr::except($version, ['artifact_path']),
+            (array) ($model['versions'] ?? []),
+        );
+
+        return ApiResponse::data($model);
     }
 
     public function train(Request $request, AiEngineClient $engine): JsonResponse
@@ -40,14 +56,22 @@ class MlController extends Controller
         $validated = $request->validate([
             'model_type' => ['required', 'string', 'in:'.implode(',', self::MODEL_TYPES)],
             'name' => ['required', 'string', 'max:100'],
-            'params' => ['nullable', 'string', 'max:4000'],
+            // The documented contract is an object, and that is what the engine's
+            // `TrainRequest.params: Dict[str, Any]` expects. The web form posts a
+            // JSON string because a textarea can only produce that, so both are
+            // accepted here; a string is decoded below.
+            'params' => ['nullable', 'array'],
+            'params_json' => ['nullable', 'string', 'max:4000'],
         ], [], [
             'model_type' => 'model type',
             'name' => 'model name',
             'params' => 'params',
+            'params_json' => 'params',
         ]);
 
-        $result = $engine->train($validated['model_type'], $validated['name'], $this->params($validated['params'] ?? null));
+        $params = $validated['params'] ?? $this->params($validated['params_json'] ?? null);
+
+        $result = $engine->train($validated['model_type'], $validated['name'], $params);
 
         AuditLog::record('model.trained', 'model', (int) ($result['model_id'] ?? 0), [
             'model_type' => $validated['model_type'],
@@ -58,8 +82,14 @@ class MlController extends Controller
         return ApiResponse::data($result, 202);
     }
 
-    public function promote(Request $request, AiEngineClient $engine, int $modelId): JsonResponse
+    public function promote(Request $request, AiEngineClient $engine, string $modelId): JsonResponse
     {
+        if (! $this->isModelId($modelId)) {
+            return $this->invalidModelId();
+        }
+
+        $modelId = (int) $modelId;
+
         $validated = $request->validate([
             'version_id' => ['required', 'integer', 'min:1'],
             'to_status' => ['nullable', 'string', 'in:'.implode(',', self::VERSION_STATUSES)],
@@ -79,6 +109,24 @@ class MlController extends Controller
         ]);
 
         return ApiResponse::data($result);
+    }
+
+    /**
+     * The `{modelId}` segment arrives as a string; a non-numeric one used to be
+     * coerced into the `int` parameter and raised a `TypeError` — an unhandled
+     * 500 for what is plainly bad input. It is answered as the 422 the
+     * documented error contract calls for instead.
+     */
+    private function isModelId(string $modelId): bool
+    {
+        return ctype_digit($modelId) && (int) $modelId > 0;
+    }
+
+    private function invalidModelId(): JsonResponse
+    {
+        return ApiResponse::error('Model id must be a positive integer.', 422, 'validation_failed', [
+            'modelId' => ['Model id must be a positive integer.'],
+        ]);
     }
 
     /** @return array<string, mixed> */

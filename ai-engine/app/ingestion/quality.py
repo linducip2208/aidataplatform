@@ -57,6 +57,18 @@ def run_quality_checks(df: pd.DataFrame, dataset_type: str = "sales") -> Dict[st
                 issues.append({"rule": "negative_quantity", "column": str(col), "count": neg,
                                "sample_rows": num[num < 0].index[:5].tolist(),
                                "message": f"{neg} negative values in {col}"})
+            # Coercion failures are disjoint from the negatives above (they
+            # become NaN, and NaN < 0 is False) and used to go unreported:
+            # a quantity column of "N/A" strings scored a perfect 1.0, then
+            # _clean filled it with zeros and every fact row loaded quantity
+            # 0. The on-demand quality endpoint reads the raw file, so the
+            # verdict that decides quarantine is the one computed here.
+            bad_num = int(num.isna().sum() - s.isna().sum())
+            if bad_num > 0:
+                invalid += bad_num
+                issues.append({"rule": "unparsable_number", "column": str(col),
+                               "count": bad_num, "sample_rows": [],
+                               "message": f"{bad_num} unparsable numeric values in {col}"})
         if _is_date_col(s):
             parsed = pd.to_datetime(s, errors="coerce")
             bad = int(parsed.isna().sum() - s.isna().sum())
@@ -105,16 +117,25 @@ def run_quality_checks(df: pd.DataFrame, dataset_type: str = "sales") -> Dict[st
         except Exception:
             pass
     consistency = max(0.0, 1 - (inconsistent / total_cells)) if total_cells else 1.0
-    score = round(float(np.mean([completeness, uniqueness, validity, consistency])), 4)
-    passed = score >= settings.quality_min_score
+    breakdown = {
+        "completeness": round(float(completeness), 4),
+        "uniqueness": round(float(uniqueness), 4),
+        "validity": round(float(validity), 4),
+        "consistency": round(float(consistency), 4),
+    }
+    # The four checks are equally weighted, so the score is their plain mean
+    # (docs/data-quality.md §2). The mean alone is not a sufficient gate: one
+    # dimension at 0.0 with the other three perfect still scores 0.75 and
+    # would clear the threshold, yet that frame is exactly the one the
+    # warehouse cannot use -- an all-null date column writes a NULL into every
+    # fact row, an all-duplicate frame double-counts nothing, and an
+    # unparseable measure column becomes a column of zeros. A zero on any
+    # single check therefore vetoes the pass and is reported in `issues`.
+    score = round(float(np.mean(list(breakdown.values()))), 4)
+    passed = score >= settings.quality_min_score and all(v > 0.0 for v in breakdown.values())
     return {
         "score": score,
-        "breakdown": {
-            "completeness": round(float(completeness), 4),
-            "uniqueness": round(float(uniqueness), 4),
-            "validity": round(float(validity), 4),
-            "consistency": round(float(consistency), 4),
-        },
+        "breakdown": breakdown,
         "issues": issues,
         "passed": bool(passed),
     }

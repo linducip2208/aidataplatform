@@ -1,18 +1,18 @@
 @php
     $primaryNav = [
         ['route' => 'dashboard', 'pattern' => 'dashboard', 'label' => 'Dashboard'],
-        ['route' => 'datasets.index', 'pattern' => 'datasets.*', 'label' => 'Datasets'],
-        ['route' => 'imports.index', 'pattern' => 'imports.*', 'label' => 'Imports'],
+        ['route' => 'datasets.index', 'pattern' => 'datasets.*', 'label' => 'Kumpulan data'],
+        ['route' => 'imports.index', 'pattern' => 'imports.*', 'label' => 'Impor'],
         ['route' => 'quality.index', 'pattern' => 'quality.*', 'label' => 'Kualitas'],
         ['route' => 'analytics.index', 'pattern' => 'analytics.*', 'label' => 'Analitik'],
-        ['route' => 'ml.index', 'pattern' => 'ml.*', 'label' => 'Machine Learning'],
+        ['route' => 'ml.index', 'pattern' => 'ml.*', 'label' => 'Pembelajaran mesin'],
         ['route' => 'assistant.index', 'pattern' => 'assistant.*', 'label' => 'Asisten'],
         ['route' => 'reports.index', 'pattern' => 'reports.*', 'label' => 'Laporan'],
     ];
 
     $adminNav = [
         ['route' => 'admin.users.index', 'pattern' => 'admin.users.*', 'label' => 'Pengguna'],
-        ['route' => 'audit.index', 'pattern' => 'audit.*', 'label' => 'Audit Log'],
+        ['route' => 'audit.index', 'pattern' => 'audit.*', 'label' => 'Log audit'],
     ];
 
     $user = auth()->user();
@@ -74,7 +74,7 @@
                             <p class="truncate text-sm font-semibold text-slate-900">{{ $user->name }}</p>
                             <p class="truncate text-sm text-slate-500">{{ $user->email }}</p>
                             <p class="mt-2">
-                                <x-badge variant="info">{{ $user->role()->label() }}</x-badge>
+                                <x-badge variant="info">{{ $user->role()->localizedLabel() }}</x-badge>
                             </p>
 
                             <div class="mt-4 space-y-2 border-t border-slate-200 pt-4">

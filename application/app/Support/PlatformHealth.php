@@ -514,7 +514,12 @@ class PlatformHealth
                 continue;
             }
 
-            $failing[] = Str::limit(trim((string) $name).($raw !== '' ? ': '.trim($raw) : ''), 60);
+            // Redacted, like every other path that surfaces engine output: a
+            // readiness failure carries the driver's message, which embeds the
+            // DSN and its password. Printing it into `platform:doctor` and into
+            // `--json` writes the key into a terminal, a CI log and a ticket.
+            $detail = trim((string) $name).($raw !== '' ? ': '.trim($raw) : '');
+            $failing[] = Str::limit($this->redact($detail), 60);
         }
 
         return $failing;
@@ -889,6 +894,13 @@ class PlatformHealth
         if ($key !== '' && str_contains($message, $key)) {
             $message = str_replace($key, '[redacted]', $message);
         }
+
+        // A driver or DSN error embeds the whole connection string, password
+        // included, and a readiness check reports the driver's own message. The
+        // service key is not the only secret in that string: this scrubs the
+        // `user:password@` of any URL as well.
+        $message = preg_replace('#(\w+://[^:/\s]+):[^@/\s]+@#', '$1:[redacted]@', $message) ?? $message;
+        $message = preg_replace('/\b(password|passwd|pwd|secret|token|api[_-]?key)=\S+/i', '$1=[redacted]', $message) ?? $message;
 
         return Str::limit(preg_replace('/\s+/', ' ', trim($message)) ?? $message, 200);
     }

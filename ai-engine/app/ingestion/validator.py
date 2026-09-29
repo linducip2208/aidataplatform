@@ -9,6 +9,18 @@ from app.core.config import settings
 
 ALLOWED_EXTS = {".csv", ".xlsx", ".xls", ".json", ".xml", ".parquet", ".zip"}
 
+# Content signatures that can legitimately back one of ALLOWED_EXTS: the zip
+# container family (a bare .zip, and .xlsx/.docx which are zips) and the OLE2
+# legacy office formats. Only a *positive* binary sniff is compared against
+# this -- csv, json, xml and parquet have no magic bytes, so they report ""
+# and are never affected. Extension-only validation let a PNG or an ELF
+# binary renamed to .csv through as a valid dataset upload.
+_DATA_MIME_PREFIXES = (
+    "application/zip", "application/x-zip-compressed",
+    "application/vnd.ms-", "application/vnd.openxmlformats-officedocument",
+    "application/x-ole-storage", "application/x-ole-", "application/msword",
+)
+
 
 def sha256_file(path: Path, block_size: int = 65536) -> str:
     h = hashlib.sha256()
@@ -18,15 +30,26 @@ def sha256_file(path: Path, block_size: int = 65536) -> str:
     return h.hexdigest()
 
 
-def detect_mime(path: Path) -> str:
+def _sniff(path: Path) -> str:
+    """Content-magic MIME, or "" when the file has no binary signature.
+
+    Kept separate from ``detect_mime`` because the ``mimetypes`` fallback maps
+    .csv to ``application/vnd.ms-excel`` on Windows, so only a real ``filetype``
+    hit is trustworthy enough to validate against.
+    """
     try:
         import filetype  # type: ignore
 
         kind = filetype.guess(str(path))
-        if kind:
-            return kind.mime
+        return kind.mime if kind else ""
     except Exception:
-        pass
+        return ""
+
+
+def detect_mime(path: Path) -> str:
+    sniffed = _sniff(path)
+    if sniffed:
+        return sniffed
     import mimetypes
 
     mime, _ = mimetypes.guess_type(str(path))
@@ -38,7 +61,7 @@ def validate_file(path: str | Path) -> Dict[str, Any]:
     p = Path(path)
     errors: List[str] = []
     warnings: List[str] = []
-    if not p.exists():
+    if not p.is_file():
         return {"ok": False, "errors": ["File not found"], "warnings": [], "meta": {}}
     size = p.stat().st_size
     if size == 0:
@@ -49,8 +72,23 @@ def validate_file(path: str | Path) -> Dict[str, Any]:
     ext = p.suffix.lower()
     if ext not in ALLOWED_EXTS:
         errors.append(f"Unsupported extension '{ext}'. Allowed: {sorted(ALLOWED_EXTS)}")
+    if size > 0:
+        sniffed = _sniff(p)
+        if sniffed and not sniffed.startswith(_DATA_MIME_PREFIXES):
+            errors.append(f"File content is {sniffed}, not a supported data file")
     mime = detect_mime(p)
-    checksum = sha256_file(p) if p.exists() and size > 0 else ""
+    # Only hash a file that passed every check above. The checksum is what the
+    # raw_upload row is deduplicated on, and a rejected upload never becomes a
+    # row, so hashing an already-rejected 200 MB file just re-read 200 MB off
+    # disk to compute a value nothing will ever look at. The unreadable case
+    # is reported instead of raising, which used to surface as a 500 out of
+    # /imports/upload rather than a validation error the UI can show.
+    checksum = ""
+    if not errors and size > 0:
+        try:
+            checksum = sha256_file(p)
+        except OSError as exc:
+            errors.append(f"File is unreadable: {exc}")
     # malformed sniff: try reading first rows
     row_errors: List[Dict[str, Any]] = []
     if not errors and ext in (".csv", ".xlsx", ".xls", ".json", ".xml", ".parquet", ".zip"):

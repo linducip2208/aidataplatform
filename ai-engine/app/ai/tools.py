@@ -1,8 +1,14 @@
-"""Tool definitions + implementations.
+﻿"""Tool definitions + implementations.
 
 Every tool is read-only and returns ``{"source": <table or pipeline>, "data": {...}}``.
 ``data`` is always a mapping so it satisfies the ``EvidenceRow`` contract in
 ``app/schemas/ai.py``; list-shaped results are wrapped as ``{"rows": [...], "count": n}``.
+
+A tool has exactly three honest outcomes â€” real data, ``{"note": ..., "empty": true}`` when
+the window holds no row, or ``{"error": ..., "empty": true}`` when the read failed. None of
+them is a zero-filled figure. That distinction is load-bearing: ``revenue: 0.0`` on an
+executive dashboard is indistinguishable from a business that stopped selling, and no
+downstream reader can tell a failed query from a real measurement.
 
 The result is used three times over: it goes into the API response body, into the
 ``ai_messages.evidence`` JSON column and into the LLM prompt. Every value is therefore
@@ -44,6 +50,7 @@ TOOL_DEFS = [
 ]
 
 # --- limits -----------------------------------------------------------------
+FRAME_WINDOW_DAYS = 90
 FRAME_ROW_LIMIT = 5000
 EVIDENCE_ROW_LIMIT = 60
 JSON_ITEM_LIMIT = 60
@@ -52,6 +59,7 @@ JSON_DEPTH_LIMIT = 6
 TEXT_LIMIT = 400
 MAX_HORIZON = 365
 DEFAULT_HORIZON = 30
+NO_DATA_NOTE = f"no rows in the last {FRAME_WINDOW_DAYS} days"
 
 _SECRET_RE = re.compile(
     r"(?i)\b(?:password|passwd|pwd|secret|token|api[_-]?key|authorization|bearer)\b\s*[:=]\s*\S+"
@@ -61,6 +69,9 @@ _STATEMENT_RE = re.compile(
     r"(?i)\b(?:select\s+.+\s+from|insert\s+into|update\s+\w+\s+set|delete\s+from|drop\s+table|"
     r"alter\s+table|create\s+table|union\s+select)\b"
 )
+# SQLAlchemy renders the statement and its bound parameters on their own lines, and
+# truncation can cut the leading keyword off a long statement while the tail survives.
+_SQL_MARKER_RE = re.compile(r"\[SQL[:\s]|\[parameters:")
 
 
 def _clip(value: Any, limit: int) -> str:
@@ -75,13 +86,27 @@ def redact(message: Any, limit: int = 240) -> str:
     SQLAlchemy exception text embeds the failing statement and its bound parameters, and
     a connection error can embed a DSN. Neither belongs in an API response, an
     ``ai_messages`` row or a prompt, so a statement-shaped message is dropped entirely.
+
+    Detection runs on the *whole* message and the result is clipped afterwards. Clipping
+    first defeated the check: a 240-character cut lands in the middle of the statement, so
+    the leading ``SELECT`` is gone, ``_STATEMENT_RE`` no longer matches, and the excerpt
+    that survives is exactly the schema and the bound values the redaction exists to keep
+    out of the response.
     """
-    text = _clip(message, limit)
-    text = _DSN_RE.sub("<redacted-dsn>", text)
+    text = _DSN_RE.sub("<redacted-dsn>", str(message))
     text = _SECRET_RE.sub("<redacted-secret>", text)
-    if _STATEMENT_RE.search(text):
+    if _STATEMENT_RE.search(text) or _SQL_MARKER_RE.search(text):
         return "tool_error: <statement text redacted>"
-    return text
+    return _clip(text, limit)
+
+
+class ToolError(RuntimeError):
+    """A tool could not read the warehouse.
+
+    Carries an already-redacted message: the class exists so a *failed* read is
+    distinguishable from a window that is genuinely empty. Conflating the two is how a
+    broken query turns into a business dashboard full of confident zeros.
+    """
 
 
 def _jsonable(value: Any, depth: int = 0) -> Any:
@@ -134,21 +159,46 @@ def evidence_data(data: Any) -> Dict[str, Any]:
     return {"value": safe}
 
 
-def _load_frame(table: str, db_session, window_days: int = 90) -> pd.DataFrame:
+def _load_frame(table: str, db_session, window_days: int = FRAME_WINDOW_DAYS) -> pd.DataFrame:
     """Load a warehouse frame for ``table`` as a DataFrame of plain Python values.
 
     The table is selected by literal comparison, never interpolated, and every
     filter this layer needs is expressed as a SQLAlchemy condition, so the dialect
-    binds the values. Returns an empty frame when the session is absent or the query fails.
+    binds the values.
 
     The window and the ordering matter. Previously this was an unfiltered
     ``LIMIT 5000`` with no ``ORDER BY``, so it scanned the whole fact table and
     returned an *arbitrary* 5000 rows: the same question could be answered with
     different numbers on two consecutive calls, and the evidence persisted
     alongside the answer was not reproducible. It is now a bounded, ordered
-    window — recent rows only, served by the ``transaction_date`` index — so the
-    numbers are stable and the cost is proportional to the window, not to the
-    table.
+    window â€” most recent ``window_days`` days only, served by the
+    ``transaction_date`` index â€” so the numbers are stable and the cost is
+    proportional to the window, not to the table.
+
+    A failed read yields an **empty** frame, as it always has. Several analytics
+    routes call this helper directly and render from it, so the lenient contract
+    is part of their interface. Evidence-producing tools must not use it: for them an
+    empty frame is ambiguous, and they use :func:`_load_frame_strict`, which raises
+    :class:`ToolError` instead so a broken read is never reported as a window with
+    nothing in it.
+    """
+    try:
+        return _load_frame_strict(table, db_session, window_days)
+    except ToolError:
+        return pd.DataFrame()
+
+
+def _load_frame_strict(table: str, db_session, window_days: int = FRAME_WINDOW_DAYS) -> pd.DataFrame:
+    """As :func:`_load_frame`, but a failed read raises :class:`ToolError`.
+
+    This is the split that keeps a fabricated zero out of the evidence. The two states
+    an analytics route can afford to confuse â€” "no rows" and "the query failed" â€” both
+    render as an empty page. A business number cannot: ``revenue: 0.0`` is
+    indistinguishable from a business that stopped selling, so a tool must be able to
+    tell the caller which one it has.
+
+    Returns an empty frame only when there is no session or the window genuinely holds
+    no row.
     """
     if db_session is None:
         return pd.DataFrame()
@@ -177,14 +227,33 @@ def _load_frame(table: str, db_session, window_days: int = 90) -> pd.DataFrame:
                 FactInventory.snapshot_date >= cutoff).order_by(
                 FactInventory.snapshot_date.desc().nullslast()).limit(FRAME_ROW_LIMIT)
             return pd.DataFrame([{"product_name": r[1] or "", "stock_qty": r[0] or 0} for r in q.all()])
-    except Exception:
-        return pd.DataFrame()
+    except ToolError:
+        raise
+    except Exception as exc:
+        raise ToolError(redact(exc)) from exc
     return pd.DataFrame()
 
 
 def _result(source: str, data: Any) -> Dict[str, Any]:
     """Build the ``{"source": ..., "data": ...}`` evidence envelope for one tool."""
     return {"source": source, "data": evidence_data(data)}
+
+
+def _no_data(source: str) -> Dict[str, Any]:
+    """Evidence for a source whose window is genuinely empty â€” a marker, and no numbers.
+
+    This is the whole point of :class:`ToolError`: a zero-filled KPI block
+    (``revenue: 0.0, orders: 0``) is indistinguishable on a dashboard from a business
+    that genuinely stopped selling, so a warehouse with no rows in the window must say
+    so and stay silent about the figures. The system prompt already tells the model to
+    answer "data belum tersedia" when a source has no data.
+    """
+    return {"source": source, "data": {"note": NO_DATA_NOTE, "empty": True}}
+
+
+def _failed(source: str, exc: BaseException) -> Dict[str, Any]:
+    """Evidence for a source whose query failed: a redacted error and no numbers."""
+    return {"source": source, "data": {"error": redact(exc), "empty": True}}
 
 
 def _horizon(args: Dict[str, Any]) -> int:
@@ -212,64 +281,95 @@ def execute_tool(name: str, args: Dict[str, Any], db_session=None) -> Dict[str, 
     one missing optional dependency cannot take the whole tool set down with it, and the
     resulting values are passed through :func:`evidence_data` so nothing that cannot be
     serialised reaches the response, the JSON column or the prompt.
+
+    Three outcomes, and only three: real data, an explicit *no rows in the window*
+    marker, or an error. There is no path that returns a zero-filled figure. A read that
+    failed is reported as an error, never as ``revenue: 0.0`` â€” a fabricated zero in an
+    executive dashboard is worse than an error, because nothing downstream can tell the
+    two apart. Any other exception propagates to the caller, which is the single place
+    that turns a raised tool into an evidence row.
     """
     args = args if isinstance(args, dict) else {}
 
     if name == "get_kpi":
         from app.analytics import sales as sa
 
-        df = _load_frame("sales", db_session)
-        data = sa.sales_kpi(df) if not df.empty else {"revenue": 0.0, "orders": 0, "units": 0.0, "aov": 0.0, "growth_pct": 0.0, "margin_pct": 0.0}
-        return _result("fact_sales", data)
+        try:
+            df = _load_frame_strict("sales", db_session)
+        except ToolError as exc:
+            return _failed("fact_sales", exc)
+        return _no_data("fact_sales") if df.empty else _result("fact_sales", sa.sales_kpi(df))
     if name == "query_sales":
         from app.analytics import sales as sa
 
-        df = _load_frame("sales", db_session)
-        gran = str(args.get("granularity") or "daily")
-        data = sa.sales_trend(df, gran) if not df.empty else []
-        return _result("fact_sales", data[:60])
+        try:
+            df = _load_frame_strict("sales", db_session)
+        except ToolError as exc:
+            return _failed("fact_sales", exc)
+        if df.empty:
+            return _no_data("fact_sales")
+        return _result("fact_sales", sa.sales_trend(df, str(args.get("granularity") or "daily"))[:60])
     if name == "query_inventory":
         from app.analytics import inventory as ia
 
-        df = _load_frame("inventory", db_session)
-        sdf = _load_frame("sales", db_session)
-        data = ia.inventory_health(df, sdf) if not df.empty else []
-        return _result("fact_inventory", data[:50])
+        try:
+            df = _load_frame_strict("inventory", db_session)
+            sdf = _load_frame_strict("sales", db_session)
+        except ToolError as exc:
+            return _failed("fact_inventory", exc)
+        return _no_data("fact_inventory") if df.empty else _result("fact_inventory", ia.inventory_health(df, sdf)[:50])
     if name == "query_customer":
         from app.analytics import customers as ca
 
-        df = _load_frame("sales", db_session)
-        data = ca.rfm(df) if not df.empty else []
-        return _result("fact_sales:rfm", data[:50])
+        try:
+            df = _load_frame_strict("sales", db_session)
+        except ToolError as exc:
+            return _failed("fact_sales:rfm", exc)
+        return _no_data("fact_sales:rfm") if df.empty else _result("fact_sales:rfm", ca.rfm(df)[:50])
     if name == "query_product":
         from app.analytics import products as pa
 
-        df = _load_frame("sales", db_session)
-        data = pa.abc_analysis(df) if not df.empty else []
-        return _result("fact_sales:abc", data[:50])
+        try:
+            df = _load_frame_strict("sales", db_session)
+        except ToolError as exc:
+            return _failed("fact_sales:abc", exc)
+        return _no_data("fact_sales:abc") if df.empty else _result("fact_sales:abc", pa.abc_analysis(df)[:50])
     if name == "query_finance":
         from app.analytics import finance as fa
 
-        df = _load_frame("sales", db_session)
-        return _result("finance", fa.finance_summary(df))
+        try:
+            df = _load_frame_strict("sales", db_session)
+        except ToolError as exc:
+            return _failed("finance", exc)
+        return _no_data("finance") if df.empty else _result("finance", fa.finance_summary(df))
     if name == "get_forecast":
         from app.ml.forecasting import forecast as _fc
 
-        return _result("ml.forecast", _fc(_daily_revenue(_load_frame("sales", db_session)),
-                                          _horizon(args)))
+        try:
+            history = _daily_revenue(_load_frame_strict("sales", db_session))
+        except ToolError as exc:
+            return _failed("ml.forecast", exc)
+        return _no_data("ml.forecast") if not history else _result("ml.forecast", _fc(history, _horizon(args)))
     if name == "get_anomaly":
         from app.ml.anomaly import detect_anomalies
 
-        series = [{"date": row["date"], "value": row["y"]}
-                  for row in _daily_revenue(_load_frame("sales", db_session))]
-        return _result("ml.anomaly", detect_anomalies(series))
+        try:
+            history = _daily_revenue(_load_frame_strict("sales", db_session))
+        except ToolError as exc:
+            return _failed("ml.anomaly", exc)
+        if not history:
+            return _no_data("ml.anomaly")
+        return _result("ml.anomaly", detect_anomalies([{"date": r["date"], "value": r["y"]} for r in history]))
     if name == "get_customer_segment":
         from app.ml.features import customer_features
         from app.ml.segmentation import segment
 
-        df = _load_frame("sales", db_session)
+        try:
+            df = _load_frame_strict("sales", db_session)
+        except ToolError as exc:
+            return _failed("ml.segment", exc)
         if df.empty:
-            return _result("ml.segment", {})
+            return _no_data("ml.segment")
         feats = _jsonable(customer_features(df).to_dict("records"))
         return _result("ml.segment", segment(feats))
     if name == "generate_report":
@@ -277,7 +377,7 @@ def execute_tool(name: str, args: Dict[str, Any], db_session=None) -> Dict[str, 
 
         period = str(args.get("period") or "weekly")
         return _result("reporting", executive_summary(db_session, period=period))
-    return _result(name, {})
+    return {"source": name, "data": {"error": f"unknown_tool: {_clip(name, 64)}", "empty": True}}
 
 
 def failed_tool_result(name: str, exc: BaseException) -> Dict[str, Any]:

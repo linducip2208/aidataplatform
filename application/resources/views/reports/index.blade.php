@@ -4,11 +4,8 @@
 
 @section('content')
     @php
-        $periodLabels = [
-            'daily' => 'Harian',
-            'weekly' => 'Mingguan',
-            'monthly' => 'Bulanan',
-        ];
+        $periodLabels = config('ai_engine.period_labels', []);
+        $financeLabels = config('ai_engine.finance_labels', []);
 
         $kpi = (array) ($report['kpi'] ?? []);
         $finance = (array) ($report['finance'] ?? []);
@@ -105,7 +102,7 @@
             <x-card title="KPI periode" description="Angka penjualan yang menjadi dasar laporan.">
                 <div class="grid gap-4 sm:grid-cols-2">
                     <x-stat label="Pendapatan" :value="\Illuminate\Support\Number::currency((float) ($kpi['revenue'] ?? 0), in: 'idr', locale: 'id', precision: 0)" />
-                    <x-stat label="Jumlah pesanan" :value="number_format((int) ($kpi['orders'] ?? 0))" />
+                    <x-stat label="Jumlah pesanan" :value="number_format((int) ($kpi['orders'] ?? 0), 0, ',', '.')" />
                     <x-stat label="Unit terjual" :value="number_format((float) ($kpi['units'] ?? 0), 0, ',', '.')" />
                     <x-stat label="Nilai pesanan rata-rata" :value="\Illuminate\Support\Number::currency((float) ($kpi['aov'] ?? 0), in: 'idr', locale: 'id', precision: 0)" />
                     <x-stat label="Pertumbuhan" :value="\Illuminate\Support\Number::percentage((float) ($kpi['growth_pct'] ?? 0), precision: 1, locale: 'id')" />
@@ -120,7 +117,7 @@
                     <dl class="space-y-3 text-sm">
                         @foreach ($finance as $key => $value)
                             <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2 last:border-b-0 last:pb-0">
-                                <dt class="font-medium text-slate-500">{{ \Illuminate\Support\Str::headline((string) $key) }}</dt>
+                                <dt class="font-medium text-slate-500">{{ $financeLabels[$key] ?? \Illuminate\Support\Str::headline((string) $key) }}</dt>
                                 <dd class="tabular-nums text-slate-900">
                                     @if ($key === 'margin_pct')
                                         {{ \Illuminate\Support\Number::percentage((float) $value, precision: 1, locale: 'id') }}

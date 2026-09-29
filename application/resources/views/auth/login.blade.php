@@ -70,15 +70,15 @@
 
             <ul class="mt-3 space-y-2 text-sm text-amber-900">
                 <li class="flex flex-wrap items-center justify-between gap-2">
-                    <span>Administrator</span>
+                    <span>{{ \App\Enums\UserRole::Admin->localizedLabel() }}</span>
                     <code class="rounded bg-white px-2 py-1 text-xs">admin@example.com / Admin123!</code>
                 </li>
                 <li class="flex flex-wrap items-center justify-between gap-2">
-                    <span>Analyst</span>
+                    <span>{{ \App\Enums\UserRole::Analyst->localizedLabel() }}</span>
                     <code class="rounded bg-white px-2 py-1 text-xs">analyst@example.com / Analyst123!</code>
                 </li>
                 <li class="flex flex-wrap items-center justify-between gap-2">
-                    <span>Viewer</span>
+                    <span>{{ \App\Enums\UserRole::Viewer->localizedLabel() }}</span>
                     <code class="rounded bg-white px-2 py-1 text-xs">viewer@example.com / Viewer123!</code>
                 </li>
             </ul>
