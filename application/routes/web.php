@@ -68,6 +68,7 @@ Route::middleware('auth')->group(function (): void {
         Route::post('/ml/experiments', [MlController::class, 'createExperiment'])->name('ml.experiments.store');
         Route::post('/ml/batch-predict', [MlController::class, 'batchPredict'])->name('ml.batch-predict');
         Route::post('/assistant/threads', [AssistantController::class, 'store'])->name('assistant.store');
+        Route::post('/reports', [ReportController::class, 'store'])->name('reports.store');
         Route::post('/decisions/recommend', [DecisionCenterController::class, 'recommend'])->name('decisions.recommend');
         Route::post('/decisions/scenarios/run', [DecisionCenterController::class, 'runScenario'])->name('decisions.scenarios.run');
         Route::post('/decisions/{id}/audit', [DecisionCenterController::class, 'audit'])->whereNumber('id')->name('decisions.audit');

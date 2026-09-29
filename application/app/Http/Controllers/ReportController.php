@@ -3,7 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Exceptions\AiEngineException;
+use App\Models\GeneratedReport;
 use App\Services\AiEngineClient;
+use App\Services\ReportGenerationService;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\View\View;
@@ -43,6 +46,12 @@ class ReportController extends Controller
             $snapshots = [];
         }
 
+        $history = GeneratedReport::query()
+            ->with('creator')
+            ->orderByDesc('created_at')
+            ->limit(20)
+            ->get();
+
         return view('reports.index', [
             'report' => $report,
             'periods' => self::PERIODS,
@@ -50,7 +59,26 @@ class ReportController extends Controller
             'engineAvailable' => $engineAvailable,
             'snapshots' => $snapshots,
             'snapshotsAvailable' => $snapshotsAvailable,
+            'history' => $history,
         ]);
+    }
+
+    public function store(Request $request, ReportGenerationService $service): RedirectResponse
+    {
+        $validated = $request->validate([
+            'period' => ['nullable', 'string', 'in:'.implode(',', self::PERIODS)],
+        ], [], ['period' => 'periode']);
+
+        try {
+            $report = $service->generate(
+                (string) ($validated['period'] ?? 'weekly'),
+                $request->user(),
+            );
+        } catch (AiEngineException $exception) {
+            return back()->withInput()->with('error', $exception->getMessage());
+        }
+
+        return back()->with('status', "Laporan #{$report->getKey()} disimpan ke riwayat.");
     }
 
     public function index(Request $request, AiEngineClient $engine): View

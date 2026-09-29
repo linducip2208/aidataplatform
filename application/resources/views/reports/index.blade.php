@@ -52,6 +52,58 @@
         </x-card>
     @endunless
 
+    <x-card class="mb-3" title="Riwayat laporan" description="Dibuat terjadwal setiap Senin 06:00 atau manual di bawah.">
+        @if (($history ?? collect())->isEmpty())
+            <x-empty-state
+                title="Belum ada laporan tersimpan"
+                description="Buat laporan pertama melalui formulir di bawah."
+            />
+        @else
+            <x-table-wrapper label="Riwayat laporan">
+                <table class="table table-vcenter card-table">
+                    <thead>
+                        <tr>
+                            <th scope="col" class="text-end">ID</th>
+                            <th scope="col">Periode</th>
+                            <th scope="col">Ringkasan</th>
+                            <th scope="col">Oleh</th>
+                            <th scope="col" class="text-end">Dibuat</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach ($history as $item)
+                            <tr>
+                                <td class="text-end">{{ $item->getKey() }}</td>
+                                <td><x-badge variant="info">{{ $periodLabels[$item->period] ?? $item->period }}</x-badge></td>
+                                <td class="small text-secondary">{{ \Illuminate\Support\Str::limit($item->narrative(), 120) }}</td>
+                                <td class="small text-secondary">{{ $item->creator?->name ?? 'terjadwal' }}</td>
+                                <td class="text-end"><span class="small text-secondary">{{ $item->created_at?->locale('id')->translatedFormat('d M Y H:i') ?? '?' }}</span></td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </x-table-wrapper>
+        @endif
+
+        @if (auth()->user()->isAnalyst())
+            <form method="POST" action="{{ route('reports.store') }}" class="row row-cards mt-3">
+                @csrf
+                <div class="col-md-6">
+                    <x-field label="Periode" for="history_period">
+                        <select id="history_period" name="period" class="form-select">
+                            @foreach ($periods as $value)
+                                <option value="{{ $value }}" @selected($period === $value)>{{ $periodLabels[$value] ?? $value }}</option>
+                            @endforeach
+                        </select>
+                    </x-field>
+                </div>
+                <div class="col-md-6 d-flex align-items-end">
+                    <button type="submit" class="btn btn-primary">Buat laporan sekarang</button>
+                </div>
+            </form>
+        @endif
+    </x-card>
+
     @unless ($hasContent)
         <x-card title="Laporan periode {{ $periodLabels[$period] ?? $period }}">
             <x-empty-state

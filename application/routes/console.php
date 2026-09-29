@@ -21,3 +21,8 @@ Schedule::command('sync:quality --limit=100 --days=30')
     ->dailyAt('02:45')
     ->withoutOverlapping(30)
     ->description('Re-run stale quality checks for committed datasets');
+
+Schedule::command('report:generate --period=weekly')
+    ->weeklyOn(1, '06:00')
+    ->withoutOverlapping(60)
+    ->description('Generate the weekly AI executive report into history');

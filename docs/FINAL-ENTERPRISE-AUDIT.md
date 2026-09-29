@@ -15,7 +15,16 @@ Date: 2026-09-29 (UTC). Branch: `main`. Scope: master enterprise commands, itera
    `WebWorkflowTest` updated to act as owner + new non-owner 403 cases.
    Suite → **929 tests, 0 failures**.
 
-## Iteration 15 (this commit)
+## Iteration 16 (this commit)
+
+25. **Report history + scheduler** — `generated_reports` table stores the
+   engine answer verbatim (scheduled Monday 06:00 via `report:generate`
+   plus on-demand generation, both audited; engine failures store nothing);
+   reports page gains history + generate form; query budgets updated with
+   documented reason (1-2, shape-constant). Tests `ReportHistoryTest` → **8
+   passed**.
+
+## Iteration 15 (previous commit)
 
 24. **Decision Center UI** — rekomendasi/scenario/audit kini punya wajah:
    `DecisionCenterController` (daftar kasus, detail rekomendasi + bukti,
