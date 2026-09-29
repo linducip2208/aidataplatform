@@ -133,8 +133,8 @@ in_list() {
 #
 # A name the same file also ASSIGNS on a line that does not read ${NAME} back is
 # a script local, not an environment input: ai-engine/docker-entrypoint.sh has
-# `PG_HOST="${PGHOST_FOR_MIGRATION:-postgres}"` and then logs ${PG_HOST}, and
-# PG_HOST is not something the operator can set. A name assigned from its own
+# `DB_HOST="${DBHOST_FOR_MIGRATION:-mysql}"` and then logs ${DB_HOST}, and
+# DB_HOST is not something the operator can set. A name assigned from its own
 # default, `BACKUP_DIR="${BACKUP_DIR:-./backups}"`, is a real input and is kept.
 script_vars() {
     sed 's/\$\${//g' "$@" 2>/dev/null |
@@ -375,8 +375,8 @@ REF
 DOCKER_HOST
 DOCKER_BUILDKIT
 COMPOSE_PROJECT_NAME
-PGDATA
-POSTGRES_PASSWORD
+MYSQL_PWD
+MYSQL_ROOT_PASSWORD
 GF_SECURITY_ADMIN_USER
 GF_SECURITY_ADMIN_PASSWORD
 GF_USERS_ALLOW_SIGN_UP
@@ -390,7 +390,8 @@ cat > "$TMP_DIR/required" <<'REQ_EOF'
 APP_KEY|Laravel has no encryption key: every request fails and laravel-entrypoint.sh refuses to start the container
 SERVICE_API_KEY|engine configured_service_key() rejects a placeholder, so every engine-backed page returns 502
 JWT_SECRET|engine _configured_jwt_secret() rejects a placeholder, so token minting and verification fail
-POSTGRES_PASSWORD|baked into the pgdata volume on first boot; a placeholder is a public database
+MYSQL_PASSWORD|baked into the mysql-data volume on first boot; a placeholder is a public database
+MYSQL_ROOT_PASSWORD|healthchecks and backup/restore authenticate as root; a placeholder is a public database
 GRAFANA_ADMIN_PASSWORD|grafana is published on GRAFANA_PORT with no other access control
 REQ_EOF
 
@@ -512,7 +513,7 @@ engine_like() {
 }
 ops_like() {
     case "$1" in
-        postgres | redis | nginx | prometheus | grafana) return 0 ;;
+        mysql | redis | nginx | prometheus | grafana) return 0 ;;
     esac
     return 1
 }

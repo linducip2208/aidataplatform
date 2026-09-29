@@ -511,14 +511,20 @@
         <p class="mt-2 text-xs text-slate-500">Ekspor PDF belum tersedia — lihat batasan di dokumentasi BI.</p>
     </x-card>
 
-    <script type="application/json" id="analytics-data">
-        {!! json_encode([
+    @php
+        // Built in PHP, not inline in the directive: a multiline array literal
+        // inside @json() breaks Blade's parenthesis matching and compiles to
+        // invalid PHP. @json escapes <, >, & for safe embedding in <script>.
+        $analyticsData = [
             'kpi' => $kpi ?? [],
             'trend' => $trend ?? [],
             'branches' => $branches ?? [],
             'finance' => $finance ?? [],
             'comparison' => $comparison ?? [],
             'dashboard' => $dashboard ?? [],
-        ], JSON_UNESCAPED_UNICODE) !!}
+        ];
+    @endphp
+    <script type="application/json" id="analytics-data">
+        @json($analyticsData)
     </script>
 @endsection

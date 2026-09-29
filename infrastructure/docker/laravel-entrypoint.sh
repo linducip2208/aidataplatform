@@ -6,7 +6,7 @@
 #
 # Boot order, each step able to stop the container:
 #   1. verify the environment docker compose injected
-#   2. wait for Postgres (compose healthchecks only gate `up`, not later restarts)
+#   2. wait for MySQL (compose healthchecks only gate `up`, not later restarts)
 #   3. install the Vite build compiled in the image
 #   4. recreate the storage skeleton hidden by the laravel-storage volume
 #   5. link public/storage
@@ -26,8 +26,8 @@ APP_PORT="${APP_PORT:-8000}"
 # anything baked into the app directory itself is shadowed at runtime.
 VITE_BUILD_DIR="${VITE_BUILD_DIR:-/opt/aidata/vite}"
 
-DB_WAIT_HOST="${DB_WAIT_HOST:-${DB_HOST:-postgres}}"
-DB_WAIT_PORT="${DB_WAIT_PORT:-${DB_PORT:-5432}}"
+DB_WAIT_HOST="${DB_WAIT_HOST:-${DB_HOST:-mysql}}"
+DB_WAIT_PORT="${DB_WAIT_PORT:-${DB_PORT:-3306}}"
 DB_WAIT_ATTEMPTS="${DB_WAIT_ATTEMPTS:-30}"
 DB_WAIT_INTERVAL="${DB_WAIT_INTERVAL:-2}"
 export DB_WAIT_HOST DB_WAIT_PORT
@@ -68,16 +68,16 @@ check_env() {
     fi
 }
 
-wait_for_postgres() {
+wait_for_db() {
     _attempt=1
     while [ "$_attempt" -le "$DB_WAIT_ATTEMPTS" ]; do
         # `php -r` does not put trailing arguments in $argv, so the target is
         # read back from the exported environment instead.
         if php -r 'exit(@fsockopen(getenv("DB_WAIT_HOST"), (int) getenv("DB_WAIT_PORT"), $e, $s, 2) ? 0 : 1);'; then
-            log "postgres $DB_WAIT_HOST:$DB_WAIT_PORT is accepting connections"
+            log "mysql $DB_WAIT_HOST:$DB_WAIT_PORT is accepting connections"
             return 0
         fi
-        log "waiting for postgres $DB_WAIT_HOST:$DB_WAIT_PORT (attempt $_attempt/$DB_WAIT_ATTEMPTS)"
+        log "waiting for mysql $DB_WAIT_HOST:$DB_WAIT_PORT (attempt $_attempt/$DB_WAIT_ATTEMPTS)"
         _attempt=$((_attempt + 1))
         sleep "$DB_WAIT_INTERVAL"
     done
@@ -169,7 +169,7 @@ run_migrations() {
         return 0
     fi
 
-    log "running artisan migrate --force against $DB_HOST:${DB_PORT:-5432}/$DB_DATABASE"
+    log "running artisan migrate --force against $DB_HOST:${DB_PORT:-3306}/$DB_DATABASE"
     if _output="$(php artisan migrate --force 2>&1)"; then
         if [ -n "$_output" ]; then
             printf '%s\n' "$_output"
@@ -198,7 +198,7 @@ main() {
 
     check_env
 
-    if wait_for_postgres; then
+    if wait_for_db; then
         log "database reachable"
     else
         error "no database connection to $DB_WAIT_HOST:$DB_WAIT_PORT after $DB_WAIT_ATTEMPTS attempts; migrating anyway will fail"

@@ -1,8 +1,8 @@
 # Architecture
 
 AIDataPlatform is a two-runtime data platform: **Laravel** (UI + orchestration) and
-**FastAPI AI Engine** (ingestion, analytics, ML, assistant, RAG), sharing one PostgreSQL
-database (pgvector) and one Redis, behind Nginx. The ASCII service map lives in `README.md`.
+**FastAPI AI Engine** (ingestion, analytics, ML, assistant, RAG), sharing one MySQL 8
+database and one Redis, behind Nginx. The ASCII service map lives in `README.md`.
 
 ## 1. Runtime split
 
@@ -50,10 +50,8 @@ synthesises the answer with the LLM. Conversations persist to `ai_conversations`
 
 ## 3. Data plane: one schema, split DDL ownership
 
-Every table lives in the default `public` schema. There are no `raw.` / `warehouse.` / `ml.`
-/ `ai.` schemas — `infrastructure/docker/postgres/init.sql` creates extensions and those
-schemas, but no code writes to them, so they stay empty. Namespacing is by **table-name
-prefix**, not by schema.
+Every table lives in the single `aidata` database. There are no `raw.` / `warehouse.` / `ml.`
+/ `ai.` schemas — namespacing is by **table-name prefix**, not by schema.
 
 DDL ownership is split on purpose, so that each table has exactly one source of truth:
 
@@ -172,7 +170,7 @@ configuration, schema and storage report. Details in `monitoring.md`.
 |---|---|
 | `application/` | Laravel 12.69.2, PHP `^8.2`, Sanctum `^4.0`. `routes/web.php` (Blade UI), `routes/api.php` (token API), `config/ai_engine.php` (every engine env key), `app/Services/AiEngineClient.php`, `app/Services/DatasetIngestionService.php`, `app/Support/PlatformHealth.php`, `app/Enums/`, `app/Models/`, `database/migrations/`, `database/seeders/` |
 | `ai-engine/` | FastAPI engine. `app/api/v1/*.py` (one module per tag), `app/core/` (config, security, errors, logging), `app/ingestion/`, `app/analytics/`, `app/ml/`, `app/ai/`, `app/alerts/`, `app/workers/`, `alembic/`, `docker-entrypoint.sh` |
-| `infrastructure/` | `nginx/default.conf`, `docker/` (laravel.Dockerfile, laravel-entrypoint.sh, celery.Dockerfile, postgres/init.sql), `monitoring/` (prometheus.yml, grafana-dashboard.json), `scripts/` (healthcheck, backup, restore, deploy-ubuntu24) |
+| `infrastructure/` | `nginx/default.conf`, `docker/` (laravel.Dockerfile, laravel-entrypoint.sh, celery.Dockerfile, mysql/init.sql), `monitoring/` (prometheus.yml, grafana-dashboard.json), `scripts/` (healthcheck, backup, restore, deploy-ubuntu24) |
 | `docs/` | This documentation set. `api.md` is the English endpoint contract and the source of truth for every path. |
 | `tests/` | `run.sh` (integration checklist), `fixtures/sample_sales.csv`, `README.md` |
 | `.github/workflows/` | `laravel.yml`, `python.yml`, `docker.yml`, `deploy.yml` |

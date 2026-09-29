@@ -67,21 +67,24 @@ ENV COMPOSER_ALLOW_SUPERUSER=1 \
     PHP_POST_MAX_SIZE=550M \
     PHP_MEMORY_LIMIT=1G
 
-# System deps + PHP extensions (pdo_pgsql, pgsql, redis, zip, gd, intl, bcmath).
-# The -dev packages are not removed afterwards: postgresql-dev/icu-dev/libzip-dev
+# System deps + PHP extensions (pdo_mysql, redis, zip, gd, intl,
+# bcmath).
+# The -dev packages are not removed afterwards: icu-dev/libzip-dev
 # and the gd stack each pull the shared library the loaded extension needs, and
 # dropping them would leave the extensions present but unloadable.
+#
+# pdo_mysql needs no -dev package: it builds against the bundled mysqlnd.
 #
 # $PHPIZE_DEPS is installed explicitly for the pecl step and then removed.
 # `docker-php-ext-install` brings it in only for the duration of its own run and
 # takes it back out, so `pecl install redis` right after it failed with
 # "phpize: not found" and no laravel image could be built at all.
 RUN apk add --no-cache \
-      bash curl git unzip icu-dev libzip-dev postgresql-dev redis \
+      bash curl git unzip icu-dev libzip-dev redis \
       freetype-dev libjpeg-turbo-dev libpng-dev $PHPIZE_DEPS \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install -j$(nproc) \
-      pdo pdo_pgsql pgsql bcmath intl zip gd opcache pcntl \
+      pdo pdo_mysql bcmath intl zip gd opcache pcntl \
     && pecl install redis \
     && docker-php-ext-enable redis opcache \
     && rm -rf /tmp/pear \

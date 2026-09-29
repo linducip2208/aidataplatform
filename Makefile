@@ -27,7 +27,7 @@ build: ## Build laravel + fastapi images
 	$(COMPOSE) build laravel fastapi celery-worker celery-beat
 
 pull: ## Pull base images
-	$(COMPOSE) pull nginx postgres redis prometheus grafana
+	$(COMPOSE) pull nginx mysql redis prometheus grafana
 
 migrate: ## Run Laravel migrations + ai-engine alembic (if any)
 	$(LARAVEL) php artisan migrate --force
@@ -52,7 +52,7 @@ test-ai: ## FastAPI tests (pytest)
 health: ## Healthcheck all core services
 	bash infrastructure/scripts/healthcheck.sh || powershell -ExecutionPolicy Bypass -File infrastructure/scripts/healthcheck.ps1 || echo "run: bash infrastructure/scripts/healthcheck.sh"
 
-backup: ## Backup postgres + datasets volume manifest
+backup: ## Backup mysql + datasets volume manifest
 	bash infrastructure/scripts/backup.sh
 
 restore: ## Restore (usage: make restore FILE=backups/aidata_YYYYmmdd_HHMMSS.sql.gz)

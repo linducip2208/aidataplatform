@@ -21,11 +21,15 @@ python-multipart>=0.0.9
 
 sqlalchemy>=2.0
 alembic>=1.13
-# SQLAlchemy's postgresql dialect driver; never imported, resolved from the URL.
-psycopg2-binary>=2.9
-# Supplies the Vector column type used by app/database/models.py, so it must be
-# importable whenever those models are.
-pgvector>=0.3
+# SQLAlchemy's MySQL dialect drivers; never imported, resolved from the URL.
+# aiomysql serves the async DATABASE_URL, PyMySQL the sync SYNC_DATABASE_URL
+# (config.py and alembic/env.py rewrite async -> sync).
+aiomysql>=0.2
+PyMySQL>=1.1
+# pgvector is deliberately absent: app/database/models.py and
+# alembic/versions/0001 fall back to a JSON embedding column when it cannot be
+# imported, which is what makes the MySQL stack work. Installing pgvector would
+# switch the column back to Vector(1536) and break on MySQL.
 
 # Imported inside try/except, but /readiness reports on Redis and celery workers
 # need it -- keep pinned or the queue silently degrades to the inline stub.

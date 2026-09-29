@@ -1,12 +1,12 @@
 #!/bin/sh
-# Container entrypoint: wait for Postgres, apply Alembic migrations, hand off to the service.
+# Container entrypoint: wait for MySQL, apply Alembic migrations, hand off to the service.
 set -e
 
 APP_DIR="${APP_DIR:-/code}"
-PG_HOST="${PGHOST_FOR_MIGRATION:-postgres}"
-PG_PORT="${PGPORT_FOR_MIGRATION:-5432}"
-PG_WAIT_ATTEMPTS="${PG_WAIT_ATTEMPTS:-60}"
-PG_WAIT_INTERVAL="${PG_WAIT_INTERVAL:-2}"
+DB_HOST="${DBHOST_FOR_MIGRATION:-mysql}"
+DB_PORT="${DBPORT_FOR_MIGRATION:-3306}"
+DB_WAIT_ATTEMPTS="${DB_WAIT_ATTEMPTS:-60}"
+DB_WAIT_INTERVAL="${DB_WAIT_INTERVAL:-2}"
 
 log() { printf '[entrypoint] %s\n' "$*"; }
 warn() { printf '[entrypoint] WARNING: %s\n' "$*" >&2; }
@@ -18,19 +18,19 @@ fi
 
 tcp_open() {
     python -c 'import socket,sys; socket.create_connection((sys.argv[1], int(sys.argv[2])), 2).close()' \
-        "$PG_HOST" "$PG_PORT" >/dev/null 2>&1
+        "$DB_HOST" "$DB_PORT" >/dev/null 2>&1
 }
 
-wait_for_postgres() {
+wait_for_db() {
     attempt=1
-    while [ "$attempt" -le "$PG_WAIT_ATTEMPTS" ]; do
+    while [ "$attempt" -le "$DB_WAIT_ATTEMPTS" ]; do
         if tcp_open; then
-            log "postgres ${PG_HOST}:${PG_PORT} is accepting connections"
+            log "mysql ${DB_HOST}:${DB_PORT} is accepting connections"
             return 0
         fi
-        log "waiting for postgres ${PG_HOST}:${PG_PORT} (attempt ${attempt}/${PG_WAIT_ATTEMPTS})"
+        log "waiting for mysql ${DB_HOST}:${DB_PORT} (attempt ${attempt}/${DB_WAIT_ATTEMPTS})"
         attempt=$((attempt + 1))
-        sleep "$PG_WAIT_INTERVAL"
+        sleep "$DB_WAIT_INTERVAL"
     done
     return 1
 }
@@ -57,13 +57,13 @@ main() {
 
     if [ "${AUTO_MIGRATE:-true}" = "false" ]; then
         log "AUTO_MIGRATE=false, skipping migrations"
-    elif wait_for_postgres; then
+    elif wait_for_db; then
         run_migrations
     elif [ "${AUTO_MIGRATE_STRICT:-false}" = "true" ]; then
-        fatal "postgres not reachable at ${PG_HOST}:${PG_PORT} after ${PG_WAIT_ATTEMPTS} attempts"
+        fatal "mysql not reachable at ${DB_HOST}:${DB_PORT} after ${DB_WAIT_ATTEMPTS} attempts"
         exit 1
     else
-        warn "postgres not reachable at ${PG_HOST}:${PG_PORT} after ${PG_WAIT_ATTEMPTS} attempts, skipping migrations"
+        warn "mysql not reachable at ${DB_HOST}:${DB_PORT} after ${DB_WAIT_ATTEMPTS} attempts, skipping migrations"
     fi
 
     log "exec $*"

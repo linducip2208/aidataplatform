@@ -47,9 +47,20 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::get('/analytics/cohort', [AnalyticsController::class, 'cohort'])->name('api.analytics.cohort');
     Route::get('/analytics/branches', [AnalyticsController::class, 'branches'])->name('api.analytics.branches');
     Route::get('/analytics/finance', [AnalyticsController::class, 'finance'])->name('api.analytics.finance');
+    Route::get('/analytics/kpi/definitions', [AnalyticsController::class, 'kpiDefinitions'])->name('api.analytics.kpi-definitions');
+    Route::post('/analytics/kpi/definitions', [AnalyticsController::class, 'storeKpiDefinition'])->name('api.analytics.kpi-definitions.store');
+    Route::get('/analytics/kpi/history', [AnalyticsController::class, 'kpiHistory'])->name('api.analytics.kpi-history');
+    Route::post('/analytics/compare', [AnalyticsController::class, 'compare'])->name('api.analytics.compare');
+    Route::post('/analytics/drilldown', [AnalyticsController::class, 'drilldown'])->name('api.analytics.drilldown');
+    Route::post('/analytics/dashboards/resolve', [AnalyticsController::class, 'dashboard'])->name('api.analytics.dashboard');
+    Route::post('/analytics/export', [AnalyticsController::class, 'export'])->name('api.analytics.export');
 
     Route::get('/ml/models', [MlController::class, 'index'])->name('api.ml.models');
     Route::get('/ml/models/{modelId}', [MlController::class, 'show'])->name('api.ml.models.show');
+    Route::get('/ml/experiments', [MlController::class, 'experiments'])->name('api.ml.experiments');
+    Route::post('/ml/experiments/{experimentId}/compare', [MlController::class, 'compareExperiment'])->name('api.ml.experiments.compare');
+    Route::get('/ml/models/{modelId}/events', [MlController::class, 'events'])->name('api.ml.events');
+    Route::get('/ml/models/{modelId}/detail', [MlController::class, 'detail'])->name('api.ml.detail');
 
     // An LLM call and a model training run are the two expensive endpoints, so
     // they carry a tighter limit than the blanket one on the `api` group.
@@ -62,9 +73,13 @@ Route::middleware('auth:sanctum')->group(function (): void {
         Route::post('/datasets/{dataset}/commit', [DatasetController::class, 'commit'])->name('api.datasets.commit');
         Route::delete('/datasets/{dataset}', [DatasetController::class, 'destroy'])->name('api.datasets.destroy');
         Route::post('/ml/train', [MlController::class, 'train'])->middleware('throttle:expensive')->name('api.ml.train');
+        Route::post('/ml/experiments', [MlController::class, 'createExperiment'])->name('api.ml.experiments.store');
+        Route::post('/ml/batch-predict', [MlController::class, 'batchPredict'])->name('api.ml.batch-predict');
     });
 
     Route::middleware('role:admin')->group(function (): void {
         Route::post('/ml/models/{modelId}/promote', [MlController::class, 'promote'])->name('api.ml.models.promote');
+        Route::post('/ml/experiments/{experimentId}/promote', [MlController::class, 'promoteExperiment'])->name('api.ml.experiments.promote');
+        Route::post('/ml/models/{modelId}/rollback', [MlController::class, 'rollback'])->name('api.ml.rollback');
     });
 });

@@ -34,7 +34,8 @@ On the first run it stops after writing `.env` for you to edit. Fill in:
 APP_ENV=prod
 APP_DEBUG=false
 APP_URL=https://data.example.com
-POSTGRES_PASSWORD=<strong>
+MYSQL_PASSWORD=<strong>
+MYSQL_ROOT_PASSWORD=<strong>
 SERVICE_API_KEY=<python -c "import secrets; print(secrets.token_urlsafe(48))">
 APP_KEY=base64:<openssl rand -base64 32>
 GRAFANA_ADMIN_PASSWORD=<strong>
@@ -102,7 +103,7 @@ docker compose exec laravel php artisan platform:doctor
 (`APP_KEY`, `APP_ENV`, `APP_DEBUG`, `AI_ENGINE_URL`, `SERVICE_API_KEY`, `MAX_UPLOAD_MB`
 against the PHP limits, `QUALITY_THRESHOLD`), the engine (`/api/v1/health`,
 `/api/v1/readiness`, and an authenticated `engine_auth` round trip to `/api/v1/models`),
-the database (connection, the `vector` and `pg_trgm` extensions, the 27 engine tables, the
+the database (connection, the `utf8mb4` charset check, the 27 engine tables, the
 12 Laravel tables, row counts) and the filesystem (`storage/` and the datasets disk
 writable). It exits non-zero on any `fail`. `--json` emits the same report for a monitor.
 
@@ -142,7 +143,7 @@ Process supervision beyond `restart: unless-stopped`: `laravel-queue`, `laravel-
 images guarantee those tools, while `celery inspect ping` was rejected because it needs the
 broker on every probe). A wedged-but-alive worker still passes its probe; that case is observed
 as queue depth in Redis, never as health. `deploy-ubuntu24.sh` waits on all eight healthchecked
-services (`postgres redis laravel laravel-queue laravel-schedule fastapi celery-worker celery-beat
+services (`mysql redis laravel laravel-queue laravel-schedule fastapi celery-worker celery-beat
 nginx`); `prometheus`/`grafana` carry no healthcheck (their images guarantee no probe tool) and
 are only required to be Up. No hard `mem_limit`/`cpus` are set: a 500 MB upload plus ML training
 bursts legitimately exceed a modest static cap, and the leak control is `queue:work --max-time=3600`
@@ -183,7 +184,7 @@ contract still works, and `healthcheck.sh` only proves the processes answer.
 Run through this with `security.md` before go-live.
 
 - UFW allows only 22/80/443; `APP_DEBUG=false`; `APP_ENV=prod`.
-- Unique strong secrets for `POSTGRES_PASSWORD`, `SERVICE_API_KEY`, `APP_KEY`,
+- Unique strong secrets for `MYSQL_PASSWORD`, `MYSQL_ROOT_PASSWORD`, `SERVICE_API_KEY`, `APP_KEY`,
   `GRAFANA_ADMIN_PASSWORD` and the LLM keys. The shipped `.env.example` defaults are not
   secrets.
 - `REDIS_PASSWORD` is empty by design. The Redis healthcheck in `docker-compose.yml` runs

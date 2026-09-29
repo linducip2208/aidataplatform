@@ -12,7 +12,7 @@ Create Date: 2026-09-28
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from typing import NamedTuple
 
 import sqlalchemy as sa
 from alembic import op
@@ -32,18 +32,22 @@ except Exception:  # pragma: no cover - no pgvector: keep sqlite/local stacks wo
     _EMBEDDING_TYPE = sa.JSON()
 
 
-@dataclass(frozen=True)
-class Index:
+# Plain NamedTuples, not dataclasses: alembic loads version modules without
+# registering them in sys.modules, and dataclasses on Python 3.13+ resolve
+# string annotations through sys.modules (the KW_ONLY lookup), which crashes
+# the import with `AttributeError: 'NoneType' object has no attribute
+# '__dict__'`. NamedTuple evaluates no annotations at class creation and is
+# immune. Behaviour is identical (immutable struct holders with defaults).
+class Index(NamedTuple):
     name: str
     columns: tuple[str, ...]
     unique: bool = False
 
 
-@dataclass(frozen=True)
-class Table:
+class Table(NamedTuple):
     name: str
     columns: tuple[sa.Column, ...]
-    indexes: tuple[Index, ...] = field(default=())
+    indexes: tuple[Index, ...] = ()
 
 
 def _pk() -> sa.Column:

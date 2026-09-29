@@ -27,3 +27,68 @@ def test_quality_duplicates(duplicates_csv):
     res = run_quality_checks(df)
     assert res["score"] < 1.0
     assert any(i["rule"] == "duplicate" for i in res["issues"])
+
+
+class _StubResult:
+    def __init__(self, value):
+        self._value = value
+
+    def scalar(self):
+        return self._value
+
+
+class _StubSession:
+    """A session with a scripted dialect name and recorded statements."""
+
+    def __init__(self, dialect, scalar=1):
+        self._dialect = dialect
+        self._scalar = scalar
+        self.statements = []
+
+    def get_bind(self):
+        session = self
+
+        class _Bind:
+            class dialect:
+                name = session._dialect
+
+        return _Bind()
+
+    def execute(self, stmt, params=None):
+        self.statements.append(str(stmt))
+        return _StubResult(self._scalar)
+
+    def commit(self):
+        self.statements.append("COMMIT")
+
+    def close(self):
+        self.statements.append("CLOSE")
+
+
+def test_serialise_job_mysql_acquires_and_releases_get_lock():
+    from app.ingestion.etl import _serialise_job
+
+    db = _StubSession("mysql")
+    with _serialise_job(db, 7) as locked:
+        assert locked is True
+    assert any("GET_LOCK" in s for s in db.statements)
+    assert any("RELEASE_LOCK" in s for s in db.statements)
+
+
+def test_serialise_job_mysql_timeout_yields_false_without_releasing():
+    from app.ingestion.etl import _serialise_job
+
+    db = _StubSession("mysql", scalar=0)
+    with _serialise_job(db, 7) as locked:
+        assert locked is False
+    assert any("GET_LOCK" in s for s in db.statements)
+    assert not any("RELEASE_LOCK" in s for s in db.statements)
+
+
+def test_serialise_job_unknown_dialect_yields_false_without_touching_the_db():
+    from app.ingestion.etl import _serialise_job
+
+    db = _StubSession("sqlite")
+    with _serialise_job(db, 7) as locked:
+        assert locked is False
+    assert db.statements == []

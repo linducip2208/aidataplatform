@@ -58,6 +58,8 @@ Route::middleware('auth')->group(function (): void {
         Route::post('/datasets/{dataset}/quality', [DatasetWorkflowController::class, 'quality'])->name('datasets.quality');
         Route::post('/datasets/{dataset}/commit', [DatasetWorkflowController::class, 'commit'])->name('datasets.commit');
         Route::post('/ml/train', [MlController::class, 'train'])->name('ml.train');
+        Route::post('/ml/experiments', [MlController::class, 'createExperiment'])->name('ml.experiments.store');
+        Route::post('/ml/batch-predict', [MlController::class, 'batchPredict'])->name('ml.batch-predict');
         Route::post('/assistant/threads', [AssistantController::class, 'store'])->name('assistant.store');
         Route::delete('/datasets/{dataset}', [DatasetController::class, 'destroy'])->name('datasets.destroy');
         Route::delete('/assistant/threads/{thread}', [AssistantController::class, 'destroy'])->name('assistant.threads.destroy');
@@ -65,6 +67,8 @@ Route::middleware('auth')->group(function (): void {
 
     Route::middleware('role:admin')->group(function (): void {
         Route::post('/ml/{modelId}/promote', [MlController::class, 'promote'])->name('ml.promote');
+        Route::post('/ml/experiments/{experimentId}/promote', [MlController::class, 'promoteExperiment'])->name('ml.experiments.promote');
+        Route::post('/ml/{modelId}/rollback', [MlController::class, 'rollback'])->name('ml.rollback');
         Route::get('/admin/users', [UserController::class, 'index'])->name('admin.users.index');
         Route::post('/admin/users', [UserController::class, 'store'])->name('admin.users.store');
         Route::patch('/admin/users/{user}', [UserController::class, 'update'])->name('admin.users.update');

@@ -7,9 +7,9 @@ a preference: every router annotates its session as ``Session`` and calls
 Alembic drives a sync engine. ``DeclarativeBase`` in ``models.py`` is
 SQLAlchemy 2.0 *mapping* style and is driver-agnostic, so it does not imply async.
 
-Compose passes ``DATABASE_URL=postgresql+asyncpg://...``. A sync
+Compose passes ``DATABASE_URL=mysql+aiomysql://...``. A sync
 ``create_engine`` cannot use an async driver, so ``app.core.config`` rewrites it
-to ``postgresql+psycopg2://`` and prefers ``SYNC_DATABASE_URL`` when present
+to ``mysql+pymysql://`` and prefers ``SYNC_DATABASE_URL`` when present
 (the same precedence ``alembic/env.py`` uses). ``_assert_sync_url`` below turns
 any future regression into an import-time error instead of a request-time one.
 """

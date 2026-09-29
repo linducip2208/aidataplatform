@@ -73,7 +73,7 @@ ls -lh backups/            # the 02:00 cron should have added a dump
 docker compose logs --tail=100 celery-worker laravel-queue laravel-schedule
 ```
 
-`docker compose ps` should show eleven services Up: `postgres`, `redis`, `laravel`,
+`docker compose ps` should show eleven services Up: `mysql`, `redis`, `laravel`,
 `laravel-queue`, `laravel-schedule`, `fastapi`, `celery-worker`, `celery-beat`, `nginx`,
 `prometheus`, `grafana`. Only the first five plus `nginx` carry a healthcheck; the others are
 covered by the restart policy, so a container that is repeatedly restarting is the signal for
@@ -146,7 +146,7 @@ per-minute alert evaluation — and `laravel-schedule` runs only `sync:import-st
 `sync:quality`, which reconcile existing rows rather than deleting any. So `raw_uploads` rows
 and their stored files, old `fact_*` rows, `rag_chunks`, `data_quality_reports`, `alerts` and
 `audit_logs` all grow without limit. Plan a retention job before the warehouse outgrows the
-disk, and keep `docker system df` and the `pgdata` volume on the weekly review.
+disk, and keep `docker system df` and the `mysql-data` volume on the weekly review.
 
 Space per dataset is roughly: the copy Laravel stores, the copy the engine stores, and the
 `fact_*` rows the ETL produced. Those are three separate volumes' worth of growth for one
@@ -191,7 +191,7 @@ SELECT created_at, actor, detail->>'import_job_id' AS job, detail->>'filename' A
 FROM audit_logs WHERE action = 'dataset.uploaded' ORDER BY created_at DESC;
 ```
 
-Export with `psql \copy` or a CSV query. Note that `detail` also holds the column mappings
+Export with `mysql --batch -e` or a CSV query. Note that `detail` also holds the column mappings
 submitted for a dataset, so treat the extract as potentially sensitive.
 
 Known gap: there is no `ml.approvals` table and no engine-side audit trail — `audit_logs` is
@@ -234,5 +234,5 @@ bash tests/run.sh
 Read the release notes and run `tests/run.sh` before and after. Pin base-image bumps (PHP,
 Postgres, Redis, Prometheus, Grafana, Nginx) to a maintenance window and re-run the whole
 checklist after each, since only `application/**` and `ai-engine/**` are covered by unit
-tests. A `down -v` on Postgres destroys `pgdata`, the database password and all data — never
+tests. A `down -v` on MySQL destroys `mysql-data`, the database password and all data — never
 use it in production; change the password with `ALTER USER` instead.

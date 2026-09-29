@@ -120,6 +120,13 @@ and `failed` (validation rejected the file, or the task exhausted its retries).
 | GET | `/api/analytics/cohort` | `POST /api/v1/analytics/cohort` |
 | GET | `/api/analytics/branches` | `GET /api/v1/analytics/branches` |
 | GET | `/api/analytics/finance` | `GET /api/v1/analytics/finance` |
+| GET | `/api/analytics/kpi/definitions` | `GET /api/v1/analytics/kpi/definitions` |
+| POST | `/api/analytics/kpi/definitions` | `POST /api/v1/analytics/kpi/definitions` |
+| GET | `/api/analytics/kpi/history` | `GET /api/v1/analytics/kpi/history` |
+| POST | `/api/analytics/compare` | `POST /api/v1/analytics/compare` |
+| POST | `/api/analytics/drilldown` | `POST /api/v1/analytics/drilldown` |
+| POST | `/api/analytics/dashboards/resolve` | `POST /api/v1/analytics/dashboards/resolve` |
+| POST | `/api/analytics/export` | `POST /api/v1/analytics/export` |
 
 All accept `date_from`, `date_to`, `branch`, `category`, `granularity`
 (`daily`|`weekly`|`monthly`).
@@ -132,6 +139,14 @@ All accept `date_from`, `date_to`, `branch`, `category`, `granularity`
 | GET | `/api/ml/models/{modelId}` | any | model + `versions[]` |
 | POST | `/api/ml/train` | admin, analyst | `{model_type,name,params{}}`, `202` |
 | POST | `/api/ml/models/{modelId}/promote` | admin | governance gate, `{version_id,to_status}` |
+| GET | `/api/ml/experiments` | any | experiment list |
+| POST | `/api/ml/experiments` | admin, analyst | create experiment |
+| POST | `/api/ml/experiments/{experimentId}/compare` | any | compare experiments |
+| POST | `/api/ml/experiments/{experimentId}/promote` | admin | promote experiment |
+| POST | `/api/ml/models/{modelId}/rollback` | admin | rollback model |
+| GET | `/api/ml/models/{modelId}/events` | any | audit events |
+| GET | `/api/ml/models/{modelId}/detail` | any | model detail |
+| POST | `/api/ml/batch-predict` | admin, analyst | batch prediction |
 
 `model_type`: `forecast`, `churn`, `segmentation`, `anomaly`, `recommend`.
 `to_status`: `PRODUCTION`, `STAGED`, `ARCHIVED`.

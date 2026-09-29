@@ -10,7 +10,6 @@ use App\Models\User;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as ClientRequest;
-use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
@@ -311,10 +310,12 @@ class QueryCountTest extends TestCase
             'analytics.index' => [
                 '/api/v1/analytics/kpi', '/api/v1/analytics/trend', '/api/v1/analytics/rfm',
                 '/api/v1/analytics/abc', '/api/v1/analytics/cohort', '/api/v1/analytics/branches',
-                '/api/v1/analytics/finance',
+                '/api/v1/analytics/finance', '/api/v1/analytics/kpi/definitions',
+                '/api/v1/analytics/compare', '/api/v1/analytics/drilldown',
+                '/api/v1/analytics/dashboards/resolve',
             ],
-            'ml.index' => ['/api/v1/models'],
-            'reports.index' => ['/api/v1/ai/report'],
+            'ml.index' => ['/api/v1/models', '/api/v1/training/experiments'],
+            'reports.index' => ['/api/v1/ai/report', '/api/v1/analytics/kpi/history'],
         ];
 
         foreach ($expected as $page => $endpoints) {
@@ -526,7 +527,7 @@ class QueryCountTest extends TestCase
      */
     private function fakeEngine(): void
     {
-        Http::fake(function (ClientRequest $request): Response {
+        Http::fake(function (ClientRequest $request) {
             $this->engineUrls[] = $request->url();
 
             return Http::response(['success' => true, 'data' => $this->enginePayload($request)], 200);

@@ -12,7 +12,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 try:  # pgvector optional
     from pgvector.sqlalchemy import Vector  # type: ignore
     _HAS_PGVECTOR = True
-except Exception:  # pragma: no cover - fallback for sqlite/tests
+except Exception:  # pragma: no cover - fallback for sqlite/tests and MySQL stacks
     _HAS_PGVECTOR = False
     Vector = None  # type: ignore
 

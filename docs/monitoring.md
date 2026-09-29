@@ -20,16 +20,16 @@ process would refuse to start. Retention is the one value Compose interpolates, 
 
 Three further blocks are present but commented out, so they are not registered as targets at
 all rather than sitting DOWN: `laravel` (the application exposes no `/metrics` route),
-`redis` (`redis-exporter:9121`) and `postgres` (`postgres-exporter:9187`). To enable the
+`redis` (`redis-exporter:9121`) and `mysql` (`mysqld-exporter:9104`). To enable the
 exporters, uncomment the block and start the container on the compose network:
 
 ```bash
 docker run -d --network aidata-appnet --name redis-exporter \
   -e REDIS_ADDR=redis://redis:6379 oliver006/redis_exporter
 
-docker run -d --network aidata-appnet --name postgres-exporter \
-  -e DATA_SOURCE_NAME="postgresql://aidata:${POSTGRES_PASSWORD}@postgres:5432/aidata?sslmode=disable" \
-  prometheuscommunity/postgres-exporter
+docker run -d --network aidata-appnet --name mysqld-exporter \
+  -e DATA_SOURCE_NAME="aidata:${MYSQL_PASSWORD}@(mysql:3306)/aidata" \
+  prom/mysqld-exporter
 ```
 
 `redis-exporter` needs the password in `REDIS_ADDR` once `REDIS_PASSWORD` is set. To clear
@@ -100,7 +100,7 @@ SELECT count(*) FROM data_quality_reports WHERE created_at > now() - interval '2
 
 | Service | Probe | Consequence of failing |
 |---|---|---|
-| `postgres` | `pg_isready` | Everything depending on it blocks |
+| `mysql` | `mysqladmin ping` | Everything depending on it blocks |
 | `redis` | `redis-cli ping`, with `-a "$REDIS_PASSWORD"` when one is set | `laravel`, `laravel-queue`, `laravel-schedule`, `fastapi` and the Celery containers block on `service_healthy` |
 | `laravel` | `GET /up` **and** `public/build/manifest.json` exists **and** `storage/framework/migrate_failed` does not | `nginx`, `laravel-queue` and `laravel-schedule` block |
 | `laravel-queue` | process probe: `ps aux \| grep -q '[q]ueue:work'` (BusyBox `ps` is guaranteed in the PHP image) | nothing blocks on it; unhealthy means the datasets/default consumer is gone |
@@ -143,7 +143,7 @@ remedy line for every non-pass, and exits non-zero if anything failed:
   the exact remedy, and the key is redacted from the message. `engine_auth` exists because the
   engine's own health and readiness routes carry no auth dependency, so a key mismatch is
   invisible there.
-- **database** (5) — `database`, `database_extensions` (`vector` and `pg_trgm`), `engine_tables`
+- **database** (5) — `database`, `database_extensions` (the `utf8mb4` charset check), `engine_tables`
   (the 27 Alembic tables), `laravel_tables` (the 12 Laravel tables) and `records` (row counts for
   `users` and `datasets`).
 - **filesystem** (2) — `storage`, that `storage/`, `storage/framework`, `storage/logs` and
@@ -184,7 +184,7 @@ Prometheus metric by default and no exporter in this stack publishes Redis `llen
 ## 6. Logs
 
 ```bash
-docker compose logs -f <laravel|laravel-queue|laravel-schedule|fastapi|celery-worker|celery-beat|postgres|redis|nginx>
+docker compose logs -f <laravel|laravel-queue|laravel-schedule|fastapi|celery-worker|celery-beat|mysql|redis|nginx>
 make logs                    # tails all services, last 200 lines each
 ```
 

@@ -11,7 +11,7 @@ docker compose exec laravel php artisan platform:doctor
 
 `healthcheck.sh` probes Laravel `/up` plus `POST /api/login` and `GET /api/me`, the engine
 `/api/v1/health` and `/api/v1/readiness`, the `/ai-api/` prefix strip and Nginx `/health`,
-`pg_isready`, `redis-cli ping`, and that `celery-worker` and `celery-beat` are up. It does not
+`mysqladmin ping`, `redis-cli ping`, and that `celery-worker` and `celery-beat` are up. It does not
 probe `laravel-queue` or `laravel-schedule`; `docker compose ps` does.
 `platform:doctor` adds configuration, service-key, schema and storage checks, and prints a
 remedy line per failure. The engine-backed pages are all proxy calls, so a Laravel `502` or
@@ -26,13 +26,13 @@ remedy line per failure. The engine-backed pages are all proxy calls, so a Larav
 | `laravel-queue` or `laravel-schedule` keeps restarting | They run the same image as `laravel` with the entrypoint cleared. A crash is a plain `php artisan` error: `docker compose logs laravel-queue` and re-run the command by hand inside the container. `schedule:work` is an infinite loop, so a container that exited is genuinely broken. |
 | Stack never finishes starting, `redis` unhealthy | Fixed in the current `docker-compose.yml`: the healthcheck runs `redis-cli -a "$REDIS_PASSWORD" ping` when the variable is non-empty, and so does `healthcheck.sh`. If you pinned an older compose file, add `-a` yourself. |
 | `nginx` 502 | Upstreams not healthy yet (30 s start period) — wait, then `healthcheck.sh`. Otherwise the `default.conf` mount path is wrong. |
-| `postgres` auth failed after changing `POSTGRES_PASSWORD` | `pgdata` keeps the first-boot password. `docker compose exec postgres psql -c "ALTER USER aidata PASSWORD 'new';"` and update `.env`. `docker compose down -v` fixes it and destroys all data. |
+| `mysql` auth failed after changing `MYSQL_PASSWORD` | `mysql-data` keeps the first-boot password. `docker compose exec mysql mysql -u root -p -e "ALTER USER 'aidata'@'%' IDENTIFIED BY 'new';"` and update `.env`. `docker compose down -v` fixes it and destroys all data. |
 | `celery-beat` crash-loops, "Cannot load the scheduler class" | `CELERY_BEAT_SCHEDULER=redbeat.RedBeatScheduler`, and `redbeat` is not in `ai-engine/requirements.txt`. Use `celery.beat.PersistentScheduler`. |
 | `celery-worker` crash-loops on Windows | Needs the solo pool: `-P solo`. |
 | `fastapi` `/api/v1/health` returns `200` but business calls fail | `/health` is deliberately unauthenticated. A green health check proves nothing about key enforcement — see §2. |
 | `platform:doctor` reports missing engine tables | `alembic upgrade head` was never applied. `make migrate`, then re-run the doctor. |
 | `platform:doctor` reports missing Laravel tables | `php artisan migrate --force`. The Laravel image runs it on start, so this usually means a migration failed — check `docker compose logs laravel`. |
-| `platform:doctor` reports `missing extension(s): vector, pg_trgm` | `CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;` as a superuser against the database, or delete the `pgdata` volume and let `infrastructure/docker/postgres/init.sql` run again. |
+| `platform:doctor` reports a non-utf8mb4 charset | `ALTER DATABASE aidata CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`, or delete the `mysql-data` volume and let the compose `command:` flags recreate it with utf8mb4. |
 
 ## 2. Auth and roles
 
@@ -94,7 +94,7 @@ remedy line per failure. The engine-backed pages are all proxy calls, so a Larav
 ## 6. Observability
 
 `infrastructure/monitoring/prometheus.yml` registers only two active jobs — `fastapi` and
-`prometheus`. The `laravel`, `redis` and `postgres` blocks are commented out, so those targets
+`prometheus`. The `laravel`, `redis` and `mysql` blocks are commented out, so those targets
 are absent rather than DOWN: Laravel exposes no `/metrics` route and neither exporter is in the
 compose file. The engine target is the only one that resolves, and it emits only
 `http_requests_total` and `http_request_latency_seconds` — every other panel in the shipped

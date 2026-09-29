@@ -560,10 +560,14 @@ class PlatformHealth
     /** @return array{status: string, detail: string, remedy: string|null, group: string} */
     private function databaseExtensions(): array
     {
-        $skip = $this->skipUnlessPostgres();
+        $skip = $this->skipUnlessServerDatabase();
 
         if ($skip !== null) {
             return $skip;
+        }
+
+        if ((string) DB::connection()->getDriverName() === 'mysql') {
+            return $this->mysqlCharset();
         }
 
         try {
@@ -590,19 +594,48 @@ class PlatformHealth
         return $this->ok('vector and pg_trgm are installed', 'database');
     }
 
+    /**
+     * The MySQL counterpart of the extension check: MySQL needs no server
+     * extensions (RAG embeddings are stored as JSON), so what is verified
+     * instead is the charset the whole stack assumes (utf8mb4).
+     *
+     * @return array{status: string, detail: string, remedy: string|null, group: string}
+     */
+    private function mysqlCharset(): array
+    {
+        try {
+            $rows = DB::select('select @@character_set_database as charset, @@collation_database as collation');
+        } catch (Throwable $exception) {
+            return $this->down('cannot read the database charset: '.$this->redact($exception->getMessage()), 'check the database role has permission for session variables', 'database');
+        }
+
+        $charset = strtolower((string) ($rows[0]->charset ?? ''));
+        $collation = strtolower((string) ($rows[0]->collation ?? ''));
+
+        if ($charset !== 'utf8mb4') {
+            return $this->warn(
+                'database charset is '.$charset.' ('.$collation.'), the stack expects utf8mb4',
+                'run `ALTER DATABASE '.DB::connection()->getDatabaseName().' CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`',
+                'database',
+            );
+        }
+
+        return $this->ok('database charset is utf8mb4 ('.$collation.')', 'database');
+    }
+
     /** @return array{status: string, detail: string, remedy: string|null, group: string} */
     private function engineTables(): array
     {
-        $skip = $this->skipUnlessPostgres();
+        $skip = $this->skipUnlessServerDatabase();
 
         if ($skip !== null) {
             return $skip;
         }
 
         try {
-            $present = $this->tablesInPostgres();
+            $present = $this->tablesInServerDatabase();
         } catch (Throwable $exception) {
-            return $this->down('cannot list PostgreSQL tables: '.$this->redact($exception->getMessage()), 'check the database role can read information_schema', 'database');
+            return $this->down('cannot list database tables: '.$this->redact($exception->getMessage()), 'check the database role can read information_schema', 'database');
         }
 
         $missing = array_values(array_diff(self::ENGINE_TABLES, $present));
@@ -659,7 +692,7 @@ class PlatformHealth
             $users = $this->hasTable('users') ? DB::table('users')->count() : null;
             $datasets = $this->hasTable('datasets') ? DB::table('datasets')->count() : null;
         } catch (Throwable $exception) {
-            return $this->warn('cannot count rows: '.$this->redact($exception->getMessage()), 'check the database role has SELECT on the public schema', 'database');
+            return $this->warn('cannot count rows: '.$this->redact($exception->getMessage()), 'check the database role has SELECT on the database schema', 'database');
         }
 
         if ($users === null && $datasets === null) {
@@ -804,12 +837,13 @@ class PlatformHealth
     }
 
     /**
-     * The engine schema only ever lives in Postgres, so every driver-specific
-     * check degrades to a note instead of a false alarm on sqlite test runs.
+     * The engine schema only ever lives in the server database (MySQL in this
+     * stack, PostgreSQL in older deployments), so every driver-specific check
+     * degrades to a note instead of a false alarm on sqlite test runs.
      *
      * @return array{status: string, detail: string, remedy: string|null, group: string}|null
      */
-    private function skipUnlessPostgres(): ?array
+    private function skipUnlessServerDatabase(): ?array
     {
         if (! $this->isReachable()) {
             return $this->warn('skipped: the database connection failed, see the "database" check', 'fix the connection first', 'database');
@@ -817,10 +851,10 @@ class PlatformHealth
 
         $driver = (string) DB::connection()->getDriverName();
 
-        if ($driver !== 'pgsql') {
+        if ($driver !== 'pgsql' && $driver !== 'mysql') {
             return $this->warn(
-                'skipped: the connection driver is '.$driver.', the engine schema lives in PostgreSQL',
-                'point DB_CONNECTION at pgsql to check the engine tables, or run the doctor against the production database',
+                'skipped: the connection driver is '.$driver.', the engine schema lives in the server database',
+                'point DB_CONNECTION at mysql to check the engine tables, or run the doctor against the production database',
                 'database',
             );
         }
@@ -829,14 +863,20 @@ class PlatformHealth
     }
 
     /** @return list<string> */
-    private function tablesInPostgres(): array
+    private function tablesInServerDatabase(): array
     {
-        $rows = DB::select(
-            "select table_name from information_schema.tables where table_schema in (current_schema(), 'public')"
-        );
+        if ((string) DB::connection()->getDriverName() === 'mysql') {
+            $rows = DB::select('select table_name from information_schema.tables where table_schema = database()');
+        } else {
+            $rows = DB::select(
+                "select table_name from information_schema.tables where table_schema in (current_schema(), 'public')"
+            );
+        }
 
+        // MySQL's information_schema returns TABLE_NAME in upper case while
+        // Postgres folds it to lower case; read whichever is present.
         return array_map(
-            static fn (object $row): string => strtolower((string) $row->table_name),
+            static fn (object $row): string => strtolower((string) ($row->table_name ?? $row->TABLE_NAME ?? '')),
             $rows,
         );
     }

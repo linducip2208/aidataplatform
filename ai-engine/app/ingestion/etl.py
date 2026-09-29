@@ -45,7 +45,12 @@ DATASET_TYPES = FACT_DATASETS + DIM_DATASETS
 
 @contextmanager
 def _serialise_job(db_session, import_job_id: int | None) -> Iterator[bool]:
-    """Hold a Postgres advisory lock for the whole purge-and-load window.
+    """Hold a serialisation lock for the whole purge-and-load window.
+
+    Postgres uses an advisory lock, MySQL `GET_LOCK()`; both are session-scoped,
+    which means they survive a rollback and would leak to whoever borrows the
+    pooled connection next. Any other dialect (sqlite in tests) yields False and
+    the ETL proceeds without the lock.
 
     The purge and every chunk commit separately, so a transaction-scoped lock
     would be released before the inserts began. Nothing in the schema enforces
@@ -66,6 +71,35 @@ def _serialise_job(db_session, import_job_id: int | None) -> Iterator[bool]:
         dialect = db_session.get_bind().dialect.name
     except Exception:
         yield False
+        return
+
+    if dialect == "mysql":
+        # Same contract as the Postgres branch below: a session-scoped named
+        # lock, released in a finally, connection discarded when the release
+        # itself fails. GET_LOCK returns 1 on acquisition, 0 on timeout and
+        # NULL on error; only 1 means "locked".
+        key = f"aidata_import_{import_job_id}"
+        try:
+            acquired = db_session.execute(text("SELECT GET_LOCK(:key, 10)"), {"key": key}).scalar()
+        except Exception:
+            yield False
+            return
+        if acquired != 1:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            try:
+                db_session.execute(text("SELECT RELEASE_LOCK(:key)"), {"key": key})
+                db_session.commit()
+            except Exception:
+                log.error("could not release the MySQL lock for import_job %s; "
+                          "discarding the connection so the lock is not leaked", import_job_id)
+                try:
+                    db_session.close()
+                except Exception:
+                    pass
         return
 
     if dialect != "postgresql":

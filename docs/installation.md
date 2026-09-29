@@ -8,7 +8,7 @@ Windows). The production Ubuntu path is in `deployment.md`. For the stack topolo
 
 1. Install Docker Desktop 4.30+ (Windows: enable the WSL2 backend) or Docker Engine 26+ with
    Compose v2. Budget 8 GB RAM and 20 GB disk. Free host ports: 80, 443, 8080, 8001, 9090,
-   3000, 5432, 6379.
+   3000, 3306, 6379.
 2. Clone and create the root `.env`:
 
 ```bash
@@ -27,7 +27,8 @@ cp .env.example .env
 4. Edit `.env`. Minimum for a working install:
 
 ```
-POSTGRES_PASSWORD=<strong>
+MYSQL_PASSWORD=<strong>
+MYSQL_ROOT_PASSWORD=<strong>
 SERVICE_API_KEY=<python -c "import secrets; print(secrets.token_urlsafe(48))">
 APP_KEY=<base64:...>
 ```
@@ -64,7 +65,8 @@ bash infrastructure/scripts/healthcheck.sh
 
    `healthcheck.sh` probes `GET /up` on Laravel, `POST /api/login` + `GET /api/me` with the
    seeded admin, `GET /api/v1/health` and `GET /api/v1/readiness` on the engine, the
-   `/ai-api/` prefix strip through Nginx, Nginx `GET /health`, `pg_isready`, `redis-cli ping`
+   `/ai-api/` prefix strip through Nginx, Nginx `GET /health`, `mysqladmin ping`,
+   `redis-cli ping`
    (authenticated when `REDIS_PASSWORD` is set), and that `celery-worker` and `celery-beat` are
    up. It does not probe `laravel-queue` or `laravel-schedule`; check those with
    `docker compose ps`. On Windows use
@@ -96,7 +98,7 @@ docker compose exec laravel php artisan platform:doctor
 | `http://localhost:3000` | Grafana (`admin` / `$GRAFANA_ADMIN_PASSWORD`) |
 
 The three seeded demo accounts are listed in `README.md`; sign in at
-`http://localhost/login`. If `pg_isready` or `redis-cli ping` fail, go to
+`http://localhost/login`. If `mysqladmin ping` or `redis-cli ping` fail, go to
 `troubleshooting.md`.
 
 ### Engine variables
@@ -143,18 +145,17 @@ Compose.
 Laragon supplies PHP, PostgreSQL and Redis; a venv supplies the engine. You also need
 Node.js 20+ and Python 3.13.
 
-1. Laragon: full edition, PHP 8.3 or 8.4, start PostgreSQL and Redis. Create the database
-   `aidata` and enable the extensions:
+1. Laragon: full edition, PHP 8.3 or 8.4, start MySQL and Redis. Create the database
+   `aidata` with `utf8mb4`:
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS vector;
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE DATABASE IF NOT EXISTS aidata CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```
 
-   `vector` needs the pgvector binaries for your PostgreSQL build; without them the engine
-   still runs and stores `rag_chunks.embedding` as JSONB, so retrieval falls back to keyword
-   matching. If installing pgvector locally is a hassle, run only PostgreSQL in Docker and
-   keep PHP on the host.
+   No database extension is needed: the engine stores `rag_chunks.embedding` as JSON and
+   scores retrieval in Python. (The optional `pgvector` package would switch the column to
+   `Vector(1536)` — do not install it against MySQL.) If running the engine
+   locally is a hassle, run only MySQL in Docker and keep PHP on the host.
 
 2. Laravel:
 

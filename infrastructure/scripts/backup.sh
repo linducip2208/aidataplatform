@@ -1,33 +1,33 @@
 #!/bin/sh
-# AIDataPlatform backup: Postgres dump (gzipped) plus a manifest of what is running.
+# AIDataPlatform backup: MySQL dump (gzipped) plus a manifest of what is running.
 #
 # Usage: bash infrastructure/scripts/backup.sh
 #        bash infrastructure/scripts/backup.sh --verify-only <archive.sql.gz>
 # Output: <BACKUP_DIR>/aidata_YYYYmmdd_HHMMSS.sql.gz (+ .manifest.txt)
 #
-# --verify-only validates an EXISTING archive (gzip integrity, pg_dump header,
+# --verify-only validates an EXISTING archive (gzip integrity, mysqldump header,
 # SQL presence) and exits without touching Docker or the database. Exit 0 means
 # "this file would be accepted by restore.sh"; exit 1 means "refused, with the
 # reason on stderr". It exists so a cron job or a drill can prove a stored
 # backup is still replayable without replaying it.
 #
 # Env: BACKUP_DIR, BACKUP_RETENTION_DAYS, BACKUP_S3_BUCKET, BACKUP_S3_PREFIX,
-#      VOLUME_PREFIX, POSTGRES_USER, POSTGRES_DB
+#      VOLUME_PREFIX, MYSQL_USER, MYSQL_DATABASE, MYSQL_PASSWORD
 #
 # Why this is shaped the way it is:
 #
 #  * The dump is written to a .part file, verified, compressed, verified again
 #    and only then renamed into place. An archive that exists under its final
 #    name is, by construction, one that passed every check below. The dump is
-#    NOT piped into gzip: POSIX sh has no `set -o pipefail`, so `pg_dump | gzip`
-#    reports gzip's exit status and leaves an empty .gz behind when pg_dump
-#    died - the exact failure a backup must never have.
+#    NOT piped into gzip: POSIX sh has no `set -o pipefail`, so
+#    `mysqldump | gzip` reports gzip's exit status and leaves an empty .gz
+#    behind when mysqldump died - the exact failure a backup must never have.
 #  * An empty file is not a valid dump either, so the .part is checked for the
-#    `PostgreSQL database dump` header pg_dump always emits and for at least
+#    `-- MySQL dump` header mysqldump always emits and for at least
 #    one SQL statement. A zero-row database is legitimate and still passes
 #    (its header + SET statements are real SQL); a truncated or error-page file
 #    does not.
-#  * `pg_dump --clean --if-exists` embeds DROP statements, so a dump is meant
+#  * `mysqldump --add-drop-table` embeds DROP statements, so a dump is meant
 #    to be replayed over an existing database by restore.sh.
 #
 # EXIT CODES:
@@ -37,7 +37,7 @@
 #      been removed, so there is no archive to restore from (--verify-only: the
 #      named archive failed validation, with the reason on stderr)
 #   2  the backup could not be started: no docker, no Compose v2, or the
-#      postgres service is not running
+#      mysql service is not running
 set -eu
 
 EXIT_OK=0
@@ -74,7 +74,7 @@ discard() {
 # ---------------------------------------------------------------------------
 # --verify-only: validate an existing archive and stop. No docker, no database.
 # The four checks are the same ones a fresh dump passes in steps 2-3 below
-# (gzip integrity, decompress, pg_dump header, SQL present), so "verified" here
+# (gzip integrity, decompress, mysqldump header, SQL present), so "verified" here
 # means restore.sh section 1 would accept this file.
 # ---------------------------------------------------------------------------
 VERIFY_ONLY=0
@@ -111,20 +111,20 @@ if [ "$VERIFY_ONLY" -eq 1 ]; then
         rm -rf "$_vwork"
         die "cannot decompress $VERIFY_FILE (gunzip exit $_vrc): $_verr"
     fi
-    if ! grep -q 'PostgreSQL database dump' "$_vsql"; then
+    if ! grep -q 'MySQL dump' "$_vsql"; then
         _vbytes=$(wc -c < "$_vsql" | tr -d ' ')
         rm -rf "$_vwork"
-        die "$VERIFY_FILE decompressed to $_vbytes bytes with no 'PostgreSQL database dump' header; this is not a pg_dump output"
+        die "$VERIFY_FILE decompressed to $_vbytes bytes with no 'MySQL dump' header; this is not a mysqldump output"
     fi
-    if ! grep -qE '^(SET|CREATE|ALTER|COPY|DROP|LOCK|SELECT) ' "$_vsql"; then
+    if ! grep -qE '^(SET|CREATE|ALTER|DROP|LOCK|INSERT|SELECT|USE) ' "$_vsql"; then
         rm -rf "$_vwork"
-        die "$VERIFY_FILE has the pg_dump header but no SQL statements; it looks truncated"
+        die "$VERIFY_FILE has the mysqldump header but no SQL statements; it looks truncated"
     fi
     _vbytes=$(wc -c < "$_vsql" | tr -d ' ')
     _vtables=$(grep -c '^CREATE TABLE ' "$_vsql" || true)
-    _vcopy=$(grep -c '^COPY ' "$_vsql" || true)
+    _vinserts=$(grep -c '^INSERT ' "$_vsql" || true)
     rm -rf "$_vwork"
-    echo "[backup] RESULT=verified file=$VERIFY_FILE bytes_uncompressed=$_vbytes create_table=$_vtables copy_blocks=$_vcopy"
+    echo "[backup] RESULT=verified file=$VERIFY_FILE bytes_uncompressed=$_vbytes create_table=$_vtables inserts=$_vinserts"
     echo "[backup] note: the dump covers the database only; datasets/models files are NOT in it (volume snapshot, docs/backup-restore.md section 5)."
     exit "$EXIT_OK"
 fi
@@ -138,12 +138,12 @@ command -v docker >/dev/null 2>&1 \
 docker compose version >/dev/null 2>&1 \
     || cannot_run "'docker compose' is unavailable (Compose v2 plugin missing or daemon down)"
 
-pg_status=$(docker compose ps -a --format '{{.Service}} {{.Status}}' 2>/dev/null \
-    | awk '$1 == "postgres" { sub(/^[^ ]+ /, ""); print; exit }')
-case "$pg_status" in
+db_status=$(docker compose ps -a --format '{{.Service}} {{.Status}}' 2>/dev/null \
+    | awk '$1 == "mysql" { sub(/^[^ ]+ /, ""); print; exit }')
+case "$db_status" in
     Up* | running*) ;;
-    "")  cannot_run "no 'postgres' service in the compose project at $ROOT_DIR" ;;
-    *)   cannot_run "the postgres service is '$pg_status'; start it with: docker compose up -d postgres" ;;
+    "")  cannot_run "no 'mysql' service in the compose project at $ROOT_DIR" ;;
+    *)   cannot_run "the mysql service is '$db_status'; start it with: docker compose up -d mysql" ;;
 esac
 
 mkdir -p "$BACKUP_DIR" || die "cannot create $BACKUP_DIR"
@@ -159,60 +159,64 @@ if [ -f .env ]; then
     . ./.env
     set +a
 fi
-PGUSER="${POSTGRES_USER:-aidata}"
-PGDB="${POSTGRES_DB:-aidata}"
+DBUSER="${MYSQL_USER:-aidata}"
+DBNAME="${MYSQL_DATABASE:-aidata}"
+# Passed as MYSQL_PWD (not -p on the command line) so the password never shows
+# in `ps` output and mysqldump stays quiet on stderr.
+DBPASS="${MYSQL_PASSWORD:-changeme}"
 
 WARN=0
 warn() { echo "[backup] WARN: $*" >&2; WARN=$((WARN + 1)); }
 
 # ---------------------------------------------------------------------------
-# 1) Dump to .part. A non-zero exit here means pg_dump failed or the container
+# 1) Dump to .part. A non-zero exit here means mysqldump failed or the container
 #    went away mid-dump; either way the .part is discarded, never kept.
 # ---------------------------------------------------------------------------
-echo "[backup] dumping postgres database '$PGDB' as user '$PGUSER' ..."
+echo "[backup] dumping mysql database '$DBNAME' as user '$DBUSER' ..."
 _dump_rc=0
 # `if ! cmd` would report the status of the `!`, not of cmd, so the status is
 # captured the other way round: with `|| _dump_rc=$?` a non-zero dump cannot
 # escape this branch.
-docker compose exec -T postgres pg_dump -U "$PGUSER" -d "$PGDB" --clean --if-exists \
+docker compose exec -T -e MYSQL_PWD="$DBPASS" mysql mysqldump -h 127.0.0.1 -u "$DBUSER" \
+    --single-transaction --routines --triggers --add-drop-table "$DBNAME" \
     > "$BACKUP_DIR/$DUMP_PART" 2> "$BACKUP_DIR/$DUMP_ERR" || _dump_rc=$?
 if [ "$_dump_rc" -ne 0 ]; then
     _err=$(tr '\n' ' ' < "$BACKUP_DIR/$DUMP_ERR" 2>/dev/null | cut -c1-400)
     discard "$BACKUP_DIR/$DUMP_PART"
     discard "$BACKUP_DIR/$DUMP_ERR"
-    die "pg_dump failed (exit $_dump_rc); no archive was written, so there is nothing to restore from${_err:+: $_err}"
+    die "mysqldump failed (exit $_dump_rc); no archive was written, so there is nothing to restore from${_err:+: $_err}"
 fi
 if [ -s "$BACKUP_DIR/$DUMP_ERR" ]; then
-    warn "pg_dump wrote to stderr: $(tr '\n' ' ' < "$BACKUP_DIR/$DUMP_ERR" | cut -c1-300)"
+    warn "mysqldump wrote to stderr: $(tr '\n' ' ' < "$BACKUP_DIR/$DUMP_ERR" | cut -c1-300)"
 fi
 discard "$BACKUP_DIR/$DUMP_ERR"
 
 # ---------------------------------------------------------------------------
-# 2) The .part must be non-empty AND look like a pg_dump. A zero-byte file, a
+# 2) The .part must be non-empty AND look like a mysqldump. A zero-byte file, a
 #    shell error that landed in the redirect, or a truncated stream all pass
 #    `-s` on nothing useful; only the header and a SQL statement prove it.
 # ---------------------------------------------------------------------------
 if [ ! -s "$BACKUP_DIR/$DUMP_PART" ]; then
     discard "$BACKUP_DIR/$DUMP_PART"
-    die "pg_dump produced an empty file; refusing to archive it (a restore from it would silently empty the database)"
+    die "mysqldump produced an empty file; refusing to archive it (a restore from it would silently empty the database)"
 fi
 DUMP_BYTES=$(wc -c < "$BACKUP_DIR/$DUMP_PART" | tr -d ' ')
-if ! grep -q 'PostgreSQL database dump' "$BACKUP_DIR/$DUMP_PART"; then
+if ! grep -q 'MySQL dump' "$BACKUP_DIR/$DUMP_PART"; then
     discard "$BACKUP_DIR/$DUMP_PART"
-    die "the dump is $DUMP_BYTES bytes but carries no 'PostgreSQL database dump' header; this is not a pg_dump output and will not be archived"
+    die "the dump is $DUMP_BYTES bytes but carries no 'MySQL dump' header; this is not a mysqldump output and will not be archived"
 fi
-if ! grep -qE '^(SET|CREATE|ALTER|COPY|DROP|LOCK|SELECT) ' "$BACKUP_DIR/$DUMP_PART"; then
+if ! grep -qE '^(SET|CREATE|ALTER|DROP|LOCK|INSERT|SELECT|USE) ' "$BACKUP_DIR/$DUMP_PART"; then
     discard "$BACKUP_DIR/$DUMP_PART"
-    die "the dump has the pg_dump header but no SQL statements; it looks truncated and will not be archived"
+    die "the dump has the mysqldump header but no SQL statements; it looks truncated and will not be archived"
 fi
 
 TABLES=$(grep -c '^CREATE TABLE ' "$BACKUP_DIR/$DUMP_PART" || true)
-COPY_BLOCKS=$(grep -c '^COPY ' "$BACKUP_DIR/$DUMP_PART" || true)
-echo "[backup] dump verified: $DUMP_BYTES bytes, $TABLES CREATE TABLE, $COPY_BLOCKS COPY blocks"
+INSERTS=$(grep -c '^INSERT ' "$BACKUP_DIR/$DUMP_PART" || true)
+echo "[backup] dump verified: $DUMP_BYTES bytes, $TABLES CREATE TABLE, $INSERTS INSERT statements"
 if [ "$TABLES" -eq 0 ]; then
     # Legitimate for a genuinely empty database, but worth saying out loud: it
     # is also what a restore into a half-migrated stack looks like from here.
-    warn "the dump contains no CREATE TABLE; '$PGDB' is empty or holds no tables - the archive is valid but restores an empty schema"
+    warn "the dump contains no CREATE TABLE; '$DBNAME' is empty or holds no tables - the archive is valid but restores an empty schema"
 fi
 
 # ---------------------------------------------------------------------------
@@ -246,14 +250,14 @@ echo "[backup] wrote $BACKUP_DIR/$DUMP_GZ ($GZ_BYTES bytes gz, from $DUMP_BYTES 
 echo "[backup] volume manifest ..."
 {
     echo "timestamp=$TS"
-    echo "database=$PGDB"
-    echo "database_user=$PGUSER"
+    echo "database=$DBNAME"
+    echo "database_user=$DBUSER"
     echo "dump_bytes=$DUMP_BYTES"
     echo "dump_gz_bytes=$GZ_BYTES"
     echo "create_table_statements=$TABLES"
-    echo "copy_blocks=$COPY_BLOCKS"
-    # Volume names come from the pgdata/datasets/models entries in docker-compose.yml.
-    echo "postgres_volume=${VOLUME_PREFIX:-aidata}-pgdata"
+    echo "insert_statements=$INSERTS"
+    # Volume names come from the mysql-data/datasets/models entries in docker-compose.yml.
+    echo "mysql_volume=${VOLUME_PREFIX:-aidata}-mysql-data"
     echo "datasets_volume=${VOLUME_PREFIX:-aidata}-datasets"
     echo "models_volume=${VOLUME_PREFIX:-aidata}-models"
     # STORAGE_PATH / MODEL_PATH are the paths compose mounts the named volumes
@@ -313,7 +317,7 @@ fi
 echo "[backup] RESULT=ok file=$DUMP_GZ bytes=$GZ_BYTES sha256=${CHECKSUM:-unavailable} warnings=$WARN"
 ls -lh "$BACKUP_DIR" 2>/dev/null | tail -5 || true
 
-# A pg_dump only covers the database. Anything on the datasets/models volumes
+# A mysqldump only covers the database. Anything on the datasets/models volumes
 # (raw uploads, model artefacts) is listed in the manifest but NOT archived;
 # add a volume backup here if those must be recoverable.
 exit "$EXIT_OK"

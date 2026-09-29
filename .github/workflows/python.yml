@@ -36,17 +36,20 @@ jobs:
       PYTHONPATH: ${{ github.workspace }}/ai-engine
       PYTHONDONTWRITEBYTECODE: "1"
     services:
-      postgres:
-        image: pgvector/pgvector:pg18
+      mysql:
+        image: mysql:8.0
         env:
-          POSTGRES_DB: aidata_test
-          POSTGRES_USER: aidata
-          POSTGRES_PASSWORD: test
+          MYSQL_DATABASE: aidata_test
+          MYSQL_USER: aidata
+          MYSQL_PASSWORD: test
+          MYSQL_ROOT_PASSWORD: test-root
         ports:
-          - 5432:5432
+          - 3306:3306
         options: >-
-          --health-cmd="pg_isready -U aidata -d aidata_test"
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -u root -ptest-root"
           --health-interval=10s --health-timeout=5s --health-retries=5
+          --default-authentication-plugin=mysql_native_password
+          --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
       redis:
         image: redis:7-alpine
         ports:
@@ -69,42 +72,22 @@ jobs:
       - name: Install dependencies
         # pytest>=8.0 and pytest-asyncio>=0.23 are already in requirements.txt
         # (ai-engine/pytest.ini sets asyncio_mode = auto), so no second install.
+        # aiomysql/PyMySQL come from the same file; pgvector is deliberately
+        # absent so the embedding column falls back to JSON (see requirements).
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Enable Postgres extensions
-        # The service container has no init.sql mount, so `vector` and `pg_trgm`
-        # are not created for us. tests/test_etl.py calls
-        # Base.metadata.create_all(engine) and app/database/models.py declares
-        # `embedding = mapped_column(Vector(1536))`, which fails without `vector`.
-        # Driven through psycopg2 (in requirements.txt) so no extra tooling.
-        run: |
-          python - <<'PY'
-          import psycopg2
-
-          conn = psycopg2.connect(
-              host="localhost", port=5432, dbname="aidata_test",
-              user="aidata", password="test",
-          )
-          conn.autocommit = True
-          with conn.cursor() as cur:
-              cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
-              cur.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
-          conn.close()
-          print("vector + pg_trgm enabled")
-          PY
-
       - name: Test (pytest)
         env:
-          # psycopg2, not asyncpg: ai-engine/app/database/connection.py builds the
+          # aiomysql, not asyncpg: ai-engine/app/database/connection.py builds the
           # SQLAlchemy engine straight from DATABASE_URL, and requirements.txt
-          # ships psycopg2-binary but no asyncpg. An asyncpg:// URL makes
-          # create_engine() resolve an uninstalled driver at connect time.
-          DATABASE_URL: postgresql+psycopg2://aidata:test@localhost:5432/aidata_test
+          # ships aiomysql/PyMySQL but no async driver for Postgres. An asyncpg://
+          # URL makes create_engine() resolve an uninstalled driver at connect time.
+          DATABASE_URL: mysql+aiomysql://aidata:test@localhost:3306/aidata_test
           # app/database/connection.py and alembic/env.py read this first; leaving
           # it unset would make them fall back to the value above.
-          SYNC_DATABASE_URL: postgresql+psycopg2://aidata:test@localhost:5432/aidata_test
+          SYNC_DATABASE_URL: mysql+pymysql://aidata:test@localhost:3306/aidata_test
           REDIS_URL: redis://localhost:6379/0
           CELERY_BROKER_URL: redis://localhost:6379/1
           SERVICE_API_KEY: ci-test-key

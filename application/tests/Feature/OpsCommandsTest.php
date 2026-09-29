@@ -248,12 +248,12 @@ class OpsCommandsTest extends TestCase
         $this->assertNotEmpty((string) $report['checked_at']);
     }
 
-    public function test_platform_doctor_degrades_the_postgres_only_checks_instead_of_failing_on_sqlite(): void
+    public function test_platform_doctor_degrades_the_server_only_checks_instead_of_failing_on_sqlite(): void
     {
         $this->assertSame('sqlite', DB::connection()->getDriverName());
 
         $this->artisan('platform:doctor')
-            ->expectsOutputToContain('skipped: the connection driver is sqlite, the engine schema lives in PostgreSQL')
+            ->expectsOutputToContain('skipped: the connection driver is sqlite, the engine schema lives in the server database')
             ->expectsOutputToContain('0 fail')
             ->doesntExpectOutputToContain('FAIL')
             ->assertExitCode(0);

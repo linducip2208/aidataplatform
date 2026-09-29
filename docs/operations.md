@@ -33,11 +33,11 @@ alerts as panels 6/13 (error rate/share) and 8 (scrape up).
 
 ## 2. Service map (11 services)
 
-`postgres pgvector:pg18`, `redis:7`, `laravel`, `laravel-queue`, `laravel-schedule`, `fastapi`,
+`mysql:8.0`, `redis:7`, `laravel`, `laravel-queue`, `laravel-schedule`, `fastapi`,
 `celery-worker`, `celery-beat`, `nginx`, `prometheus`, `grafana` — the eleven `services:` blocks
 in `docker-compose.yml`, all on `appnet`, all `restart: unless-stopped`.
 
-Dependency order that matters: `postgres`/`redis` healthy → `laravel`/`fastapi` healthy →
+Dependency order that matters: `mysql`/`redis` healthy → `laravel`/`fastapi` healthy →
 `nginx` + workers. `laravel-queue`/`laravel-schedule` additionally gate on `laravel` healthy
 (schema migrated + storage skeleton present before the first job logs). The engine is
 deliberately NOT a gate for `laravel-schedule` (scheduled commands preflight it themselves).
@@ -56,7 +56,7 @@ progress — a wedged-but-alive worker is a queue-depth symptom (§3.3), never a
    start; `AUTO_MIGRATE_STRICT=false` warns and starts anyway) vs `APP_ENV` rejection (unknown
    value raises at import) vs DB/Redis unreachable.
 3. `bash infrastructure/scripts/healthcheck.sh` §§4–5: liveness passing + health failing =
-   dependency down, not process down — check `postgres`/`redis` next, not the engine log.
+   dependency down, not process down — check `mysql`/`redis` next, not the engine log.
 4. `docker compose exec laravel php artisan platform:doctor` — the `engine_auth` check reports a
    `SERVICE_API_KEY` mismatch explicitly (engine health/readiness carry no auth, so a key
    mismatch is invisible there).
@@ -151,7 +151,7 @@ then (re-upload / retrain per the disaster table).
 | `CELERY_CONCURRENCY` (default 4) | threads per worker | Raise with RAM; ML tasks are memory-hungry. Recreate the worker after changing. |
 | `PHP_CLI_SERVER_WORKERS` (default 4) | `php artisan serve` forks | Exported by the entrypoint; a value living only in `application/.env` is never seen. |
 | `celery-beat` | exactly 1 | §3.4. |
-| `postgres` / `redis` | exactly 1 each | No replication in this stack; scale vertically (deployment §1 sizing). |
+| `mysql` / `redis` | exactly 1 each | No replication in this stack; scale vertically (deployment §1 sizing). |
 
 No hard `mem_limit`/`cpus` guard any of this (compose notes explain why); watch Grafana panel 12
 (one worker's CPU/RSS, not the container's — two-worker caveat) and panel 14 (FDs) plus host

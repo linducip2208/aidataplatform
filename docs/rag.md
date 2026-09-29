@@ -85,12 +85,13 @@ search in SQL — it reads the rows and scores them in the process. Two conseque
 
 - Retrieval is O(n) over the first 2000 chunks, and `top_k` is applied *after* scoring, so
   with more than 2000 chunks the tail is invisible to every query.
-- The `+0.05` keyword boost is a rerank on top of cosine, not a `pg_trgm` fusion. `pg_trgm`
-  is installed but unused by this code path.
+- The `+0.05` keyword boost is a rerank on top of cosine, computed in Python alongside
+  a BM25-lite keyword score — no database extension is involved in this code path.
 
-Keep the corpus small, or add a real index and a `ORDER BY embedding <=> :q LIMIT :k` query
-before scaling. The `pgvector` extension is already a hard requirement of
-`PlatformHealth::REQUIRED_EXTENSIONS`.
+Keep the corpus small, or add a real ANN index and an `ORDER BY embedding <=> :q LIMIT :k`
+query before scaling. On this stack the `embedding` column is plain `JSON` (the pgvector
+`Vector(1536)` type is only used when the optional `pgvector` package is installed, which
+the MySQL deployment deliberately does not do).
 
 ## 4. Changing the embedding model
 
@@ -110,8 +111,8 @@ that document's chunks in place, and delete the `rag_documents` rows you want go
 
 - Nothing prunes `rag_documents` or `rag_chunks`. Beat runs a placeholder nightly sync, an
   hourly AI report and the per-minute alert evaluation, none of which touch the corpus.
-  Storage is roughly the document text plus 4 KB per float4 embedding row — a
-  1536-dimension vector is ~6 KB, so a million chunks is several gigabytes in `pgdata`.
+  Storage is roughly the document text plus the JSON embedding per row —
+  a 1536-dimension vector is several KB as JSON, so a million chunks is several gigabytes in `mysql-data`.
 - Watch for the `2000`-chunk ceiling as the corpus grows. The first symptom is
   "irrelevant citations" rather than an error.
 - An offline hash-embedding corpus and an online API-embedding corpus must not be mixed:

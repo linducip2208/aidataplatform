@@ -52,9 +52,9 @@ jobs:
       run:
         working-directory: application
     # Set as real process env, NOT appended to .env. application/.env.example
-    # ships DB_CONNECTION=pgsql, and Laravel's dotenv loader is immutable, so an
-    # `echo "DB_CONNECTION=sqlite" >> .env` loses to the earlier `pgsql` line and
-    # the suite tries to reach 127.0.0.1:5432. Real env vars win over .env.
+    # ships DB_CONNECTION=mysql, and Laravel's dotenv loader is immutable, so an
+    # `echo "DB_CONNECTION=sqlite" >> .env` loses to the earlier `mysql` line and
+    # the suite tries to reach 127.0.0.1:3306. Real env vars win over .env.
     env:
       APP_ENV: testing
       APP_DEBUG: "false"
@@ -90,7 +90,7 @@ jobs:
           # pdo_sqlite/sqlite3: the whole suite runs on :memory: sqlite.
           # The rest mirror infrastructure/docker/laravel.Dockerfile so CI
           # exercises the same extensions production runs with.
-          extensions: pdo_sqlite, sqlite3, mbstring, pdo_pgsql, pgsql, redis, zip, gd, intl, bcmath
+          extensions: pdo_sqlite, sqlite3, mbstring, pdo_mysql, mysqli, redis, zip, gd, intl, bcmath
           coverage: none
           tools: composer:v2
 

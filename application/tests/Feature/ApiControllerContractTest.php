@@ -12,7 +12,9 @@ use Illuminate\Http\Client\Request as ClientRequest;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Testing\TestResponse;
 use Laravel\Sanctum\Sanctum;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 /**
@@ -571,7 +573,7 @@ class ApiControllerContractTest extends TestCase
      * @param  array<string, mixed>  $payload
      * @param  array<int, string>  $fields
      */
-    #[\PHPUnit\Framework\Attributes\DataProvider('validationCases')]
+    #[DataProvider('validationCases')]
     public function test_a_422_carries_errors_keyed_by_the_field_the_client_sent(
         string $method,
         string $uri,
@@ -806,7 +808,7 @@ class ApiControllerContractTest extends TestCase
      */
     private function keysOf(mixed $response): array
     {
-        $json = $response instanceof \Illuminate\Testing\TestResponse ? $response->json() : $response;
+        $json = $response instanceof TestResponse ? $response->json() : $response;
 
         $this->assertIsArray($json, 'Expected a JSON object at the top level of the response.');
 

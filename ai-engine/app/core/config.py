@@ -7,7 +7,7 @@ Two rules this module enforces:
 1. **One engine flavour.** The service is synchronous end to end
    (``Session.query`` in the routers, sync Celery tasks, sync Alembic), so
    ``database_url`` is normalised to a *sync* driver here. Compose passes
-   ``postgresql+asyncpg://``; a sync ``create_engine`` cannot use that, so the
+   ``mysql+aiomysql://``; a sync ``create_engine`` cannot use that, so the
    async driver is rewritten before any engine is built. ``SYNC_DATABASE_URL``
    wins when it is set, which is the same precedence ``alembic/env.py`` uses.
 2. **The caller's name wins.** Compose, ``application/config/ai_engine.php``,

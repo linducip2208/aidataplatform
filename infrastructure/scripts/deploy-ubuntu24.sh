@@ -40,7 +40,7 @@ WRITERS="laravel laravel-queue laravel-schedule fastapi celery-worker celery-bea
 # The services that carry a healthcheck in docker-compose.yml. Queue, schedule,
 # worker and beat carry lightweight process-level probes (ps / /proc + python);
 # the rest are only required to be Up.
-HEALTHCHECKED="postgres redis laravel laravel-queue laravel-schedule fastapi celery-worker celery-beat nginx"
+HEALTHCHECKED="mysql redis laravel laravel-queue laravel-schedule fastapi celery-worker celery-beat nginx"
 
 step() { echo; echo "=== [$1/9] $2 ==="; }
 fatal() { echo; echo "FATAL: $*" >&2; echo "The previous version is still what is serving; nothing was torn down." >&2; exit "$EXIT_STEP_FAILED"; }
@@ -170,7 +170,7 @@ if [ ! -f .env.example ]; then
 fi
 if [ ! -f .env ]; then
     cp .env.example .env || fatal "could not create .env from .env.example"
-    echo "!! EDIT .env now (POSTGRES_PASSWORD, REDIS_PASSWORD, SERVICE_API_KEY, LLM keys, APP_KEY, GRAFANA pw) then re-run this script."
+    echo "!! EDIT .env now (MYSQL_PASSWORD, MYSQL_ROOT_PASSWORD, REDIS_PASSWORD, SERVICE_API_KEY, LLM keys, APP_KEY, GRAFANA pw) then re-run this script."
     echo "   Generate the app key:   cd application && php -r \"echo 'base64:'.base64_encode(random_bytes(32)).PHP_EOL;\""
     echo "   Generate the service key: python3 -c 'import secrets; print(secrets.token_urlsafe(48))'"
     echo "!! Nothing has been deployed yet. Re-run this script after editing .env."
@@ -257,10 +257,10 @@ step 6 "pre-up backup (rollback point)"
 # A deploy that migrates the schema is the exact moment a pre-change dump
 # matters, and it is the only rollback point that exists afterwards. Skipped on
 # a genuinely fresh install, where there is no database to dump yet.
-if docker compose ps postgres --format '{{.Status}}' 2>/dev/null | grep -q '^Up'; then
+if docker compose ps mysql --format '{{.Status}}' 2>/dev/null | grep -q '^Up'; then
     bash infrastructure/scripts/backup.sh || fatal "the pre-deploy backup failed; refusing to deploy without a rollback point (see the [backup] FATAL above)"
 else
-    echo "postgres is not running yet (fresh install) - nothing to back up"
+    echo "mysql is not running yet (fresh install) - nothing to back up"
 fi
 
 step 7 "build + up"

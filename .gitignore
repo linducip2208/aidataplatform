@@ -80,4 +80,4 @@ Thumbs.db
 infrastructure/nginx/ssl/
 !infrastructure/nginx/ssl/.gitkeep
 grafana-data/
-pgdata/
+mysql-data/

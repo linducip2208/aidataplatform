@@ -79,7 +79,7 @@ commit `.env`, `*.pem` or `*.key`. Required in production:
 
 | Secret | Consequence if left at the default |
 |---|---|
-| `POSTGRES_PASSWORD` | The shipped value is a literal dev placeholder; the database is open to anything that reaches port 5432 |
+| `MYSQL_PASSWORD` / `MYSQL_ROOT_PASSWORD` | The shipped values are literal dev placeholders; the database is open to anything that reaches port 3306 |
 | `SERVICE_API_KEY` | A placeholder or empty value is treated as *not configured*, so every engine call fails with `401` and the platform is unusable. The shipped default is a known public string, which is worse than either |
 | `APP_KEY` | The Laravel entrypoint refuses to start without it, and every request would fail on the encrypter |
 | `GRAFANA_ADMIN_PASSWORD` | Graph panels and the Prometheus data behind them |
@@ -114,7 +114,7 @@ without reaching the engine, because proxying it would make the peer the nginx c
 which is on the internal network — and hand the full scrape to the internet. That is
 intentional; keep both directives, and if you want `/ai-api/` gone entirely, remove the
 `location` block. In Docker, `docker-compose.yml` publishes `fastapi` on host port 8001 and
-Postgres on 5432 and Redis on 6379 — the published engine port is the one real exposure,
+MySQL on 3306 and Redis on 6379 — the published engine port is the one real exposure,
 because it bypasses Nginx; bind those to `127.0.0.1` or drop the `ports:` entries so they
 are reachable only from the host and the compose network. UFW allows 22, 80 and 443.
 
@@ -167,7 +167,7 @@ whatever is in the warehouse to anyone allowed to ask a question.
 
 ## 5. Supply chain
 
-Base images are pinned to specific tags: `pgvector/pgvector:pg18`, `redis:7-alpine`,
+Base images are pinned to specific tags: `mysql:8.0`, `redis:7-alpine`,
 `nginx:1.27-alpine`, `prom/prometheus:v2.53.0`, `grafana:11.2.0`, `php:8.3-fpm-alpine`,
 `node:22-alpine` (frontend assets stage, not in the runtime image), `python:3.13-slim`.
 Laravel requires `php ^8.2` and `laravel/framework ^12.0`; the engine pins its Python

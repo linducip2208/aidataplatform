@@ -33,12 +33,12 @@ x-laravel-environment: &laravel-environment
   # laravel-queue, laravel-schedule and nginx down with it. Generate it once with
   # `php artisan key:generate`; .env.example documents it as required.
   # APP_KEY: ${APP_KEY}
-  DB_CONNECTION: pgsql
-  DB_HOST: postgres
-  DB_PORT: 5432
-  DB_DATABASE: ${POSTGRES_DB:-aidata}
-  DB_USERNAME: ${POSTGRES_USER:-aidata}
-  DB_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+  DB_CONNECTION: mysql
+  DB_HOST: mysql
+  DB_PORT: 3306
+  DB_DATABASE: ${MYSQL_DATABASE:-aidata}
+  DB_USERNAME: ${MYSQL_USER:-aidata}
+  DB_PASSWORD: ${MYSQL_PASSWORD:-changeme}
   REDIS_HOST: redis
   REDIS_PORT: 6379
   # "null" is the literal Laravel's env() maps to PHP null. An empty string
@@ -101,22 +101,25 @@ services:
   #     ports bypass nginx, so 0.0.0.0 would expose them off-box. Volume names
   #     keep the ${VOLUME_PREFIX:-aidata} prefix; every host value is
   #     ${VAR:-default} interpolated from the root .env.
-  postgres:
-    image: pgvector/pgvector:pg18
-    container_name: aidata-postgres
+  mysql:
+    image: mysql:8.0
+    container_name: aidata-mysql
     restart: unless-stopped
+    # mysql_native_password keeps older clients (PHP mysqlnd, PyMySQL) working
+    # without caching_sha2_password negotiation surprises.
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-aidata}
-      POSTGRES_USER: ${POSTGRES_USER:-aidata}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
-      PGDATA: /var/lib/postgresql/data/pgdata
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-aidata}
+      MYSQL_USER: ${MYSQL_USER:-aidata}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-changeme}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-changeme-root}
     volumes:
-      - pgdata:/var/lib/postgresql/data
-      - ./infrastructure/docker/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - mysql-data:/var/lib/mysql
+      - ./infrastructure/docker/mysql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${MYSQL_PORT:-3306}:3306"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-aidata} -d $${POSTGRES_DB:-aidata}"]
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p$$MYSQL_ROOT_PASSWORD"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -169,7 +172,7 @@ services:
     container_name: aidata-laravel
     restart: unless-stopped
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -210,7 +213,7 @@ services:
     container_name: aidata-laravel-queue
     restart: unless-stopped
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -259,7 +262,7 @@ services:
     container_name: aidata-laravel-schedule
     restart: unless-stopped
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -310,14 +313,14 @@ services:
     container_name: aidata-fastapi
     restart: unless-stopped
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
     environment:
       APP_ENV: ${APP_ENV:-production}
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-aidata}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-aidata}
-      SYNC_DATABASE_URL: postgresql://${POSTGRES_USER:-aidata}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-aidata}
+      DATABASE_URL: mysql+aiomysql://${MYSQL_USER:-aidata}:${MYSQL_PASSWORD:-changeme}@mysql:3306/${MYSQL_DATABASE:-aidata}
+      SYNC_DATABASE_URL: mysql+pymysql://${MYSQL_USER:-aidata}:${MYSQL_PASSWORD:-changeme}@mysql:3306/${MYSQL_DATABASE:-aidata}
       REDIS_URL: redis://:${REDIS_PASSWORD:-}@redis:6379/${REDIS_DB:-0}
       CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-}@redis:6379/${CELERY_BROKER_DB:-1}
       CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-}@redis:6379/${CELERY_RESULT_DB:-2}
@@ -345,8 +348,8 @@ services:
       MODEL_PATH: /code/data/models
       AUTO_MIGRATE: ${AUTO_MIGRATE:-true}
       AUTO_MIGRATE_STRICT: ${AUTO_MIGRATE_STRICT:-false}
-      PGHOST_FOR_MIGRATION: postgres
-      PGPORT_FOR_MIGRATION: 5432
+      DBHOST_FOR_MIGRATION: mysql
+      DBPORT_FOR_MIGRATION: 3306
     volumes:
       - ./ai-engine:/code
       - datasets-data:/code/data/datasets
@@ -383,13 +386,13 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      postgres:
+      mysql:
         condition: service_healthy
     command: celery -A app.workers.celery_app.celery_app worker --loglevel=info --concurrency=${CELERY_CONCURRENCY:-4} -Q ${CELERY_QUEUES:-default,imports,quality,ml,agent,rag}
     environment:
       APP_DIR: /code
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-aidata}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-aidata}
-      SYNC_DATABASE_URL: postgresql://${POSTGRES_USER:-aidata}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-aidata}
+      DATABASE_URL: mysql+aiomysql://${MYSQL_USER:-aidata}:${MYSQL_PASSWORD:-changeme}@mysql:3306/${MYSQL_DATABASE:-aidata}
+      SYNC_DATABASE_URL: mysql+pymysql://${MYSQL_USER:-aidata}:${MYSQL_PASSWORD:-changeme}@mysql:3306/${MYSQL_DATABASE:-aidata}
       REDIS_URL: redis://:${REDIS_PASSWORD:-}@redis:6379/${REDIS_DB:-0}
       CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-}@redis:6379/${CELERY_BROKER_DB:-1}
       CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-}@redis:6379/${CELERY_RESULT_DB:-2}
@@ -549,8 +552,8 @@ networks:
     driver: bridge
 
 volumes:
-  pgdata:
-    name: ${VOLUME_PREFIX:-aidata}-pgdata
+  mysql-data:
+    name: ${VOLUME_PREFIX:-aidata}-mysql-data
   redis-data:
     name: ${VOLUME_PREFIX:-aidata}-redis-data
   laravel-storage:

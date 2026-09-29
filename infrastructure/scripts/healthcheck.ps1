@@ -118,7 +118,7 @@ try {
     }
 
     # Exit-code-only probe, for tools whose exit status is the signal
-    # (pg_isready, redis-cli ping, busybox wget).
+    # (mysqladmin ping, redis-cli ping, busybox wget).
     function Get-ExitCode {
         param([string[]]$DockerArgs)
         $null = & docker compose @DockerArgs
@@ -132,7 +132,7 @@ try {
     foreach ($l in $psLines) {
         if ($l -match "^(\S+)\s+(.*)$") { $psMap[$Matches[1]] = $Matches[2] }
     }
-    foreach ($svc in @("postgres", "redis", "laravel", "laravel-queue", "laravel-schedule",
+    foreach ($svc in @("mysql", "redis", "laravel", "laravel-queue", "laravel-schedule",
                        "fastapi", "celery-worker", "celery-beat", "nginx", "prometheus", "grafana")) {
         if (-not $psMap.ContainsKey($svc)) {
             Bad $svc "not present in the compose project at $repoRoot - docker compose ps -a"
@@ -301,13 +301,16 @@ print("REDIS:" + str(checks.get("redis")))
         }
     }
 
-    # -- [8] postgres ---------------------------------------------------------
-    Write-Host "-- [8] postgres (pg_isready) --"
-    $pgUser = if ($env:POSTGRES_USER) { $env:POSTGRES_USER } else { "aidata" }
-    $pgDb = if ($env:POSTGRES_DB) { $env:POSTGRES_DB } else { "aidata" }
-    $c = Get-ExitCode @("exec", "-T", "postgres", "pg_isready", "-U", $pgUser, "-d", $pgDb)
-    if ($c -eq 0) { Ok "postgres pg_isready ($pgUser/$pgDb)" }
-    else { Bad "postgres pg_isready ($pgUser/$pgDb)" "pg_isready exit=$c - docker compose logs postgres | Select-Object -Last 30" }
+    # -- [8] mysql ------------------------------------------------------------
+    Write-Host "-- [8] mysql (mysqladmin ping) --"
+    $dbUser = if ($env:MYSQL_USER) { $env:MYSQL_USER } else { "aidata" }
+    $dbName = if ($env:MYSQL_DATABASE) { $env:MYSQL_DATABASE } else { "aidata" }
+    $dbPass = if ($env:MYSQL_PASSWORD) { $env:MYSQL_PASSWORD } else { "changeme" }
+    $env:MYSQL_PWD = $dbPass
+    $c = Get-ExitCode @("exec", "-T", "mysql", "mysqladmin", "-h", "127.0.0.1", "-u", $dbUser, "ping")
+    Remove-Item Env:\MYSQL_PWD -ErrorAction SilentlyContinue
+    if ($c -eq 0) { Ok "mysql ping ($dbUser@$dbName)" }
+    else { Bad "mysql ping ($dbUser@$dbName)" "mysqladmin exit=$c - docker compose logs mysql | Select-Object -Last 30" }
 
     # -- [9] redis ------------------------------------------------------------
     # redis-cli needs the password whenever REDIS_PASSWORD is set, and an empty

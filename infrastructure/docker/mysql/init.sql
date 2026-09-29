@@ -1,0 +1,21 @@
+-- AIDataPlatform MySQL bootstrap. Runs once, on first initialisation of the
+-- mysql-data volume, from /docker-entrypoint-initdb.d.
+--
+-- Table ownership, so this file does not overstate what it sets up:
+--   * Alembic (ai-engine/alembic/versions/0001_*) creates the engine tables.
+--   * Laravel (application/database/migrations/) creates users, sessions,
+--     cache, jobs, datasets, chat_*, audit_logs, personal_access_tokens.
+-- Nothing is created here: MYSQL_DATABASE, MYSQL_USER and MYSQL_PASSWORD from
+-- the container environment are provisioned by the image itself before this
+-- file runs, and the utf8mb4 charset/collation the app expects comes from the
+-- --character-set-server / --collation-server flags in docker-compose.yml.
+--
+-- Existing volumes never re-run it; apply changes with
+--   docker compose exec mysql mysql -u "$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" < file.sql
+--
+-- NOTE: the Postgres layout used to reserve empty `raw`, `staging`,
+-- `warehouse`, `analytics`, `ml` and `ai` schemas here. MySQL has no schemas,
+-- and every table lives in the single application database namespaced by
+-- prefix (raw_*, fact_*, ml_*, ...), so there is nothing to reserve.
+
+SELECT 1;

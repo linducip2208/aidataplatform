@@ -1,14 +1,14 @@
 # Backup & Restore
 
-Covers the PostgreSQL database, which holds every table both services own, plus the volumes
+Covers the MySQL database, which holds every table both services own, plus the volumes
 that a dump cannot capture. Test restores quarterly — a backup never restored is assumed
 broken. See `deployment.md` for the production cron and `security.md` for at-rest encryption.
 
 ## 1. What a backup actually covers
 
-| Data | In the `pg_dump`? | Notes |
+| Data | In the `mysqldump`? | Notes |
 |---|---|---|
-| Engine tables (`raw_uploads`, `import_jobs`, `fact_*`, `dim_*`, `ml_*`, `rag_*`, `ai_*`, `data_quality_reports`) | yes | `alembic`/`public` schema |
+| Engine tables (`raw_uploads`, `import_jobs`, `fact_*`, `dim_*`, `ml_*`, `rag_*`, `ai_*`, `data_quality_reports`) | yes | `alembic`, `aidata` database |
 | Laravel tables (`users`, `datasets`, `chat_*`, `audit_logs`, `sessions`, `cache`, `jobs`, `personal_access_tokens`) | yes | same database |
 | Uploaded files Laravel stored | **no** | `datasets-data` / `laravel-storage` volume |
 | The engine's own copy of each upload (`raw_uploads.stored_path`) | **no** | under the engine's `STORAGE_PATH` |
@@ -36,11 +36,10 @@ backups/aidata_20260928_020000.manifest.txt
 
 What the script does:
 
-1. Sources the root `.env` for `POSTGRES_USER` / `POSTGRES_DB` (only those two).
-2. `docker compose exec -T postgres pg_dump -U <user> -d <db> --clean --if-exists`, piped
-   through `gzip`. The dump includes the `CREATE EXTENSION` statements and the empty
-   `raw`/`staging`/`warehouse`/`analytics`/`ml`/`ai` schemas, so a restore into a fresh
-   database reproduces the full extension and schema state.
+1. Sources the root `.env` for `MYSQL_USER` / `MYSQL_DATABASE` / `MYSQL_PASSWORD`.
+2. `docker compose exec -T -e MYSQL_PWD=... mysql mysqldump --single-transaction --routines --triggers --add-drop-table`, piped
+   through `gzip`. The dump includes `DROP TABLE` statements, so a restore into an
+   existing database reproduces the full table state.
 3. Writes a manifest with the timestamp, `du -sh` of the Laravel datasets directory and the
    engine models directory, and the state of every container.
 4. If `BACKUP_S3_BUCKET` is set, `aws s3 cp` the dump; a failure warns and continues, leaving
@@ -77,11 +76,11 @@ bash infrastructure/scripts/restore.sh --verify-only backups/aidata_20260928_020
 
 The script resolves the path, checks it exists, sources `.env` for the database name, asks for
 confirmation (`y`), then pipes `gunzip -c` into
-`docker compose exec -T postgres psql -U <user> -d <db> -v ON_ERROR_STOP=1` in the live
-container. It restores over the running database — the `pg_dump --clean --if-exists` output
+`docker compose exec -T -i -e MYSQL_PWD=... mysql mysql` in the live
+container. It restores over the running database — the `mysqldump --add-drop-table` output
 drops and recreates the tables it knows about, so unrelated objects in the same database are
-left alone. `ON_ERROR_STOP=1` aborts on the first error, which means a partial restore is
-possible: check the psql output, not just the exit status.
+left alone. The client stops at the first error without rolling back, which means a partial restore is
+possible: check the mysql output, not just the exit status — and keep the safety dump the script takes first.
 
 Afterwards, always re-run the migrations. A dump taken before a schema change will not have
 the new columns:
@@ -109,12 +108,12 @@ WHERE table_name = 'audit_logs' ORDER BY ordinal_position;
 
 | Loss | Recovery |
 |---|---|
-| One table dropped or corrupted | Restore the dump into a scratch database, then copy the table out: `pg_dump -t <table>` and replay it into production |
-| Whole database lost | `docker compose up -d postgres` → `restore.sh` with the newest dump → `make migrate` → `healthcheck.sh` → `tests/run.sh` |
+| One table dropped or corrupted | Restore the dump into a scratch database, then copy the table out: `mysqldump <db> <table>` and replay it into production |
+| Whole database lost | `docker compose up -d mysql` → `restore.sh` with the newest dump → `make migrate` → `healthcheck.sh` → `tests/run.sh` |
 | `datasets-data` volume lost | The rows and checksums are in the dump, the files are not. Re-upload the sources: the ETL is idempotent per `import_job_id`, so re-committing an existing job id replaces its own fact rows instead of duplicating them |
 | Engine upload copies lost | Same as above; `raw_uploads.stored_path` will point at files that no longer exist, so re-upload rather than re-commit |
 | ML artifacts lost | Registry rows survive in the dump, artifacts do not. Retrain. Under Compose the artefacts are on the `models-cache` volume (`MODEL_PATH=/code/data/models`), so a volume loss is the only realistic cause; outside Compose `MODEL_PATH` is `./models` beside the code and is lost on every rebuild |
-| Password changed and `pgdata` still has the old one | The first-boot password is baked into the volume. `docker compose exec postgres psql -c "ALTER USER aidata PASSWORD 'new';"` and update `.env`. `docker compose down -v` does fix it and destroys all data — never in production |
+| Password changed and `mysql-data` still has the old one | The first-boot password is baked into the volume. `docker compose exec mysql mysql -u root -p -e "ALTER USER 'aidata'@'%' IDENTIFIED BY 'new';"` and update `.env`. `docker compose down -v` does fix it and destroys all data — never in production |
 
 ## 5. Volume snapshots
 

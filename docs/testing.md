@@ -52,8 +52,8 @@ Redis, no LLM key needed (embeddings degrade to deterministic hash vectors).
 | `pytest tests/test_schemas.py tests/test_security.py -q -p no:cacheprovider` | Nearest-neighbour regressions (68 tests) |
 | `pytest -q -p no:cacheprovider` | Full suite (~400 tests, sqlite) |
 
-CI (`.github/workflows/python.yml`) runs the full suite on Postgres
-(`pgvector/pg18`) + Redis instead of sqlite. `-p no:cacheprovider` keeps
+CI (`.github/workflows/python.yml`) runs the full suite on MySQL 8
+(`mysql:8.0`) + Redis instead of sqlite. `-p no:cacheprovider` keeps
 `.pytest_cache/` out of the tree; `PYTHONDONTWRITEBYTECODE=1` is set in CI.
 
 ## 2. Fixture catalog
@@ -131,8 +131,7 @@ client.
   `route:list` smoke, migrations, `verify-contract.sh` (docs/api.md ↔ routes),
   `verify-env.sh`, `verify-routing.sh` (nginx). Path-filtered to
   `application/**` + engine API + infra.
-- `python.yml`: full pytest on Postgres+Redis (pgvector/pg18, `CREATE
-  EXTENSION vector/pg_trgm`), Python 3.13. Path-filtered to `ai-engine/**`.
+- `python.yml`: full pytest on MySQL+Redis (mysql:8.0, embeddings stored as JSON via the no-pgvector fallback), Python 3.13. Path-filtered to `ai-engine/**`.
 
 ## 5. Flaky-test policy
 

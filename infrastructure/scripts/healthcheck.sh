@@ -4,7 +4,7 @@
 # Probes only endpoints and services that exist in this tree. Every external
 # thing this script touches, with the code that has to agree with it:
 #
-#   compose services  postgres redis laravel laravel-queue laravel-schedule
+#   compose services  mysql redis laravel laravel-queue laravel-schedule
 #                     fastapi celery-worker celery-beat nginx prometheus grafana
 #                     (the eleven `services:` blocks in docker-compose.yml)
 #   laravel  GET  /up                    bootstrap/app.php -> health: '/up'
@@ -19,16 +19,16 @@
 #                                           body has to be read, not the code
 #   nginx    GET  /health                infrastructure/nginx/default.conf:62
 #   nginx    GET  /ai-api/api/v1/health  default.conf:74 (the /ai-api prefix strip)
-#   postgres      pg_isready -U $POSTGRES_USER -d $POSTGRES_DB
+#   mysql         mysqladmin ping -h 127.0.0.1 -u $MYSQL_USER (MYSQL_PWD from env)
 #   redis         redis-cli ping, with -a when REDIS_PASSWORD is set (compose
 #                 requires the password the moment it is non-empty)
 #   in-container CLIs: curl in `laravel` (laravel.Dockerfile:75), python in
 #                 `fastapi` (python:3.13-slim), wget in `nginx` (busybox),
-#                 pg_isready in `postgres` and redis-cli in `redis`
+#                 mysqladmin in `mysql` and redis-cli in `redis`
 #
 #   NOT probed, on purpose: the engine's /metrics (nginx 404s it) and any
 #   host-published port - every probe here goes through `docker compose exec`,
-#   so it works the same whether or not POSTGRES_PORT/LARAVEL_PORT are published.
+#   so it works the same whether or not MYSQL_PORT/LARAVEL_PORT are published.
 #
 # EXIT CODES - the three outcomes that have to be tellable apart at 03:00:
 #   0  every probe passed (warnings may still have been printed)
@@ -77,8 +77,9 @@ if [ -f .env ]; then
     . ./.env
     set +a
 fi
-PGUSER="${POSTGRES_USER:-aidata}"
-PGDB="${POSTGRES_DB:-aidata}"
+DBUSER="${MYSQL_USER:-aidata}"
+DBNAME="${MYSQL_DATABASE:-aidata}"
+DBPASS="${MYSQL_PASSWORD:-changeme}"
 
 PASS=0
 FAIL=0
@@ -171,8 +172,8 @@ ok "docker + compose reachable, $(wc -l < "$WORK_DIR/services" | tr -d ' ') serv
 #    identical "unreachable" lines further down.
 # ---------------------------------------------------------------------------
 echo "-- [1] container states --"
-for svc in postgres redis laravel laravel-queue laravel-schedule \
-           fastapi celery-worker celery-beat nginx prometheus grafana
+for svc in mysql redis laravel laravel-queue laravel-schedule \
+            fastapi celery-worker celery-beat nginx prometheus grafana
 do
     status=$(docker compose ps -a --format '{{.Service}} {{.Status}}' 2>/dev/null \
         | awk -v s="$svc" '$1 == s { sub(/^[^ ]+ /, ""); print; exit }')
@@ -410,13 +411,13 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 8) Postgres
+# 8) MySQL
 # ---------------------------------------------------------------------------
-echo "-- [8] postgres (pg_isready) --"
-if docker compose exec -T postgres pg_isready -U "$PGUSER" -d "$PGDB" >/dev/null 2>"$ERR_FILE"; then
-    ok "postgres pg_isready ($PGUSER/$PGDB)"
+echo "-- [8] mysql (mysqladmin ping) --"
+if docker compose exec -T -e MYSQL_PWD="$DBPASS" mysql mysqladmin -h 127.0.0.1 -u "$DBUSER" ping >/dev/null 2>"$ERR_FILE"; then
+    ok "mysql ping ($DBUSER@$DBNAME)"
 else
-    bad "postgres pg_isready ($PGUSER/$PGDB)" "$(shorten "$(cat "$ERR_FILE" 2>/dev/null)") - docker compose logs postgres | tail -30"
+    bad "mysql ping ($DBUSER@$DBNAME)" "$(shorten "$(cat "$ERR_FILE" 2>/dev/null)") - docker compose logs mysql | tail -30"
 fi
 
 # ---------------------------------------------------------------------------

@@ -1,10 +1,7 @@
 # Data Dictionary
 
-One PostgreSQL database, one schema. Every table lives in `public` and is namespaced by
-**table-name prefix**, not by a PostgreSQL schema. `infrastructure/docker/postgres/init.sql`
-creates the `vector`, `pg_trgm` and `uuid-ossp` extensions and the `raw`, `staging`,
-`warehouse`, `analytics`, `ml`, `ai` schemas, but no code writes to those schemas — they stay
-empty. Do not qualify a table with one of them.
+One MySQL database (`aidata`, `utf8mb4`). Every table lives in it and is namespaced by
+**table-name prefix**. Do not expect separate schemas: MySQL has none, and no code relies on them.
 
 Each table has exactly one DDL owner: Alembic for the data tables, Laravel migrations for the
 app tables. Laravel links to engine-owned ids through soft integer columns and never through
@@ -105,8 +102,9 @@ duplicate. `downgrade()` puts it back, on purpose, so the revision is reversible
   compares the SHA-256 of the content; the same text re-ingested replaces the chunks in place
   and answers `unchanged`, different text answers `updated`.
 - `rag_chunks(id, created_at, updated_at, document_id FK rag_documents.id, chunk_index,
-  content, embedding, meta JSONB)` — the embedding column is `pgvector Vector(1536)` when
-  pgvector is importable, otherwise `JSONB`. **There is no HNSW index on it.** Retrieval in
+  content, embedding, meta JSON)` — the embedding column is plain `JSON` on this stack
+  (`pgvector Vector(1536)` only when the optional pgvector package is importable, which the
+  MySQL deployment deliberately does not install). **There is no ANN index on it.** Retrieval in
   `app/ai/rag.py` loads up to 2000 chunks (`SCAN_LIMIT`) and scores them in Python (cosine,
   plus a +0.05 keyword boost); when the embedding call fails it falls back to a substring
   match scored 1.0 or 0.0. Plan for that O(n) scan before indexing at scale. `0002` explains

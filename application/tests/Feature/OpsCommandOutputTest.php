@@ -443,20 +443,20 @@ class OpsCommandOutputTest extends TestCase
     // platform:doctor — a check that cannot run must say so
     // ------------------------------------------------------------------
 
-    public function test_platform_doctor_says_it_skipped_the_postgres_only_checks_on_sqlite_instead_of_passing_them_silently(): void
+    public function test_platform_doctor_says_it_skipped_the_server_only_checks_on_sqlite_instead_of_passing_them_silently(): void
     {
         $this->assertSame('sqlite', DB::connection()->getDriverName());
 
         $exitCode = Artisan::call('platform:doctor');
         $text = Artisan::output();
 
-        $this->assertSame(0, $exitCode, 'The engine schema lives in Postgres; sqlite must not read as a broken deployment.');
+        $this->assertSame(0, $exitCode, 'The engine schema lives in the server database; sqlite must not read as a broken deployment.');
 
         // Both the extensions check and the engine-tables check have to say it,
         // each in its own right, on its own line.
         $this->assertSame(
             2,
-            substr_count($text, 'skipped: the connection driver is sqlite, the engine schema lives in PostgreSQL'),
+            substr_count($text, 'skipped: the connection driver is sqlite, the engine schema lives in the server database'),
             'Every check that did not run must say so; a check that cannot run silently is a check that lies.',
         );
         $this->assertStringNotContainsString('FAIL', $text);

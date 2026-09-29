@@ -103,7 +103,7 @@ docker compose exec laravel php artisan platform:doctor            # config, key
 docker compose exec laravel php artisan platform:doctor --json     # same, for a monitor
 docker compose exec laravel php artisan sync:import-status --dry-run
 docker compose exec laravel php artisan sync:quality --dry-run
-docker compose exec postgres psql -U aidata -d aidata -c '\dt'     # all tables, public schema
+docker compose exec mysql mysql -u aidata -p aidata -e 'SHOW TABLES'     # all tables
 ```
 
 The engine sets `X-Request-ID` on every response and logs it; send that header from a

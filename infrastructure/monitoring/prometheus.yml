@@ -69,11 +69,11 @@ scrape_configs:
   #     static_configs:
   #       - targets: ["redis-exporter:9121"]
   #
-  #   - job_name: postgres
+  #   - job_name: mysql
   #     metrics_path: /metrics
   #     scrape_interval: 30s
   #     static_configs:
-  #       - targets: ["postgres-exporter:9187"]
+  #       - targets: ["mysqld-exporter:9104"]
 
   # Prometheus scrapes itself, which is what makes `up{job="prometheus"}` and
   # `scrape_samples_scraped` available to compare against the engine job.
