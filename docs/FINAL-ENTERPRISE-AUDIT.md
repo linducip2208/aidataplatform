@@ -15,7 +15,20 @@ Date: 2026-09-29 (UTC). Branch: `main`. Scope: master enterprise commands, itera
    `WebWorkflowTest` updated to act as owner + new non-owner 403 cases.
    Suite → **929 tests, 0 failures**.
 
-## Iteration 12 (this commit)
+## Iteration 13 (this commit)
+
+21. **Per-owner private RAG + trend chart.** `visibility=private` requires
+   `owner` (422 otherwise); first ingest wins for audience and owner;
+   `query` accepts `user_id` and private docs match owner-only — ownerless
+   private stays hidden even from allow-all (a real fail-closed bug the new
+   tests caught before the filter fast-path shipped). Laravel sends
+   `allow` + `user_id` from role/account on every query and adds `POST
+   /api/rag/documents` (analyst+, owner forced to caller). Analytics trend
+   card gains a server-rendered SVG chart from the same rows as the table
+   (no JS dependency). Tests: engine `test_rag_acl.py` (7), Laravel
+   `RagAclTest` (6), `TrendChartTest` (2). Docs (`rag.md` §7, `api.md`) updated.
+
+## Iteration 12 (previous commit)
 
 20. **RAG document ACL** — visibility (`public`/`internal`/`confidential`)
    in document `meta` (no schema change; pre-ACL docs stay `public`);

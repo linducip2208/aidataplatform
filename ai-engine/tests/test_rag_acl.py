@@ -71,3 +71,35 @@ def _query(db_session, text, allow):
 
     res = query(text, 5, db_session, allowed_visibility=allow)
     return res["citations"]
+
+
+def test_private_needs_an_owner(db_session):
+    from app.ai.rag import ingest_text
+
+    res = ingest_text("Pribadi", "catatan pribadi pemilik", source="acl-test",
+                      db_session=db_session, visibility="private")
+    assert res["status"] == "failed"
+    assert res["error"] == "private_needs_owner"
+
+
+def test_private_visible_only_to_owner(db_session):
+    from app.ai.rag import ingest_text, query
+
+    _ingest(db_session, "Pengumuman", "pengumuman terbuka untuk semua", "public")
+    res = ingest_text("Pribadi", "catatan rahasia pemilik tujuh", source="acl-test",
+                      db_session=db_session, visibility="private", owner="7")
+    assert res["status"] in ("created", "updated")
+
+    owner_hits = query("catatan rahasia pemilik", 5, db_session,
+                       allowed_visibility="public,internal,confidential",
+                       user_id="7")
+    assert "Pribadi" in {h["title"] for h in owner_hits["citations"]}
+
+    stranger = query("catatan rahasia pemilik", 5, db_session,
+                     allowed_visibility="public,internal,confidential",
+                     user_id="8")
+    assert "Pribadi" not in {h["title"] for h in stranger["citations"]}
+
+    anonymous = query("catatan rahasia pemilik", 5, db_session,
+                      allowed_visibility=None)
+    assert "Pribadi" not in {h["title"] for h in anonymous["citations"]}

@@ -50,7 +50,9 @@ DEFAULT_TOP_K = 5
 VISIBILITY_PUBLIC = "public"
 VISIBILITY_INTERNAL = "internal"
 VISIBILITY_CONFIDENTIAL = "confidential"
-VISIBILITIES = (VISIBILITY_PUBLIC, VISIBILITY_INTERNAL, VISIBILITY_CONFIDENTIAL)
+VISIBILITY_PRIVATE = "private"
+VISIBILITIES = (VISIBILITY_PUBLIC, VISIBILITY_INTERNAL, VISIBILITY_CONFIDENTIAL,
+                VISIBILITY_PRIVATE)
 MAX_INGEST_CHARS = 2_000_000
 MAX_CHUNKS = 1000
 MAX_TITLE_CHARS = 500
@@ -532,7 +534,8 @@ def doc_visibility(meta: Any) -> str:
 
 
 def ingest_text(title: str, content: str, source: str = "api", doc_type: str = "txt",
-                db_session=None, visibility: Any = VISIBILITY_PUBLIC) -> Dict[str, Any]:
+                db_session=None, visibility: Any = VISIBILITY_PUBLIC,
+                owner: Any = None) -> Dict[str, Any]:
     """Chunk, embed and store one document, replacing an identical earlier ingest.
 
     Returns ``{"document_id": int | None, "n_chunks": int, "n_embedded": int, "status":
@@ -560,6 +563,13 @@ def ingest_text(title: str, content: str, source: str = "api", doc_type: str = "
             "document_id": None, "n_chunks": 0, "n_embedded": 0, "status": "failed",
             "truncated": False, "chunks_truncated": False, "embedding_dim": 0,
             "column_dim": _vector_dim(), "error": "bad_visibility",
+        }
+    owner = str(owner).strip() if owner is not None and str(owner).strip() else None
+    if visibility == VISIBILITY_PRIVATE and not owner:
+        return {
+            "document_id": None, "n_chunks": 0, "n_embedded": 0, "status": "failed",
+            "truncated": False, "chunks_truncated": False, "embedding_dim": 0,
+            "column_dim": _vector_dim(), "error": "private_needs_owner",
         }
     source = _clip(str(source or "api").strip(), MAX_SOURCE_CHARS)
     doc_type = _clip(str(doc_type or "txt").strip().lower().lstrip("."), MAX_DOC_TYPE_CHARS) or "txt"
@@ -602,7 +612,7 @@ def ingest_text(title: str, content: str, source: str = "api", doc_type: str = "
                     default=0)
         meta = {"n_chunks": len(chunks), "content_sha256": digest, "truncated": truncated,
                 "chunks_truncated": chunks_truncated, "embedding_dim": width,
-                "visibility": visibility}
+                "visibility": visibility, "owner": owner}
         if doc_id is None:
             doc = RagDocument(source=source, title=title, doc_type=doc_type, meta=meta)
             db_session.add(doc)
@@ -613,11 +623,13 @@ def ingest_text(title: str, content: str, source: str = "api", doc_type: str = "
             doc.title = title
             doc.source = source
             doc.doc_type = doc_type
-            # Visibility is set at first ingest and wins over later re-ingests:
-            # silently re-tagging a document's audience on a content update
+            # Audience AND owner are set at first ingest and win over later
+            # re-ingests: silently re-tagging either on a content update
             # would be a privilege change disguised as a sync.
             if isinstance(doc.meta, dict) and doc.meta.get("visibility") in VISIBILITIES:
                 meta["visibility"] = doc.meta["visibility"]
+                if doc.meta.get("owner"):
+                    meta["owner"] = doc.meta["owner"]
             doc.meta = meta
             db_session.query(RagChunk).filter(RagChunk.document_id == doc_id).delete(
                 synchronize_session=False)
@@ -684,7 +696,7 @@ def _grounded_answer(query_text: str, hits: List[Dict[str, Any]], note: str = ""
 
 def query(query_text: str, top_k: int = DEFAULT_TOP_K, db_session=None,
           hybrid: bool = True, rerank: bool = True,
-          allowed_visibility: Any = None) -> Dict[str, Any]:
+          allowed_visibility: Any = None, user_id: Any = None) -> Dict[str, Any]:
     """Retrieve the best matching chunks and ground an answer in them.
 
     Returns ``{"answer": str, "evidence": [...], "citations": [...],
@@ -771,15 +783,31 @@ def query(query_text: str, top_k: int = DEFAULT_TOP_K, db_session=None,
                 "evidence": [], "chunks": [], "n_results": 0, "confidence": 0.0,
                 "limitations": ["document store unreadable"]}
 
+    caller = str(user_id).strip() if user_id is not None and str(user_id).strip() else None
+
+    def _may_see(doc_meta: Any) -> bool:
+        level = doc_visibility(doc_meta)
+        if level != VISIBILITY_PRIVATE:
+            return allowed is None or level in allowed
+        # Private documents belong to one owner; without a caller identity
+        # they stay hidden even from an allow-all listing.
+        if caller is None:
+            return False
+        if not isinstance(doc_meta, dict):
+            return False
+        return str(doc_meta.get("owner") or "").strip() == caller
+
+    # The filter always runs: even a legacy allow-all call must not see
+    # another owner's private document (there are no legacy private
+    # documents, but fail-closed beats fast-path here).
     acl_excluded = 0
-    if allowed is not None:
-        kept = []
-        for row in rows:
-            if doc_visibility(row[8]) in allowed:
-                kept.append(row)
-            else:
-                acl_excluded += 1
-        rows = kept
+    kept = []
+    for row in rows:
+        if _may_see(row[8]):
+            kept.append(row)
+        else:
+            acl_excluded += 1
+    rows = kept
 
     q_emb: List[float] = []
     if question:

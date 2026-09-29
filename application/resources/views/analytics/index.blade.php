@@ -255,6 +255,10 @@
                 description="Tidak ada transaksi pada rentang tanggal yang dipilih. Longgarkan filter atau tambahkan dataset penjualan."
             />
         @else
+            <x-trend-chart
+                label="Grafik tren pendapatan"
+                :points="collect($trend)->map(fn ($point): array => ['label' => (string) ($point['period'] ?? ''), 'value' => (float) ($point['revenue'] ?? 0)])->values()->all()"
+            />
             <x-table-wrapper label="Tren penjualan">
                 <table class="table table-vcenter card-table">
                     <thead>

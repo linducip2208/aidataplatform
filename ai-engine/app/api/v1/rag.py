@@ -25,7 +25,8 @@ MAX_QUERY_CHARS = 2000
 @router.post("/rag/ingest")
 def ingest(body: RagIngestRequest, db: Session = Depends(get_db),
            _: str = Depends(require_service_auth),
-           visibility: Optional[str] = Query(default=None)):
+           visibility: Optional[str] = Query(default=None),
+           owner: Optional[str] = Query(default=None)):
     from app.ai.rag import ingest_text, normalise_visibility
 
     if visibility is not None:
@@ -50,7 +51,16 @@ def ingest(body: RagIngestRequest, db: Session = Depends(get_db),
             details={"field": "content", "max_chars": MAX_INGEST_CHARS}))
 
     res = ingest_text(body.title, body.content, body.source, body.doc_type, db,
-                      visibility=visibility if visibility is not None else "public")
+                      visibility=visibility if visibility is not None else "public",
+                      owner=owner)
+    if res.get("error") == "private_needs_owner":
+        return JSONResponse(status_code=422, content=build_error_response(
+            module="rag", operation="ingest", error_type="validation",
+            code="PRIVATE_NEEDS_OWNER",
+            message="private documents require an owner.",
+            request_id=get_request_id(),
+            resolution="Kirim owner bersama visibility=private.",
+            details={"field": "owner"}))
     if res.get("status") == "failed":
         # ingest_text swallows the write error and reports the failure in-band.
         # A 200 with success=false became a 422 in Laravel, so a failed write
@@ -68,7 +78,8 @@ def ingest(body: RagIngestRequest, db: Session = Depends(get_db),
 def query(body: RagQueryRequest, db: Session = Depends(get_db),
           _: str = Depends(require_service_auth),
           hybrid: bool = True, rerank: bool = True,
-          allow: Optional[str] = Query(default=None)):
+          allow: Optional[str] = Query(default=None),
+          user_id: Optional[str] = Query(default=None)):
     from app.ai import rag as rag_mod
 
     if len(body.query) > MAX_QUERY_CHARS:
@@ -87,4 +98,4 @@ def query(body: RagQueryRequest, db: Session = Depends(get_db),
     # with the legacy `chunks`/`n_results` keys preserved for older clients.
     return {"success": True, "data": rag_mod.query(
         body.query, body.top_k, db, hybrid=hybrid, rerank=rerank,
-        allowed_visibility=allow)}
+        allowed_visibility=allow, user_id=user_id)}

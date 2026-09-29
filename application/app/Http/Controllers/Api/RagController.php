@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Exceptions\AiEngineException;
 use App\Http\Controllers\Controller;
+use App\Models\AuditLog;
 use App\Services\AiEngineClient;
 use App\Support\ApiResponse;
 use Illuminate\Http\Client\ConnectionException;
@@ -35,22 +36,24 @@ class RagController extends Controller
 
         // Document ACL, enforced in the engine before retrieval: the caller
         // never chooses their own allowlist. Viewers see public documents,
-        // analysts add internal ones; admins keep the pinned `ragQuery()`
-        // path (byte-identical body, legacy allow-all).
+        // analysts add internal ones; admins see everything except other
+        // owners' private documents.
         $role = $request->user()->role()->value;
         $allow = match ($role) {
             'viewer' => 'public',
             'analyst' => 'public,internal',
-            default => null,
+            default => 'public,internal,confidential',
         };
 
         // Default path is byte-identical: the pinned `ragQuery()` body.
-        // `hybrid`/`rerank`/`allow` ride as engine query params on an
-        // extended call (same body), whenever any of them applies.
-        $flags = [];
-        if ($allow !== null) {
-            $flags['allow'] = $allow;
-        }
+        // `allow`/`user_id`/`hybrid`/`rerank` ride as engine query params on
+        // an extended call (same body). `user_id` is the caller identity for
+        // per-owner private documents and always comes from the authenticated
+        // account, never from request input.
+        $flags = [
+            'allow' => $allow,
+            'user_id' => (string) $request->user()->getKey(),
+        ];
         if (array_key_exists('hybrid', $validated)) {
             $flags['hybrid'] = $validated['hybrid'] ? 'true' : 'false';
         }
@@ -58,20 +61,55 @@ class RagController extends Controller
             $flags['rerank'] = $validated['rerank'] ? 'true' : 'false';
         }
 
-        if ($flags === []) {
-            $result = $engine->ragQuery($text, $topK);
-        } else {
-            $result = $this->enginePost(
-                '/rag/query?'.http_build_query($flags),
-                ['query' => $text, 'top_k' => $topK],
-                'rag.query'
-            );
-        }
+        $result = $this->enginePost(
+            '/rag/query?'.http_build_query($flags),
+            ['query' => $text, 'top_k' => $topK],
+            'rag.query'
+        );
 
         return ApiResponse::data([
             'answer' => (string) ($result['answer'] ?? ''),
             'citations' => (array) ($result['citations'] ?? $result['chunks'] ?? []),
         ]);
+    }
+
+    /**
+     * Index one document into the knowledge base. `visibility=private`
+     * documents belong to the caller: the owner is always the authenticated
+     * account, never request input.
+     */
+    public function storeDocument(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'title' => ['required', 'string', 'max:500'],
+            'content' => ['required', 'string', 'max:500000'],
+            'source' => ['nullable', 'string', 'max:1000'],
+            'doc_type' => ['nullable', 'string', 'max:30'],
+            'visibility' => ['nullable', 'string', 'in:public,internal,confidential,private'],
+        ]);
+
+        $query = array_filter([
+            'visibility' => $validated['visibility'] ?? null,
+            'owner' => (string) $request->user()->getKey(),
+        ], static fn (mixed $value): bool => $value !== null);
+
+        $result = $this->enginePost(
+            '/rag/ingest'.($query === [] ? '' : '?'.http_build_query($query)),
+            [
+                'title' => $validated['title'],
+                'content' => $validated['content'],
+                'source' => $validated['source'] ?? 'api',
+                'doc_type' => $validated['doc_type'] ?? 'txt',
+            ],
+            'rag.ingest'
+        );
+
+        AuditLog::record('rag.document_ingested', 'rag_document', $result['document_id'] ?? null, [
+            'title' => $validated['title'],
+            'visibility' => $validated['visibility'] ?? 'public',
+        ]);
+
+        return ApiResponse::data($result, 201);
     }
 
     // ------------------------------------------------------------------

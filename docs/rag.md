@@ -186,6 +186,9 @@ evidence, citations, or the answer. The hidden count is reported in
 direct engine callers.
 
 Laravel maps the caller on every proxied query and the caller never chooses:
-viewer → `public`, analyst → `public,internal`, admin → unfiltered pinned
-path. Per-owner private documents are not yet supported (the engine has no
-user identity); they are tracked as a known limitation, not silently allowed.
+viewer → `public`, analyst → `public,internal`, admin →
+`public,internal,confidential` — plus `user_id` (the authenticated account)
+on every call for per-owner matching. `POST /api/rag/documents`
+(admin/analyst) indexes with `visibility`, forcing `owner` to the caller for
+`private`. A `private` document is visible only to its owner; without a
+caller identity it stays hidden even from allow-all listings.

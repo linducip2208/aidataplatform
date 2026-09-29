@@ -65,13 +65,60 @@ class RagAclTest extends TestCase
         $this->assertSame('public,internal', $this->allowSent());
     }
 
-    public function test_admin_keeps_the_unfiltered_pinned_path(): void
+    public function test_admin_sees_everything_except_foreign_private(): void
     {
         Sanctum::actingAs(User::factory()->admin()->create());
 
         $this->postJson(route('api.rag.query'), ['question' => 'laporan?'])
             ->assertOk();
 
-        $this->assertNull($this->allowSent());
+        $this->assertSame('public,internal,confidential', $this->allowSent());
+    }
+
+    public function test_every_query_carries_the_caller_identity(): void
+    {
+        $analyst = User::factory()->analyst()->create();
+        Sanctum::actingAs($analyst);
+
+        $this->postJson(route('api.rag.query'), ['question' => 'laporan?'])
+            ->assertOk();
+
+        $request = Http::recorded()->map(fn (array $pair): ClientRequest => $pair[0])->first(
+            fn (ClientRequest $request): bool => str_contains(strtok($request->url(), '?'), '/api/v1/rag/query')
+        );
+
+        $this->assertNotNull($request);
+        parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+        $this->assertSame((string) $analyst->getKey(), $query['user_id'] ?? null);
+    }
+
+    public function test_private_documents_belong_to_the_caller(): void
+    {
+        $analyst = User::factory()->analyst()->create();
+        Sanctum::actingAs($analyst);
+
+        $this->postJson(route('api.rag.documents.store'), [
+            'title' => 'Catatan pribadi',
+            'content' => 'Isi rahasia milik analis.',
+            'visibility' => 'private',
+        ])->assertCreated();
+
+        $request = Http::recorded()->map(fn (array $pair): ClientRequest => $pair[0])->first(
+            fn (ClientRequest $request): bool => str_contains(strtok($request->url(), '?'), '/api/v1/rag/ingest')
+        );
+
+        $this->assertNotNull($request);
+        parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+        $this->assertSame('private', $query['visibility'] ?? null);
+        $this->assertSame((string) $analyst->getKey(), $query['owner'] ?? null);
+    }
+
+    public function test_viewer_cannot_index_documents(): void
+    {
+        Sanctum::actingAs(User::factory()->viewer()->create());
+
+        $this->postJson(route('api.rag.documents.store'), [
+            'title' => 'x', 'content' => 'y',
+        ])->assertForbidden();
     }
 }

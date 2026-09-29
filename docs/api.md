@@ -158,7 +158,8 @@ All accept `date_from`, `date_to`, `branch`, `category`, `granularity`
 | POST | `/api/agent/chat` | bearer | `{message,conversation_id?}` → `data` carries `reply` **and** `answer` (same value), `conversation_id`, `evidence[]`, `steps` |
 | GET | `/api/ai/usage` | bearer | usage ledger proxy for `GET /api/v1/ai/usage`, `?conversation_id=` optional |
 | GET | `/api/ai/usage/summary` | bearer | cost dashboard proxy for `GET /api/v1/ai/usage/summary`, `?days=` 1-365 |
-| POST | `/api/rag/query` | bearer | `{question or query,top_k?}` → `{answer,citations[]}`; engine `allow` set from role (viewer `public`, analyst `public,internal`) |
+| POST | `/api/rag/query` | bearer | `{question or query,top_k?}` → `{answer,citations[]}`; engine `allow` + `user_id` set from role/account (viewer `public`, analyst `public,internal`) |
+| POST | `/api/rag/documents` | bearer (admin, analyst) | `{title,content,source?,doc_type?,visibility?}` → stored chunk report; `private` belongs to the caller; `201` |
 
 `reply` is kept as an alias of `answer` so older clients keep working.
 
