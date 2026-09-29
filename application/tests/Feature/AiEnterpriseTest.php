@@ -307,6 +307,8 @@ class AiEnterpriseTest extends TestCase
 
     public function test_the_usage_proxy_scopes_by_conversation_id(): void
     {
+        ChatThread::factory()->forUser($this->analyst)->create(['ai_conversation_id' => 43]);
+
         $this->actingAs($this->analyst)
             ->getJson('/_enterprise/ai/usage?conversation_id=43')
             ->assertOk();
@@ -315,6 +317,19 @@ class AiEnterpriseTest extends TestCase
 
         $this->assertNotNull($request);
         $this->assertStringContainsString('conversation_id=43', $request->url());
+    }
+
+    public function test_the_usage_proxy_rejects_a_foreign_conversation_id(): void
+    {
+        $other = User::factory()->analyst()->create();
+        ChatThread::factory()->forUser($other)->create(['ai_conversation_id' => 44]);
+
+        $this->actingAs($this->analyst)
+            ->getJson('/_enterprise/ai/usage?conversation_id=44')
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('conversation_id');
+
+        Http::assertNothingSent();
     }
 
     public function test_an_unreachable_engine_on_the_usage_proxy_is_a_503(): void

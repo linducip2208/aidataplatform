@@ -125,6 +125,22 @@ class AgentController extends Controller
             'conversation_id' => 'conversation id',
         ]);
 
+        // Same ownership rule as store(): a conversation id is sequential and
+        // guessable, so an unknown id must be indistinguishable from another
+        // user's. Without this, account A could read account B's usage ledger.
+        if (isset($validated['conversation_id'])) {
+            $owned = ChatThread::query()
+                ->where('ai_conversation_id', (int) $validated['conversation_id'])
+                ->where('user_id', $request->user()->getKey())
+                ->exists();
+
+            if (! $owned) {
+                throw ValidationException::withMessages([
+                    'conversation_id' => ['Unknown conversation for this account.'],
+                ]);
+            }
+        }
+
         $query = array_filter([
             'conversation_id' => $validated['conversation_id'] ?? null,
         ], static fn (mixed $value): bool => $value !== null);

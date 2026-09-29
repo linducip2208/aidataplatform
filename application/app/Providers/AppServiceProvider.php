@@ -2,9 +2,14 @@
 
 namespace App\Providers;
 
+use App\Models\ChatThread;
+use App\Models\Dataset;
+use App\Policies\ChatThreadPolicy;
+use App\Policies\DatasetPolicy;
 use App\Services\AiEngineClient;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 
@@ -24,6 +29,13 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->configureRateLimiters();
+
+        // Object-level policies, registered (not yet enforced in controllers —
+        // enforcement lands per-controller with factory/test updates; see
+        // docs/FINAL-ENTERPRISE-AUDIT.md). Registration alone changes no
+        // behaviour; it enables Gate::allows()/authorize() call sites.
+        Gate::policy(Dataset::class, DatasetPolicy::class);
+        Gate::policy(ChatThread::class, ChatThreadPolicy::class);
     }
 
     /**

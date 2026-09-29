@@ -290,5 +290,115 @@ def generate_embeddings(title: str, content: str, source: str = "api") -> Dict[s
 
 
 @celery_app.task(name="app.workers.tasks.scheduled_data_sync")
+@_redacted_failure
 def scheduled_data_sync() -> Dict[str, Any]:
-    return {"status": "ok", "message": "sync placeholder executed"}
+    """Nightly reconciliation of the import pipeline (read-only).
+
+    Beat entry ``nightly-data-sync`` (01:15 Asia/Jakarta) runs this. There is
+    no external source to pull from in this deployment — uploads arrive via
+    ``POST /api/v1/imports/upload`` and the ETL owns all state transitions —
+    so the honest nightly work is reconciliation, not mutation:
+
+    Schedule → Acquire Lock → Count by status → Detect stuck jobs
+    (non-terminal + untouched for 24h) → Summarise the last 24h → Metrics.
+
+    The task never writes: stuck jobs are *reported* (ids included) for the
+    Laravel ``sync:import-status`` command / operators to act on. A concurrent
+    beat is skipped via a MySQL named lock; on SQLite (tests) or when the
+    lock query itself fails the task proceeds without the lock rather than
+    failing the whole night.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    NON_TERMINAL = ("uploaded", "queued")
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=24)
+
+    db = _db()
+    locked = False
+    dialect = ""
+    try:
+        try:
+            dialect = db.get_bind().dialect.name
+        except Exception:
+            dialect = ""
+        if dialect == "mysql":
+            try:
+                from sqlalchemy import text
+
+                acquired = db.execute(
+                    text("SELECT GET_LOCK(:key, 0)"),
+                    {"key": "aidata_scheduled_sync"},
+                ).scalar()
+                if acquired != 1:
+                    return {
+                        "status": "skipped",
+                        "reason": "lock_held",
+                        "checked_at": now.isoformat(),
+                    }
+                locked = True
+            except Exception:
+                locked = False
+
+        from app.database.models import ImportJob
+
+        totals: Dict[str, int] = {}
+        try:
+            from sqlalchemy import func
+
+            for status, count in (
+                db.query(ImportJob.status, func.count(ImportJob.id))
+                .group_by(ImportJob.status)
+                .all()
+            ):
+                totals[str(status)] = int(count)
+        except Exception:
+            for job in db.query(ImportJob).all():
+                totals[str(job.status)] = totals.get(str(job.status), 0) + 1
+
+        stuck_ids: list[int] = []
+        try:
+            stuck = (
+                db.query(ImportJob)
+                .filter(
+                    ImportJob.status.in_(NON_TERMINAL),
+                    ImportJob.updated_at < cutoff,
+                )
+                .order_by(ImportJob.id)
+                .limit(100)
+                .all()
+            )
+            stuck_ids = [int(j.id) for j in stuck]
+        except Exception:
+            stuck_ids = []
+
+        last_24h: Dict[str, int] = {}
+        try:
+            recent = (
+                db.query(ImportJob).filter(ImportJob.updated_at >= cutoff).all()
+            )
+            for job in recent:
+                last_24h[str(job.status)] = last_24h.get(str(job.status), 0) + 1
+        except Exception:
+            pass
+
+        return {
+            "status": "ok",
+            "checked_at": now.isoformat(),
+            "totals": totals,
+            "stuck": {"count": len(stuck_ids), "job_ids": stuck_ids},
+            "last_24h": last_24h,
+        }
+    finally:
+        if locked:
+            try:
+                from sqlalchemy import text
+
+                db.execute(
+                    text("SELECT RELEASE_LOCK(:key)"),
+                    {"key": "aidata_scheduled_sync"},
+                )
+                db.commit()
+            except Exception:
+                pass
+        _close(db)

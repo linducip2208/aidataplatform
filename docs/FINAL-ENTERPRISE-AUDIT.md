@@ -1,6 +1,25 @@
 # FINAL ENTERPRISE AUDIT — AIDataPlatform
 
-Date: 2026-09-29 (UTC). Branch: `main`. Scope: master enterprise command, iteration 1.
+Date: 2026-09-29 (UTC). Branch: `main`. Scope: master enterprise commands, iterations 1-2.
+
+## Iteration 2 (this commit)
+
+5. **Scheduled sync placeholder → real reconciliation** —
+   `ai-engine/app/workers/tasks.py::scheduled_data_sync`: nightly read-only
+   reconciliation (MySQL `GET_LOCK` single-flight with skip-on-held, counts by
+   status, stuck non-terminal jobs untouched 24h with ids, last-24h summary).
+   Never writes — stuck jobs are reported for `sync:import-status`/operators.
+   New `ai-engine/tests/test_scheduled_sync.py` → **3 passed**.
+6. **Object authorization, additive step** —
+   `AppServiceProvider::boot` now registers `Gate::policy(Dataset) +
+   Gate::policy(ChatThread)` (zero behaviour change alone); `Api\AgentController::usage`
+   enforces the same conversation-ownership rule as `store()` (422 on foreign
+   id, engine never contacted). Full DatasetPolicy enforcement deferred with
+   reason: factories leave `datasets.user_id` null, so analyst-owner checks
+   would regress the existing suite — needs factory backfill first.
+7. **Tests updated honestly**: `AiEnterpriseTest` usage-scope test now owns
+   conversation 43; new test rejects foreign conversation 44 with engine
+   untouched. Laravel suite → **OK 917 tests / 7322 assertions** (was 916).
 
 ## 1. Implemented (this iteration)
 
