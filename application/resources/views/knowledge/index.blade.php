@@ -5,16 +5,16 @@
 @section('content')
     @php
         $visibilityVariants = ['public' => 'success', 'internal' => 'info', 'confidential' => 'warning', 'private' => 'danger'];
-        $visibilityLabels = ['public' => 'Publik', 'internal' => 'Internal', 'confidential' => 'Rahasia', 'private' => 'Pribadi'];
+        $visibilityLabels = ['public' => __('knowledge.visibility_public'), 'internal' => __('knowledge.visibility_internal'), 'confidential' => __('knowledge.visibility_confidential'), 'private' => __('knowledge.visibility_private')];
         $canWrite = auth()->user()->isAnalyst();
     @endphp
 
     <div class="page-header">
         <div class="row align-items-center">
             <div class="col">
-                <h1 class="page-title">Basis pengetahuan</h1>
+                <h1 class="page-title">{{ __('knowledge.header_title') }}</h1>
                 <p class="page-subtitle">
-                    Dokumen yang diindeks mesin RAG beserta audiensnya. Dokumen pribadi hanya terlihat oleh pemiliknya.
+                    {{ __('knowledge.header_subtitle') }}
                 </p>
             </div>
         </div>
@@ -23,30 +23,30 @@
     @unless ($engineAvailable)
         <x-card class="mb-3">
             <div role="status" class="alert alert-warning">
-                <x-badge variant="warning">Mesin AI tidak tersedia</x-badge>
+                <x-badge variant="warning">{{ __('knowledge.engine_unavailable') }}</x-badge>
                 <p class="text-secondary">
-                    Daftar dokumen belum dapat dimuat. Periksa layanan <code>fastapi</code>
-                    lalu muat ulang halaman ini.
+                    {{ __('knowledge.engine_unavailable_lead') }} <code>fastapi</code>
+                    {{ __('knowledge.engine_unavailable_trail') }}
                 </p>
             </div>
         </x-card>
     @endunless
 
-    <x-card title="Dokumen terindeks" description="Terbaru lebih dulu.">
+    <x-card :title="__('knowledge.list_title')" :description="__('knowledge.list_desc')">
         @if ($documents === [])
             <x-empty-state
-                title="Belum ada dokumen"
-                description="Indeks dokumen pertama melalui formulir di bawah."
+                :title="__('knowledge.list_empty_title')"
+                :description="__('knowledge.list_empty_desc')"
             />
         @else
-            <x-table-wrapper label="Dokumen terindeks">
+            <x-table-wrapper :label="__('knowledge.list_table_label')">
                 <table class="table table-vcenter card-table">
                     <thead>
                         <tr>
-                            <th scope="col">Dokumen</th>
-                            <th scope="col">Sumber</th>
-                            <th scope="col">Visibilitas</th>
-                            <th scope="col" class="text-end">Chunk</th>
+                            <th scope="col">{{ __('knowledge.col_document') }}</th>
+                            <th scope="col">{{ __('knowledge.col_source') }}</th>
+                            <th scope="col">{{ __('knowledge.col_visibility') }}</th>
+                            <th scope="col" class="text-end">{{ __('knowledge.col_chunks') }}</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -54,8 +54,8 @@
                             @php $visibility = strtolower((string) ($document['visibility'] ?? 'public')); @endphp
                             <tr>
                                 <td>
-                                    <div class="fw-bold text-secondary">{{ $document['title'] ?? 'Tanpa judul' }}</div>
-                                    <div class="small text-secondary">ID {{ $document['id'] ?? '?' }} &middot; {{ $document['doc_type'] ?? 'txt' }}</div>
+                                    <div class="fw-bold text-secondary">{{ $document['title'] ?? __('knowledge.doc_untitled') }}</div>
+                                    <div class="small text-secondary">{{ __('knowledge.doc_id_ref', ['id' => $document['id'] ?? '?']) }} &middot; {{ $document['doc_type'] ?? 'txt' }}</div>
                                 </td>
                                 <td class="small text-secondary">{{ $document['source'] ?? '?' }}</td>
                                 <td><x-badge variant="{{ $visibilityVariants[$visibility] ?? 'neutral' }}">{{ $visibilityLabels[$visibility] ?? $visibility }}</x-badge></td>
@@ -69,11 +69,11 @@
     </x-card>
 
     @if ($canWrite)
-        <x-card title="Indeks dokumen" description="Teks dipecah, di-embedding, dan siap ditanya lewat RAG.">
+        <x-card :title="__('knowledge.index_title')" :description="__('knowledge.index_desc')">
             <form method="POST" action="{{ route('knowledge.store') }}" class="row row-cards">
                 @csrf
                 <div class="col-md-6">
-                    <x-field label="Judul" for="doc_title" name="title" required>
+                    <x-field :label="__('knowledge.field_title')" for="doc_title" name="title" required>
                         <input
                             id="doc_title"
                             name="title"
@@ -81,24 +81,24 @@
                             value="{{ old('title') }}"
                             required
                             maxlength="500"
-                            placeholder="mis. Panduan refund"
+                            placeholder="{{ __('knowledge.field_title_placeholder') }}"
                             @error('title') aria-invalid="true" @enderror
                             class="form-control"
                         >
                     </x-field>
                 </div>
                 <div class="col-md-6">
-                    <x-field label="Visibilitas" for="doc_visibility" name="visibility" hint="Pribadi berarti hanya Anda.">
+                    <x-field :label="__('knowledge.field_visibility')" for="doc_visibility" name="visibility" :hint="__('knowledge.field_visibility_hint')">
                         <select id="doc_visibility" name="visibility" @error('visibility') aria-invalid="true" @enderror class="form-select">
-                            <option value="">Publik (bawaan)</option>
-                            @foreach (['public' => 'Publik', 'internal' => 'Internal', 'confidential' => 'Rahasia', 'private' => 'Pribadi'] as $value => $label)
+                            <option value="">{{ __('knowledge.visibility_default') }}</option>
+                            @foreach (['public' => __('knowledge.visibility_public'), 'internal' => __('knowledge.visibility_internal'), 'confidential' => __('knowledge.visibility_confidential'), 'private' => __('knowledge.visibility_private')] as $value => $label)
                                 <option value="{{ $value }}" @selected(old('visibility') === $value)>{{ $label }}</option>
                             @endforeach
                         </select>
                     </x-field>
                 </div>
                 <div class="col-12">
-                    <x-field label="Isi dokumen" for="doc_content" name="content" required>
+                    <x-field :label="__('knowledge.field_content')" for="doc_content" name="content" required>
                         <textarea
                             id="doc_content"
                             name="content"
@@ -110,7 +110,7 @@
                     </x-field>
                 </div>
                 <div class="col-12">
-                    <button type="submit" class="btn btn-primary">Indeks dokumen</button>
+                    <button type="submit" class="btn btn-primary">{{ __('knowledge.index_submit') }}</button>
                 </div>
             </form>
         </x-card>

@@ -74,10 +74,10 @@ class LocaleTest extends TestCase
         $user = User::factory()->admin()->create();
         $user->forceFill(['locale' => 'en'])->save();
 
-        foreach (['dashboard', 'datasets.index', 'datasets.create', 'imports.index', 'quality.index', 'analytics.index', 'ml.index', 'assistant.index', 'reports.index'] as $route) {
+        foreach (['dashboard', 'datasets.index', 'imports.index', 'quality.index', 'analytics.index', 'ml.index', 'assistant.index', 'reports.index', 'alerts.index', 'ai.usage', 'decisions.index', 'knowledge.index', 'glossary.index', 'admin.users.index', 'audit.index', 'password.edit', 'admin.organization.edit'] as $route) {
             $html = $this->actingAs($user)->get(route($route))->assertOk()->getContent();
 
-            foreach (['dashboard.', 'datasets.', 'imports.', 'quality.', 'analytics.', 'ml.', 'assistant.', 'reports.', 'nav.', 'auth.', 'common.'] as $prefix) {
+            foreach (['dashboard.', 'datasets.', 'imports.', 'quality.', 'analytics.', 'ml.', 'assistant.', 'reports.', 'alerts.', 'aicost.', 'decisions.', 'knowledge.', 'glossary.', 'admin.', 'profile.', 'errors.', 'nav.', 'auth.', 'common.'] as $prefix) {
                 // A missing translation renders as the key itself.
                 $this->assertDoesNotMatchRegularExpression(
                     '/[\'"\s>]'.preg_quote($prefix, '/').'[a-z0-9_.]+/i',

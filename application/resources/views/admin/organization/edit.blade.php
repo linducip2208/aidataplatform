@@ -6,21 +6,21 @@
     <div class="page-header">
         <div class="row align-items-center">
             <div class="col">
-                <h1 class="page-title">Profil organisasi</h1>
+                <h1 class="page-title">{{ __('admin.org_header_title') }}</h1>
                 <p class="page-subtitle">
-                    Nama dan logo tampil di bilah navigasi seluruh aplikasi (white-label satu perusahaan).
+                    {{ __('admin.org_header_sub') }}
                 </p>
             </div>
         </div>
     </div>
 
-    <x-card title="Identitas" description="Perubahan langsung terlihat setelah disimpan.">
+    <x-card :title="__('admin.org_card_title')" :description="__('admin.org_card_desc')">
         <form method="POST" action="{{ route('admin.organization.update') }}" enctype="multipart/form-data" class="row row-cards">
             @csrf
             @method('PUT')
 
             <div class="col-md-6">
-                <x-field label="Nama organisasi" for="org_name" name="name" required>
+                <x-field :label="__('admin.org_name_label')" for="org_name" name="name" required>
                     <input
                         id="org_name"
                         name="name"
@@ -35,14 +35,14 @@
             </div>
 
             <div class="col-md-6">
-                <x-field label="Tagline" for="org_tagline" name="tagline">
+                <x-field :label="__('admin.org_tagline_label')" for="org_tagline" name="tagline">
                     <input
                         id="org_tagline"
                         name="tagline"
                         type="text"
                         value="{{ old('tagline', $organization->tagline) }}"
                         maxlength="255"
-                        placeholder="mis. Platform data perusahaan"
+                        placeholder="{{ __('admin.org_tagline_placeholder') }}"
                         @error('tagline') aria-invalid="true" @enderror
                         class="form-control"
                     >
@@ -51,10 +51,10 @@
 
             <div class="col-md-6">
                 <x-field
-                    label="Logo"
+                    :label="__('admin.org_logo_label')"
                     for="org_logo"
                     name="logo"
-                    hint="PNG, JPG, atau SVG maksimal 1 MB. Dibiarkan kosong untuk memakai inisial."
+                    :hint="__('admin.org_logo_hint')"
                 >
                     <input
                         id="org_logo"
@@ -73,14 +73,14 @@
                         </span>
                         <div class="form-check">
                             <input id="remove_logo" name="remove_logo" type="checkbox" value="1" class="form-check-input">
-                            <label for="remove_logo" class="form-check-label">Hapus logo saat ini</label>
+                            <label for="remove_logo" class="form-check-label">{{ __('admin.org_remove_logo') }}</label>
                         </div>
                     </div>
                 @endif
             </div>
 
             <div class="col-12">
-                <button type="submit" class="btn btn-primary">Simpan profil</button>
+                <button type="submit" class="btn btn-primary">{{ __('admin.org_save') }}</button>
             </div>
         </form>
     </x-card>

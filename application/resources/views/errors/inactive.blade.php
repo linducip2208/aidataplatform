@@ -5,16 +5,15 @@
 @section('content')
     <div class="card card-md">
         <div class="card-body">
-            <h1 class="card-title">Akun dinonaktifkan</h1>
+            <h1 class="card-title">{{ __('errors.inactive_title') }}</h1>
 
             <p class="text-secondary">
-                Akun ini sudah dinonaktifkan, jadi tidak dapat dipakai lagi. Hubungi administrator
-                untuk mengaktifkannya kembali.
+                {{ __('errors.inactive_body') }}
             </p>
 
             <a href="{{ route('login') }}"
                class="btn btn-primary mt-3">
-                Kembali ke halaman masuk
+                {{ __('errors.inactive_back') }}
             </a>
         </div>
     </div>

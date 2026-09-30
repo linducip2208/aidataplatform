@@ -6,9 +6,9 @@
     <div class="page-header">
         <div class="row align-items-center">
             <div class="col">
-                <h1 class="page-title">Ubah password</h1>
+                <h1 class="page-title">{{ __('profile.password_header_title') }}</h1>
                 <div class="page-subtitle">
-                    Password baru minimal 8 karakter dan harus memuat huruf serta angka.
+                    {{ __('profile.password_header_sub') }}
                 </div>
             </div>
         </div>
@@ -16,12 +16,12 @@
 
     <div class="row row-cards">
         <div class="col-lg-8">
-            <x-card title="Password akun" description="Masukkan password lama untuk memverifikasi perubahan.">
+            <x-card :title="__('profile.password_card_title')" :description="__('profile.password_card_desc')">
                 <form method="POST" action="{{ route('password.update') }}">
                     @csrf
                     @method('PUT')
 
-                    <x-field label="Password saat ini" for="current_password" name="current_password" required>
+                    <x-field :label="__('profile.password_current_label')" for="current_password" name="current_password" required>
                         <input
                             id="current_password"
                             name="current_password"
@@ -34,11 +34,11 @@
                     </x-field>
 
                     <x-field
-                        label="Password baru"
+                        :label="__('profile.password_new_label')"
                         for="password"
                         name="password"
                         required
-                        hint="Minimal 8 karakter, berisi huruf dan angka."
+                        :hint="__('profile.password_new_hint')"
                     >
                         <input
                             id="password"
@@ -51,7 +51,7 @@
                         >
                     </x-field>
 
-                    <x-field label="Konfirmasi password baru" for="password_confirmation" name="password_confirmation" required>
+                    <x-field :label="__('profile.password_confirm_label')" for="password_confirmation" name="password_confirmation" required>
                         <input
                             id="password_confirmation"
                             name="password_confirmation"
@@ -66,39 +66,39 @@
                         <button
                             type="submit"
                             class="btn btn-primary"
-                        >Perbarui password</button>
+                        >{{ __('profile.password_submit') }}</button>
                     </div>
                 </form>
             </x-card>
         </div>
 
         <div class="col-lg-4">
-            <x-card title="Akun Anda" description="Informasi akun yang sedang digunakan.">
+            <x-card :title="__('profile.password_account_title')" :description="__('profile.password_account_desc')">
                 <dl class="datagrid">
                     <div class="datagrid-item">
-                        <dt class="datagrid-title">Nama</dt>
+                        <dt class="datagrid-title">{{ __('profile.password_name_label') }}</dt>
                         <dd class="datagrid-content">{{ $user->name }}</dd>
                     </div>
                     <div class="datagrid-item">
-                        <dt class="datagrid-title">Email</dt>
+                        <dt class="datagrid-title">{{ __('profile.password_email_label') }}</dt>
                         <dd class="datagrid-content text-break">{{ $user->email }}</dd>
                     </div>
                     <div class="datagrid-item">
-                        <dt class="datagrid-title">Peran</dt>
+                        <dt class="datagrid-title">{{ __('profile.password_role_label') }}</dt>
                         <dd class="datagrid-content">
                             <x-badge variant="info">{{ $user->role()->localizedLabel() }}</x-badge>
                         </dd>
                     </div>
                     <div class="datagrid-item">
-                        <dt class="datagrid-title">Login terakhir</dt>
+                        <dt class="datagrid-title">{{ __('profile.password_last_login_label') }}</dt>
                         <dd class="datagrid-content">
-                            {{ $user->last_login_at ? $user->last_login_at->locale('id')->translatedFormat('d M Y H:i') : 'Belum pernah' }}
+                            {{ $user->last_login_at ? $user->last_login_at->locale('id')->translatedFormat('d M Y H:i') : __('profile.password_never') }}
                         </dd>
                     </div>
                 </dl>
 
                 <p class="small text-secondary mt-3 mb-0">
-                    Setelah password diubah, gunakan password baru pada login berikutnya di perangkat ini maupun perangkat lain.
+                    {{ __('profile.password_note') }}
                 </p>
             </x-card>
         </div>

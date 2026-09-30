@@ -6,9 +6,9 @@
     <div class="page-header">
         <div class="row align-items-center">
             <div class="col">
-                <h1 class="page-title">Pusat keputusan</h1>
+                <h1 class="page-title">{{ __('decisions.index_header_title') }}</h1>
                 <p class="page-subtitle">
-                    Rekomendasi AI berbasis bukti, simulasi skenario, dan persetujuan manusia yang teraudit.
+                    {{ __('decisions.index_header_subtitle') }}
                 </p>
             </div>
         </div>
@@ -17,29 +17,29 @@
     @unless ($engineAvailable)
         <x-card class="mb-3">
             <div role="status" class="alert alert-warning">
-                <x-badge variant="warning">Mesin AI tidak tersedia</x-badge>
+                <x-badge variant="warning">{{ __('decisions.engine_unavailable') }}</x-badge>
                 <p class="text-secondary">
-                    Kasus keputusan belum dapat dimuat. Periksa layanan <code>fastapi</code>
-                    lalu muat ulang halaman ini.
+                    {{ __('decisions.engine_unavailable_lead') }} <code>fastapi</code>
+                    {{ __('decisions.engine_unavailable_trail') }}
                 </p>
             </div>
         </x-card>
     @endunless
 
     @if (is_array($scenarioResult) && $scenarioResult !== [])
-        <x-card class="mb-3" title="Hasil skenario" description="Angka simulasi dari mesin, bukan rekomendasi final.">
+        <x-card class="mb-3" :title="__('decisions.scenario_title')" :description="__('decisions.scenario_desc')">
             @if (! ($scenarioResult['supported'] ?? true))
                 <x-empty-state
-                    title="Skenario tidak didukung"
-                    description="{{ collect((array) ($scenarioResult['reasons'] ?? []))->implode('; ') ?: 'Bentuk skenario ini tidak dapat dihitung dari data yang ada.' }}"
+                    :title="__('decisions.scenario_unsupported_title')"
+                    :description="collect((array) ($scenarioResult['reasons'] ?? []))->implode('; ') ?: __('decisions.scenario_unsupported_fallback')"
                 />
             @else
-                <x-table-wrapper label="Dampak skenario">
+                <x-table-wrapper :label="__('decisions.scenario_table_label')">
                     <table class="table table-vcenter card-table">
                         <thead>
                             <tr>
-                                <th scope="col">Ukuran</th>
-                                <th scope="col" class="text-end">Nilai</th>
+                                <th scope="col">{{ __('decisions.col_measure') }}</th>
+                                <th scope="col" class="text-end">{{ __('decisions.col_value') }}</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -60,92 +60,92 @@
 
     <div class="row row-cards">
         <div class="col-md-6">
-            <x-card title="Minta rekomendasi" description="AI mengumpulkan bukti, menilai aturan, dan menyimpan kasus.">
+            <x-card :title="__('decisions.recommend_title')" :description="__('decisions.recommend_desc')">
                 @if (auth()->user()->isAnalyst())
                     <form method="POST" action="{{ route('decisions.recommend') }}" class="row row-cards">
                         @csrf
                         <div class="col-md-6">
-                            <x-field label="Cabang" for="subject_branch" hint="Kosongkan untuk seluruh cabang.">
-                                <input id="subject_branch" name="branch" type="text" maxlength="128" value="{{ old('branch') }}" placeholder="mis. BR-01" class="form-control">
+                            <x-field :label="__('decisions.field_branch')" for="subject_branch" :hint="__('decisions.field_branch_hint')">
+                                <input id="subject_branch" name="branch" type="text" maxlength="128" value="{{ old('branch') }}" placeholder="{{ __('decisions.field_branch_placeholder') }}" class="form-control">
                             </x-field>
                         </div>
                         <div class="col-md-6">
-                            <x-field label="Periode" for="subject_period">
-                                <input id="subject_period" name="period" type="text" maxlength="32" value="{{ old('period') }}" placeholder="mis. 2026-09" class="form-control">
+                            <x-field :label="__('decisions.field_period')" for="subject_period">
+                                <input id="subject_period" name="period" type="text" maxlength="32" value="{{ old('period') }}" placeholder="{{ __('decisions.field_period_placeholder') }}" class="form-control">
                             </x-field>
                         </div>
                         <div class="col-md-6">
-                            <x-field label="Granularitas" for="subject_granularity">
+                            <x-field :label="__('decisions.field_granularity')" for="subject_granularity">
                                 <select id="subject_granularity" name="granularity" class="form-select">
-                                    <option value="">Bawaan</option>
-                                    @foreach (['daily' => 'Harian', 'weekly' => 'Mingguan', 'monthly' => 'Bulanan'] as $value => $label)
+                                    <option value="">{{ __('decisions.granularity_default') }}</option>
+                                    @foreach (['daily' => __('decisions.granularity_daily'), 'weekly' => __('decisions.granularity_weekly'), 'monthly' => __('decisions.granularity_monthly')] as $value => $label)
                                         <option value="{{ $value }}" @selected(old('granularity') === $value)>{{ $label }}</option>
                                     @endforeach
                                 </select>
                             </x-field>
                         </div>
                         <div class="col-md-6">
-                            <x-field label="Horizon (hari)" for="subject_horizon">
+                            <x-field :label="__('decisions.field_horizon')" for="subject_horizon">
                                 <input id="subject_horizon" name="horizon" type="number" min="1" max="365" value="{{ old('horizon') }}" class="form-control">
                             </x-field>
                         </div>
                         <div class="col-12">
-                            <button type="submit" class="btn btn-primary">Minta rekomendasi</button>
+                            <button type="submit" class="btn btn-primary">{{ __('decisions.recommend_submit') }}</button>
                         </div>
                     </form>
                 @else
-                    <p class="text-secondary">Peran Anda hanya dapat membaca kasus yang ada.</p>
+                    <p class="text-secondary">{{ __('decisions.read_only') }}</p>
                 @endif
             </x-card>
         </div>
 
         <div class="col-md-6">
-            <x-card title="Simulasi skenario" description="Hitung dampak numerik sebelum memutuskan.">
+            <x-card :title="__('decisions.simulate_title')" :description="__('decisions.simulate_desc')">
                 @if (auth()->user()->isAnalyst())
                     <form method="POST" action="{{ route('decisions.scenarios.run') }}" class="row row-cards">
                         @csrf
                         <div class="col-md-6">
-                            <x-field label="Jenis skenario" for="scenario_type" required>
+                            <x-field :label="__('decisions.field_type')" for="scenario_type" required>
                                 <select id="scenario_type" name="type" required class="form-select">
-                                    <option value="">Pilih jenis</option>
-                                    <option value="price_change_pct" @selected(old('type') === 'price_change_pct')>Perubahan harga (%)</option>
-                                    <option value="inventory_change_pct" @selected(old('type') === 'inventory_change_pct')>Perubahan inventaris (%)</option>
-                                    <option value="churn_rise_pp" @selected(old('type') === 'churn_rise_pp')>Kenaikan churn (pp)</option>
+                                    <option value="">{{ __('decisions.type_placeholder') }}</option>
+                                    <option value="price_change_pct" @selected(old('type') === 'price_change_pct')>{{ __('decisions.type_price') }}</option>
+                                    <option value="inventory_change_pct" @selected(old('type') === 'inventory_change_pct')>{{ __('decisions.type_inventory') }}</option>
+                                    <option value="churn_rise_pp" @selected(old('type') === 'churn_rise_pp')>{{ __('decisions.type_churn') }}</option>
                                 </select>
                             </x-field>
                         </div>
                         <div class="col-md-6">
-                            <x-field label="Nilai" for="scenario_value" required>
-                                <input id="scenario_value" name="value" type="number" step="any" required value="{{ old('value') }}" placeholder="mis. -5" class="form-control">
+                            <x-field :label="__('decisions.field_value')" for="scenario_value" required>
+                                <input id="scenario_value" name="value" type="number" step="any" required value="{{ old('value') }}" placeholder="{{ __('decisions.field_value_placeholder') }}" class="form-control">
                             </x-field>
                         </div>
                         <div class="col-12">
-                            <button type="submit" class="btn btn-primary">Jalankan skenario</button>
+                            <button type="submit" class="btn btn-primary">{{ __('decisions.simulate_submit') }}</button>
                         </div>
                     </form>
                 @else
-                    <p class="text-secondary">Peran Anda hanya dapat membaca kasus yang ada.</p>
+                    <p class="text-secondary">{{ __('decisions.read_only') }}</p>
                 @endif
             </x-card>
         </div>
     </div>
 
-    <x-card title="Riwayat kasus" description="Terbaru lebih dulu. Buka untuk rekomendasi, bukti, dan audit.">
+    <x-card :title="__('decisions.history_title')" :description="__('decisions.history_desc')">
         @if ($cases === [])
             <x-empty-state
-                title="Belum ada kasus keputusan"
-                description="Minta rekomendasi pertama melalui formulir di atas."
+                :title="__('decisions.history_empty_title')"
+                :description="__('decisions.history_empty_desc')"
             />
         @else
-            <x-table-wrapper label="Riwayat kasus keputusan">
+            <x-table-wrapper :label="__('decisions.history_table_label')">
                 <table class="table table-vcenter card-table">
                     <thead>
                         <tr>
-                            <th scope="col" class="text-end">ID</th>
-                            <th scope="col">Subjek</th>
-                            <th scope="col">Status</th>
-                            <th scope="col" class="text-end">Dibuat</th>
-                            <th scope="col"><span class="visually-hidden">Aksi</span></th>
+                            <th scope="col" class="text-end">{{ __('decisions.col_id') }}</th>
+                            <th scope="col">{{ __('decisions.col_subject') }}</th>
+                            <th scope="col">{{ __('decisions.col_status') }}</th>
+                            <th scope="col" class="text-end">{{ __('decisions.col_created') }}</th>
+                            <th scope="col"><span class="visually-hidden">{{ __('decisions.col_actions') }}</span></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -153,13 +153,13 @@
                             <tr>
                                 <td class="text-end">{{ $case['id'] ?? '?' }}</td>
                                 <td>
-                                    <span class="fw-bold text-secondary">{{ $case['subject']['branch'] ?? 'Semua cabang' }}</span>
+                                    <span class="fw-bold text-secondary">{{ $case['subject']['branch'] ?? __('decisions.subject_all_branches') }}</span>
                                     <span class="d-block small text-secondary">{{ $case['subject']['period'] ?? '' }}</span>
                                 </td>
                                 <td><x-badge variant="info">{{ $case['status'] ?? '?' }}</x-badge></td>
                                 <td class="text-end"><span class="small text-secondary">{{ $case['created_at'] ?? '?' }}</span></td>
                                 <td class="text-end">
-                                    <a href="{{ route('decisions.show', ['id' => (int) ($case['id'] ?? 0)]) }}" class="btn btn-sm">Buka</a>
+                                    <a href="{{ route('decisions.show', ['id' => (int) ($case['id'] ?? 0)]) }}" class="btn btn-sm">{{ __('decisions.open') }}</a>
                                 </td>
                             </tr>
                         @endforeach

@@ -6,11 +6,11 @@
     <div class="page-header">
         <div class="row align-items-center">
             <div class="col">
-                <h1 class="page-title">Glosarium bisnis</h1>
+                <h1 class="page-title">{{ __('glossary.header_title') }}</h1>
                 <p class="page-subtitle">
-                    Definisi metrik tersertifikasi yang dipakai AI saat menjawab dan menyusun SQL.
+                    {{ __('glossary.header_subtitle') }}
                     @if ($version)
-                        <x-badge variant="info">versi {{ $version }}</x-badge>
+                        <x-badge variant="info">{{ __('glossary.version_badge', ['version' => $version]) }}</x-badge>
                     @endif
                 </p>
             </div>
@@ -20,30 +20,30 @@
     @unless ($engineAvailable)
         <x-card class="mb-3">
             <div role="status" class="alert alert-warning">
-                <x-badge variant="warning">Mesin AI tidak tersedia</x-badge>
+                <x-badge variant="warning">{{ __('glossary.engine_unavailable') }}</x-badge>
                 <p class="text-secondary">
-                    Daftar definisi belum dapat dimuat. Periksa layanan <code>fastapi</code>
-                    lalu muat ulang halaman ini.
+                    {{ __('glossary.engine_unavailable_lead') }} <code>fastapi</code>
+                    {{ __('glossary.engine_unavailable_trail') }}
                 </p>
             </div>
         </x-card>
     @endunless
 
-    <x-card title="Definisi metrik" description="Rumus mengutip fungsi yang menghitungnya — bukan tebakan.">
+    <x-card :title="__('glossary.list_title')" :description="__('glossary.list_desc')">
         @if ($metrics === [])
             <x-empty-state
-                title="Belum ada definisi"
-                description="Mesin AI tidak mengembalikan glosarium."
+                :title="__('glossary.list_empty_title')"
+                :description="__('glossary.list_empty_desc')"
             />
         @else
-            <x-table-wrapper label="Definisi metrik tersertifikasi">
+            <x-table-wrapper :label="__('glossary.list_table_label')">
                 <table class="table table-vcenter card-table">
                     <thead>
                         <tr>
-                            <th scope="col">Metrik</th>
-                            <th scope="col">Definisi</th>
-                            <th scope="col">Rumus</th>
-                            <th scope="col">Sumber</th>
+                            <th scope="col">{{ __('glossary.col_metric') }}</th>
+                            <th scope="col">{{ __('glossary.col_definition') }}</th>
+                            <th scope="col">{{ __('glossary.col_formula') }}</th>
+                            <th scope="col">{{ __('glossary.col_source') }}</th>
                         </tr>
                     </thead>
                     <tbody>

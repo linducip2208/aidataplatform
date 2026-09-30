@@ -15,7 +15,14 @@ Date: 2026-09-29 (UTC). Branch: `main`. Scope: master enterprise commands, itera
    `WebWorkflowTest` updated to act as owner + new non-owner 403 cases.
    Suite → **929 tests, 0 failures**.
 
-## Iteration 22 (this commit, BYOK directive)
+## Iteration 23 (this commit, develop wave 4)
+
+37. **i18n wave 4 (all pages).** alerts/aicost/decisions/knowledge/
+   glossary/admin/profile/errors fully keyed EN+ID via parallel agents
+   (colon-binding discipline, id byte-identical); key-leak test extended to
+   17 routes (356 assertions). Suite 1006 green, `view:cache` clean.
+
+## Iteration 22 (previous commit, BYOK directive)
 
 36. **BYOK provider registry.** `ai_providers` table holds metadata only —
    keys are never stored/logged/returned. Admin UI (CRUD, test-connection,

@@ -6,25 +6,25 @@
     <div class="page-header">
         <div class="row align-items-center">
             <div class="col">
-                <h1 class="page-title">Manajemen pengguna</h1>
+                <h1 class="page-title">{{ __('admin.users_header_title') }}</h1>
                 <div class="page-subtitle">
-                    Tambah akun, ubah peran, aktifkan atau nonaktifkan akun, dan hapus pengguna yang tidak lagi dibutuhkan.
+                    {{ __('admin.users_header_sub') }}
                 </div>
             </div>
         </div>
     </div>
 
-    <x-card class="mb-3" title="Filter" description="Cari pengguna berdasarkan nama atau email, atau saring berdasarkan peran.">
+    <x-card class="mb-3" :title="__('admin.users_filter_title')" :description="__('admin.users_filter_desc')">
         <form method="GET" action="{{ route('admin.users.index') }}">
             <div class="row row-cards">
                 <div class="col-md-4">
-                    <x-field label="Cari" for="q" hint="Mencocokkan nama dan email pengguna.">
+                    <x-field :label="__('admin.users_search_label')" for="q" :hint="__('admin.users_search_hint')">
                         <input
                             id="q"
                             name="q"
                             type="search"
                             value="{{ $filters['q'] ?? '' }}"
-                            placeholder="mis. analyst"
+                            placeholder="{{ __('admin.users_search_placeholder') }}"
                             @error('q') aria-invalid="true" @enderror
                             class="form-control"
                         >
@@ -32,13 +32,13 @@
                 </div>
 
                 <div class="col-md-4">
-                    <x-field label="Peran" for="role">
+                    <x-field :label="__('admin.users_role_label')" for="role">
                         <select
                             id="role"
                             name="role"
                             class="form-select"
                         >
-                                <option value="">Semua peran</option>
+                                <option value="">{{ __('admin.users_role_all') }}</option>
                                 @foreach ($roles as $role)
                                     <option value="{{ $role->value }}" @selected(($filters['role'] ?? '') === $role->value)>{{ $role->localizedLabel() }}</option>
                                 @endforeach
@@ -51,11 +51,11 @@
                         <button
                             type="submit"
                             class="btn btn-primary flex-fill"
-                        >Terapkan</button>
+                        >{{ __('admin.users_apply') }}</button>
                         <a
                             href="{{ route('admin.users.index') }}"
                             class="btn"
-                        >Atur ulang</a>
+                        >{{ __('admin.users_reset') }}</a>
                     </div>
                 </div>
             </div>
@@ -64,11 +64,11 @@
 
     <div class="row row-cards">
         <div class="col-lg-8">
-            <x-card title="Daftar pengguna" description="{{ number_format($users->total(), 0, ',', '.') }} akun terdaftar.">
+            <x-card :title="__('admin.users_list_title')" :description="__('admin.users_list_desc', ['count' => number_format($users->total(), 0, ',', '.')])">
                 @if ($users->isEmpty())
                 <x-empty-state
-                    title="Belum ada pengguna"
-                    description="Gunakan formulir di samping untuk membuat akun pertama."
+                    :title="__('admin.users_empty_title')"
+                    :description="__('admin.users_empty_desc')"
                 />
             @else
                 <ul class="list-unstyled mb-0 d-grid gap-3">
@@ -81,30 +81,30 @@
                                         <p class="fw-bold mb-1">
                                             {{ $user->name }}
                                             @if ($isSelf)
-                                                <span class="small fw-normal text-secondary">(Anda)</span>
+                                                <span class="small fw-normal text-secondary">{{ __('admin.users_you') }}</span>
                                             @endif
                                         </p>
                                         <p class="small text-secondary text-break">{{ $user->email }}</p>
 
                                         <dl class="datagrid mt-3">
                                             <div class="datagrid-item">
-                                                <dt class="datagrid-title">Peran</dt>
+                                                <dt class="datagrid-title">{{ __('admin.users_th_role') }}</dt>
                                                 <dd class="datagrid-content"><x-badge variant="info">{{ $user->role()->localizedLabel() }}</x-badge></dd>
                                             </div>
                                             <div class="datagrid-item">
-                                                <dt class="datagrid-title">Status</dt>
+                                                <dt class="datagrid-title">{{ __('admin.users_th_status') }}</dt>
                                                 <dd class="datagrid-content">
                                                     @if ($user->is_active)
-                                                        <x-badge variant="success">Aktif</x-badge>
+                                                        <x-badge variant="success">{{ __('admin.users_active') }}</x-badge>
                                                     @else
-                                                        <x-badge variant="danger">Nonaktif</x-badge>
+                                                        <x-badge variant="danger">{{ __('admin.users_inactive') }}</x-badge>
                                                     @endif
                                                 </dd>
                                             </div>
                                             <div class="datagrid-item">
-                                                <dt class="datagrid-title">Login terakhir</dt>
+                                                <dt class="datagrid-title">{{ __('admin.users_th_last_login') }}</dt>
                                                 <dd class="datagrid-content">
-                                                    {{ $user->last_login_at ? $user->last_login_at->locale('id')->translatedFormat('d M Y H:i') : 'Belum pernah' }}
+                                                    {{ $user->last_login_at ? $user->last_login_at->locale('id')->translatedFormat('d M Y H:i') : __('admin.users_never') }}
                                                 </dd>
                                             </div>
                                         </dl>
@@ -115,9 +115,9 @@
                                             @csrf
                                             @method('PATCH')
 
-                                            <p class="fw-bold">Ubah akun</p>
+                                            <p class="fw-bold">{{ __('admin.users_edit_title') }}</p>
 
-                                            <x-field label="Nama" for="name-{{ $user->getKey() }}" name="name" required>
+                                            <x-field :label="__('admin.users_name_label')" for="name-{{ $user->getKey() }}" name="name" required>
                                                 <input
                                                     id="name-{{ $user->getKey() }}"
                                                     name="name"
@@ -130,7 +130,7 @@
                                                 >
                                             </x-field>
 
-                                            <x-field label="Email" for="email-{{ $user->getKey() }}" name="email" required>
+                                            <x-field :label="__('admin.users_email_label')" for="email-{{ $user->getKey() }}" name="email" required>
                                                 <input
                                                     id="email-{{ $user->getKey() }}"
                                                     name="email"
@@ -142,7 +142,7 @@
                                                 >
                                             </x-field>
 
-                                            <x-field label="Peran" for="role-{{ $user->getKey() }}" name="role" required>
+                                            <x-field :label="__('admin.users_role_label')" for="role-{{ $user->getKey() }}" name="role" required>
                                                 <select
                                                     id="role-{{ $user->getKey() }}"
                                                     name="role"
@@ -172,24 +172,24 @@
                                                     @checked(old('is_active', $user->is_active ? '1' : '0') === '1')
                                                     class="form-check-input"
                                                 >
-                                                <label for="is_active-{{ $user->getKey() }}" class="form-check-label">Akun aktif dan dapat login</label>
+                                                <label for="is_active-{{ $user->getKey() }}" class="form-check-label">{{ __('admin.users_active_label') }}</label>
                                             </div>
 
                                             <button
                                                 type="submit"
                                                 class="btn btn-primary w-100"
-                                            >Simpan perubahan</button>
+                                            >{{ __('admin.users_save') }}</button>
 
                                             @if ($isSelf)
                                                 <p class="small text-secondary mt-2 mb-0">
-                                                    Akun yang sedang digunakan tidak dapat dihapus. Nonaktifkan bila perlu.
+                                                    {{ __('admin.users_self_note') }}
                                                 </p>
                                             @else
                                                 <button
                                                     type="submit"
                                                     form="delete-user-{{ $user->getKey() }}"
                                                     class="btn btn-outline-danger w-100 mt-2"
-                                                >Hapus pengguna</button>
+                                                >{{ __('admin.users_delete') }}</button>
                                             @endif
                                         </form>
                                     </div>
@@ -201,7 +201,7 @@
                                     id="delete-user-{{ $user->getKey() }}"
                                     method="POST"
                                     action="{{ route('admin.users.destroy', $user) }}"
-                                    x-on:submit.confirm="Hapus pengguna ini? Tindakan ini tidak dapat dibatalkan."
+                                    x-on:submit.confirm="{{ __('admin.users_delete_confirm') }}"
                                 >
                                     @csrf
                                     @method('DELETE')
@@ -220,11 +220,11 @@
         </div>
 
         <div class="col-lg-4">
-            <x-card title="Tambah pengguna" description="Password minimal 8 karakter.">
+            <x-card :title="__('admin.users_create_title')" :description="__('admin.users_create_desc')">
                 <form method="POST" action="{{ route('admin.users.store') }}">
                     @csrf
 
-                    <x-field label="Nama" for="new-name" name="name" required>
+                    <x-field :label="__('admin.users_name_label')" for="new-name" name="name" required>
                         <input
                             id="new-name"
                             name="name"
@@ -237,7 +237,7 @@
                         >
                     </x-field>
 
-                    <x-field label="Email" for="new-email" name="email" required>
+                    <x-field :label="__('admin.users_email_label')" for="new-email" name="email" required>
                         <input
                             id="new-email"
                             name="email"
@@ -250,7 +250,7 @@
                         >
                     </x-field>
 
-                    <x-field label="Password" for="new-password" name="password" required>
+                    <x-field :label="__('admin.users_password_label')" for="new-password" name="password" required>
                         <input
                             id="new-password"
                             name="password"
@@ -262,7 +262,7 @@
                         >
                     </x-field>
 
-                    <x-field label="Peran" for="new-role" name="role" required hint="Setiap peran punya kewenangan berbeda pada platform.">
+                    <x-field :label="__('admin.users_role_label')" for="new-role" name="role" required :hint="__('admin.users_role_hint')">
                         <select
                             id="new-role"
                             name="role"
@@ -281,11 +281,11 @@
                     <button
                         type="submit"
                         class="btn btn-primary w-100"
-                    >Tambah pengguna</button>
+                    >{{ __('admin.users_create_title') }}</button>
                 </form>
             </x-card>
 
-            <x-card title="Peran dan akses" description="Kewenangan setiap peran dalam platform.">
+            <x-card :title="__('admin.users_roles_title')" :description="__('admin.users_roles_desc')">
                 <ul class="list-unstyled mb-0 d-grid gap-3">
                     @foreach ($roles as $role)
                         <li>
