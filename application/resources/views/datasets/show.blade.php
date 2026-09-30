@@ -35,10 +35,10 @@
         $sampleColumns = array_keys($sampleColumns);
 
         $breakdownLabels = [
-            'completeness' => 'Kelengkapan',
-            'uniqueness' => 'Keunikan',
-            'validity' => 'Validitas',
-            'consistency' => 'Konsistensi',
+            'completeness' => __('datasets.show_breakdown_completeness'),
+            'uniqueness' => __('datasets.show_breakdown_uniqueness'),
+            'validity' => __('datasets.show_breakdown_validity'),
+            'consistency' => __('datasets.show_breakdown_consistency'),
         ];
 
         // Mirrors CANONICAL_FIELDS in ai-engine/app/ingestion/mapper.py. A new
@@ -55,10 +55,10 @@
         $targets = $canonicalFields[$dataset->dataset_type] ?? $canonicalFields['sales'];
 
         $steps = [
-            ['label' => 'Pratinjau', 'done' => $hasProfile, 'ready' => $hasJob],
-            ['label' => 'Pemetaan kolom', 'done' => $hasMappings, 'ready' => $hasProfile],
-            ['label' => 'Kualitas', 'done' => $score !== null, 'ready' => $hasJob && $hasMappings],
-            ['label' => 'Komit', 'done' => $isCommitted, 'ready' => $hasJob && $passed && ! $isCommitted],
+            ['label' => __('datasets.show_step_preview'), 'done' => $hasProfile, 'ready' => $hasJob],
+            ['label' => __('datasets.show_step_mapping'), 'done' => $hasMappings, 'ready' => $hasProfile],
+            ['label' => __('datasets.show_step_quality'), 'done' => $score !== null, 'ready' => $hasJob && $hasMappings],
+            ['label' => __('datasets.show_step_commit'), 'done' => $isCommitted, 'ready' => $hasJob && $passed && ! $isCommitted],
         ];
 
         $typeLabels = config('ai_engine.dataset_type_labels', []);
@@ -67,12 +67,12 @@
     <div class="page-header">
         <div class="row align-items-center">
             <div class="col">
-                <nav aria-label="Remah roti">
+                <nav aria-label="{{ __('datasets.show_breadcrumb_aria') }}">
                     <ol class="breadcrumb">
                         <li class="breadcrumb-item">
                             <a
                                 href="{{ route('datasets.index') }}"
-                            >Kumpulan data</a>
+                            >{{ __('datasets.show_breadcrumb') }}</a>
                         </li>
                         <li class="breadcrumb-item active" aria-current="page">{{ $dataset->name }}</li>
                     </ol>
@@ -81,7 +81,7 @@
                 <h1 class="page-title">{{ $dataset->name }}</h1>
                 <div class="page-subtitle d-flex flex-wrap align-items-center gap-2">
                     <x-badge :class="$status->badgeClass()">{{ $status->localizedLabel() }}</x-badge>
-                    <span>{{ $dataset->source_filename ?: 'Tanpa nama berkas' }}</span>
+                    <span>{{ $dataset->source_filename ?: __('datasets.show_no_file') }}</span>
                     <span aria-hidden="true">&middot;</span>
                     <span>{{ $dataset->sizeForHumans() }}</span>
                 </div>
@@ -92,32 +92,32 @@
                     <a
                         href="{{ route('datasets.index') }}"
                         class="btn"
-                    >Kembali ke daftar</a>
+                    >{{ __('datasets.show_back') }}</a>
 
                     @if ($hasJob)
                         <a
                             href="{{ route('imports.show', $dataset) }}"
                             class="btn"
-                        >Lihat job impor</a>
+                        >{{ __('datasets.show_view_job') }}</a>
                     @endif
                 </div>
             </div>
         </div>
     </div>
 
-    <ol class="row row-cards" aria-label="Tahapan pemrosesan dataset">
+    <ol class="row row-cards" aria-label="{{ __('datasets.show_steps_aria') }}">
         @foreach ($steps as $index => $step)
             <li class="col-sm-6 col-lg-3">
                 <div class="card card-body">
-                    <p class="text-secondary small fw-bold text-uppercase">Tahap {{ $index + 1 }}</p>
+                    <p class="text-secondary small fw-bold text-uppercase">{{ __('datasets.show_step_n', ['n' => $index + 1]) }}</p>
                     <p class="fw-bold">{{ $step['label'] }}</p>
                     <p>
                         @if ($step['done'])
-                            <x-badge variant="success">Selesai</x-badge>
+                            <x-badge variant="success">{{ __('datasets.show_step_done') }}</x-badge>
                         @elseif ($step['ready'])
-                            <x-badge variant="info">Siap dijalankan</x-badge>
+                            <x-badge variant="info">{{ __('datasets.show_step_ready') }}</x-badge>
                         @else
-                            <x-badge variant="neutral">Menunggu langkah sebelumnya</x-badge>
+                            <x-badge variant="neutral">{{ __('datasets.show_step_waiting') }}</x-badge>
                         @endif
                     </p>
                 </div>
@@ -126,11 +126,9 @@
     </ol>
 
     @unless ($canWrite)
-        <x-card class="mb-3" title="Akses baca saja">
+        <x-card class="mb-3" title="{{ __('datasets.show_readonly_title') }}">
             <p class="text-secondary">
-                Peran <strong>{{ auth()->user()->role()->localizedLabel() }}</strong> hanya dapat melihat dataset.
-                Menjalankan pratinjau, pemetaan, kualitas, dan komit terbatas untuk
-                {{ \App\Enums\UserRole::Admin->localizedLabel() }} dan {{ \App\Enums\UserRole::Analyst->localizedLabel() }}.
+                {{ __('datasets.show_readonly_prefix') }} <strong>{{ auth()->user()->role()->localizedLabel() }}</strong> {{ __('datasets.show_readonly_suffix', ['admin' => \App\Enums\UserRole::Admin->localizedLabel(), 'analyst' => \App\Enums\UserRole::Analyst->localizedLabel()]) }}
             </p>
         </x-card>
     @endunless
@@ -138,32 +136,32 @@
     <div class="row row-cards">
         <div class="col-lg-8">
             <x-card
-                title="Tahap 1: Pratinjau data"
-                description="Membaca berkas dan memprofil jumlah baris, kolom, serta contoh data."
+                title="{{ __('datasets.show_stage1_title') }}"
+                description="{{ __('datasets.show_stage1_desc') }}"
             >
                 @if (! $hasJob)
                     <p class="text-secondary">
-                        Dataset ini belum memiliki job import, jadi mesin AI tidak bisa memprofilnya. Unggah ulang berkasnya untuk memulai dari awal.
+                        {{ __('datasets.show_stage1_nojob') }}
                     </p>
                 @endif
 
                 <dl class="datagrid mb-3">
                     <div class="datagrid-item">
-                        <dt class="datagrid-title">Jumlah baris</dt>
+                        <dt class="datagrid-title">{{ __('datasets.show_row_count') }}</dt>
                         <dd class="datagrid-content tabular-nums">{{ number_format((int) $dataset->row_count, 0, ',', '.') }}</dd>
                     </div>
                     <div class="datagrid-item">
-                        <dt class="datagrid-title">Jumlah kolom</dt>
+                        <dt class="datagrid-title">{{ __('datasets.show_col_count') }}</dt>
                         <dd class="datagrid-content tabular-nums">{{ number_format((int) $dataset->column_count, 0, ',', '.') }}</dd>
                     </div>
                     <div class="datagrid-item">
-                        <dt class="datagrid-title">Job impor</dt>
-                        <dd class="datagrid-content tabular-nums">{{ $dataset->import_job_id ? number_format((int) $dataset->import_job_id, 0, ',', '.') : 'Belum ada' }}</dd>
+                        <dt class="datagrid-title">{{ __('datasets.show_import_job') }}</dt>
+                        <dd class="datagrid-content tabular-nums">{{ $dataset->import_job_id ? number_format((int) $dataset->import_job_id, 0, ',', '.') : __('datasets.show_job_none') }}</dd>
                     </div>
                     <div class="datagrid-item">
-                        <dt class="datagrid-title">Diunggah</dt>
+                        <dt class="datagrid-title">{{ __('datasets.show_uploaded') }}</dt>
                         <dd class="datagrid-content">
-                            {{ $dataset->created_at ? $dataset->created_at->locale('id')->translatedFormat('d M Y H:i') : 'Tidak diketahui' }}
+                            {{ $dataset->created_at ? $dataset->created_at->locale('id')->translatedFormat('d M Y H:i') : __('datasets.show_uploaded_unknown') }}
                         </dd>
                     </div>
                 </dl>
@@ -175,35 +173,35 @@
                             type="submit"
                             @disabled(! $hasJob)
                             class="btn btn-primary"
-                        >{{ $hasProfile ? 'Jalankan pratinjau ulang' : 'Jalankan pratinjau' }}</button>
+                        >{{ $hasProfile ? __('datasets.show_preview_rerun') : __('datasets.show_preview_run') }}</button>
 
                         @unless ($hasJob)
-                            <p class="text-secondary small">Tombol dinonaktifkan karena dataset belum memiliki job import.</p>
+                            <p class="text-secondary small">{{ __('datasets.show_preview_disabled') }}</p>
                         @endunless
                     </form>
                 @endif
             </x-card>
 
             <x-card
-                title="Tahap 2: Pemetaan kolom"
-                description="Setiap kolom sumber dipetakan ke kolom kanonik gudang analytics. Minimal satu kolom wajib dipetakan."
+                title="{{ __('datasets.show_stage2_title') }}"
+                description="{{ __('datasets.show_stage2_desc') }}"
             >
                 @if (! $hasProfile)
                     <x-empty-state
-                        title="Profil kolom belum tersedia"
-                        description="Jalankan pratinjau pada tahap 1 supaya mesin AI dapat membaca nama kolom berkas."
+                        title="{{ __('datasets.show_stage2_empty_title') }}"
+                        description="{{ __('datasets.show_stage2_empty_desc') }}"
                     />
                 @else
                     @if ($canWrite)
                         <form method="POST" action="{{ route('datasets.mapping', $dataset) }}">
                             @csrf
 
-                            <x-table-wrapper label="Pemetaan kolom" class="mb-3">
+                            <x-table-wrapper label="{{ __('datasets.show_mapping_label') }}" class="mb-3">
                                 <table class="table table-vcenter card-table">
                                     <thead>
                                         <tr>
-                                            <th scope="col">Kolom sumber</th>
-                                            <th scope="col">Kolom kanonik</th>
+                                            <th scope="col">{{ __('datasets.show_th_source') }}</th>
+                                            <th scope="col">{{ __('datasets.show_th_canonical') }}</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -229,20 +227,20 @@
                                                                 <span class="text-uppercase">{{ $profile['dtype'] }}</span>
                                                                 &middot;
                                                             @endif
-                                            kosong {{ number_format((int) ($profile['missing'] ?? 0), 0, ',', '.') }}
+                                            {{ __('datasets.show_missing', ['count' => number_format((int) ($profile['missing'] ?? 0), 0, ',', '.')]) }}
                                             &middot;
-                                            {{ number_format((int) ($profile['unique'] ?? 0), 0, ',', '.') }} nilai unik
+                                            {{ __('datasets.show_unique', ['count' => number_format((int) ($profile['unique'] ?? 0), 0, ',', '.')]) }}
                                                         </span>
                                                     @endif
                                                 </td>
                                                 <td>
-                                                    <label for="mapping-{{ $loop->index }}" class="visually-hidden">Target untuk kolom {{ $column }}</label>
+                                                    <label for="mapping-{{ $loop->index }}" class="visually-hidden">{{ __('datasets.show_mapping_target', ['column' => $column]) }}</label>
                                                     <select
                                                         id="mapping-{{ $loop->index }}"
                                                         name="{{ $inputName }}"
                                                         class="form-select"
                                                     >
-                                                        <option value="">Tidak dipetakan</option>
+                                                        <option value="">{{ __('datasets.show_unmapped') }}</option>
                                                         @foreach ($options as $target)
                                                             <option value="{{ $target }}" @selected($selected === $target)>{{ $target }}</option>
                                                         @endforeach
@@ -259,10 +257,10 @@
                             @enderror
 
                             <x-field
-                                label="Simpan sebagai template"
+                                label="{{ __('datasets.show_template_label') }}"
                                 for="save_as_template"
                                 name="save_as_template"
-                                hint="Opsional. Nama template untuk dipakai ulang pada dataset berikutnya."
+                                hint="{{ __('datasets.show_template_hint') }}"
                                 class="mb-3"
                             >
                                 <input
@@ -271,7 +269,7 @@
                                     type="text"
                                     value="{{ old('save_as_template') }}"
                                     maxlength="120"
-                                    placeholder="mis. template_penjualan_retail"
+                                    placeholder="{{ __('datasets.show_template_placeholder') }}"
                                     @error('save_as_template') aria-invalid="true" @enderror
                                     class="form-control"
                                 >
@@ -280,7 +278,7 @@
                             <button
                                 type="submit"
                                 class="btn btn-primary"
-                            >Simpan pemetaan</button>
+                            >{{ __('datasets.show_save_mapping') }}</button>
                         </form>
                     @else
                         <dl class="datagrid">
@@ -292,7 +290,7 @@
                             @endforeach
 
                             @if ($mappings === [])
-                                <x-empty-state title="Belum ada pemetaan" description="Pemetaan kolom belum disimpan untuk dataset ini." />
+                                <x-empty-state title="{{ __('datasets.show_no_mapping_title') }}" description="{{ __('datasets.show_no_mapping_desc') }}" />
                             @endif
                         </dl>
                     @endif
@@ -300,20 +298,20 @@
             </x-card>
 
             <x-card
-                title="Tahap 3: Pemeriksaan kualitas"
-                description="Menghitung kelengkapan, keunikan, validitas, dan konsistensi data sebelum masuk gudang."
+                title="{{ __('datasets.show_stage3_title') }}"
+                description="{{ __('datasets.show_stage3_desc') }}"
             >
                 @if ($score === null)
                     <p class="text-secondary">
-                        Belum ada laporan kualitas. Jalankan pemeriksaan setelah pemetaan kolom tersimpan.
+                        {{ __('datasets.show_stage3_empty') }}
                     </p>
                 @else
                     <div class="d-flex flex-wrap align-items-center gap-3 mb-3">
                         <p class="tabular-nums">
                             {{ \Illuminate\Support\Number::percentage($score * 100, precision: 1, locale: 'id') }}
                         </p>
-                        <x-badge variant="{{ $passed ? 'success' : 'danger' }}">{{ $passed ? \App\Enums\QualityVerdict::Pass->localizedLabel() : 'Belum lolos' }}</x-badge>
-                        <span class="text-secondary">Ambang minimum {{ \Illuminate\Support\Number::percentage($threshold * 100, precision: 1, locale: 'id') }}</span>
+                        <x-badge variant="{{ $passed ? 'success' : 'danger' }}">{{ $passed ? \App\Enums\QualityVerdict::Pass->localizedLabel() : __('datasets.show_not_passed') }}</x-badge>
+                        <span class="text-secondary">{{ __('datasets.show_threshold', ['value' => \Illuminate\Support\Number::percentage($threshold * 100, precision: 1, locale: 'id')]) }}</span>
                     </div>
 
                     <dl class="mb-3">
@@ -337,23 +335,23 @@
                 @endif
 
                 @if ($issues !== [])
-                    <x-table-wrapper label="Temuan pemeriksaan kualitas" class="mb-3">
+                    <x-table-wrapper label="{{ __('datasets.show_issues_label') }}" class="mb-3">
                         <table class="table table-vcenter card-table">
                             <thead>
                                 <tr>
-                                    <th scope="col">Aturan</th>
-                                    <th scope="col">Kolom</th>
-                                    <th scope="col" class="text-end">Jumlah</th>
-                                    <th scope="col">Keterangan</th>
+                                    <th scope="col">{{ __('datasets.show_th_rule') }}</th>
+                                    <th scope="col">{{ __('datasets.show_th_column') }}</th>
+                                    <th scope="col" class="text-end">{{ __('datasets.show_th_count') }}</th>
+                                    <th scope="col">{{ __('datasets.show_th_note') }}</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 @foreach ($issues as $issue)
                                     <tr>
-                                        <td><code>{{ $issue['rule'] ?? 'tidak diketahui' }}</code></td>
-                                        <td>{{ $issue['column'] ?? 'seluruh tabel' }}</td>
+                                        <td><code>{{ $issue['rule'] ?? __('datasets.show_issue_rule_unknown') }}</code></td>
+                                        <td>{{ $issue['column'] ?? __('datasets.show_issue_all_table') }}</td>
                                         <td class="text-end tabular-nums">{{ number_format((int) ($issue['count'] ?? 0), 0, ',', '.') }}</td>
-                                        <td class="text-secondary">{{ $issue['message'] ?? 'Tanpa keterangan' }}</td>
+                                        <td class="text-secondary">{{ $issue['message'] ?? __('datasets.show_issue_no_desc') }}</td>
                                     </tr>
                                 @endforeach
                             </tbody>
@@ -368,15 +366,15 @@
                             type="submit"
                             @disabled(! $hasJob || ! $hasMappings)
                             class="btn btn-primary"
-                        >{{ $score === null ? 'Jalankan pemeriksaan kualitas' : 'Jalankan ulang pemeriksaan' }}</button>
+                        >{{ $score === null ? __('datasets.show_run_quality') : __('datasets.show_rerun_quality') }}</button>
 
                         @unless ($hasJob && $hasMappings)
                             <p class="text-secondary small">
-                                Tombol dinonaktifkan karena
+                                {{ __('datasets.show_quality_disabled_lead') }}
                                 @if (! $hasJob)
-                                    job impor belum tersedia.
+                                    {{ __('datasets.show_quality_no_job') }}
                                 @else
-                                    pemetaan kolom belum disimpan.
+                                    {{ __('datasets.show_quality_no_mapping') }}
                                 @endif
                             </p>
                         @endunless
@@ -385,16 +383,16 @@
             </x-card>
 
             <x-card
-                title="Tahap 4: Komit ke gudang data"
-                description="Baris yang lolos ambang kualitas dikirim ke gudang data untuk dianalisis."
+                title="{{ __('datasets.show_stage4_title') }}"
+                description="{{ __('datasets.show_stage4_desc') }}"
             >
                 @if ($isCommitted)
                     <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
                         <x-badge :class="$status->badgeClass()">{{ $status->localizedLabel() }}</x-badge>
                         <p class="text-secondary">
-                            Komit terakhir
+                            {{ __('datasets.show_commit_last') }}
                             @if ($dataset->committed_at)
-                                pada {{ $dataset->committed_at->locale('id')->translatedFormat('d M Y H:i') }}.
+                                {{ __('datasets.show_commit_on', ['date' => $dataset->committed_at->locale('id')->translatedFormat('d M Y H:i')]) }}
                             @else
                                 .
                             @endif
@@ -402,8 +400,7 @@
                     </div>
                 @elseif (! $passed)
                     <p class="text-secondary">
-                        Komit baru bisa dijalankan setelah skor kualitas mencapai ambang minimum
-                        {{ \Illuminate\Support\Number::percentage($threshold * 100, precision: 1, locale: 'id') }}.
+                        {{ __('datasets.show_commit_blocked', ['threshold' => \Illuminate\Support\Number::percentage($threshold * 100, precision: 1, locale: 'id')]) }}
                     </p>
                 @endif
 
@@ -422,9 +419,9 @@
                                 class="form-check-input"
                             >
                             <label for="run_async" class="text-secondary">
-                                Proses di latar belakang (disarankan)
+                                {{ __('datasets.show_async_label') }}
                                 <span class="d-block text-secondary small">
-                                    Impor diproses oleh worker. Nonaktifkan untuk menjalankan sinkron dan menunggu sampai selesai.
+                                    {{ __('datasets.show_async_hint') }}
                                 </span>
                             </label>
                         </div>
@@ -433,17 +430,17 @@
                             type="submit"
                             @disabled($isCommitted || ! $hasJob || ! $passed)
                             class="btn btn-primary"
-                        >Komit dataset</button>
+                        >{{ __('datasets.show_commit_button') }}</button>
 
                         @if ($isCommitted || ! $hasJob || ! $passed)
                             <p class="text-secondary small">
-                                Tombol dinonaktifkan karena
+                                {{ __('datasets.show_commit_disabled_lead') }}
                                 @if ($isCommitted)
-                                    dataset sudah dikomit.
+                                    {{ __('datasets.show_commit_done') }}
                                 @elseif (! $hasJob)
-                                    job impor belum tersedia.
+                                    {{ __('datasets.show_commit_no_job') }}
                                 @else
-                                    kualitas belum mencapai ambang minimum.
+                                    {{ __('datasets.show_commit_quality') }}
                                 @endif
                             </p>
                         @endif
@@ -451,14 +448,14 @@
                 @endif
             </x-card>
 
-            <x-card title="Contoh data" description="Maksimal 20 baris pertama dari berkas yang diunggah.">
+            <x-card title="{{ __('datasets.show_sample_title') }}" description="{{ __('datasets.show_sample_desc') }}">
                 @if ($sampleRows === [] || $sampleColumns === [])
                     <x-empty-state
-                        title="Contoh data belum tersedia"
-                        description="Jalankan pratinjau pada tahap 1 agar mesin AI mengambil contoh baris."
+                        title="{{ __('datasets.show_sample_empty_title') }}"
+                        description="{{ __('datasets.show_sample_empty_desc') }}"
                     />
                 @else
-                    <x-table-wrapper label="Contoh data">
+                    <x-table-wrapper label="{{ __('datasets.show_sample_title') }}">
                         <table class="table table-vcenter card-table">
                             <thead>
                                 <tr>
@@ -492,66 +489,66 @@
         </div>
 
         <div class="col-lg-4">
-            <x-card title="Informasi dataset" description="Metadata berkas dan status pemrosesan.">
+            <x-card title="{{ __('datasets.show_info_title') }}" description="{{ __('datasets.show_info_desc') }}">
                 <dl class="datagrid">
                     <div class="datagrid-item">
-                        <dt class="datagrid-title">Tipe dataset</dt>
+                        <dt class="datagrid-title">{{ __('datasets.show_info_type') }}</dt>
                         <dd class="datagrid-content">{{ $typeLabels[$dataset->dataset_type] ?? $dataset->dataset_type }}</dd>
                     </div>
                     <div class="datagrid-item">
-                        <dt class="datagrid-title">Berkas sumber</dt>
-                        <dd class="datagrid-content">{{ $dataset->source_filename ?: 'Tidak diketahui' }}</dd>
+                        <dt class="datagrid-title">{{ __('datasets.show_info_file') }}</dt>
+                        <dd class="datagrid-content">{{ $dataset->source_filename ?: __('datasets.show_info_file_unknown') }}</dd>
                     </div>
                     <div class="datagrid-item">
-                        <dt class="datagrid-title">Ukuran</dt>
+                        <dt class="datagrid-title">{{ __('datasets.show_info_size') }}</dt>
                         <dd class="datagrid-content">{{ $dataset->sizeForHumans() }}</dd>
                     </div>
                     <div class="datagrid-item">
-                        <dt class="datagrid-title">UUID</dt>
+                        <dt class="datagrid-title">{{ __('datasets.show_info_uuid') }}</dt>
                         <dd class="datagrid-content font-monospace text-secondary small">{{ $dataset->uuid }}</dd>
                     </div>
                     @if ($dataset->checksum_sha256)
                         <div class="datagrid-item">
-                            <dt class="datagrid-title">Checksum SHA-256</dt>
+                            <dt class="datagrid-title">{{ __('datasets.show_info_checksum') }}</dt>
                             <dd class="datagrid-content font-monospace text-secondary small">{{ $dataset->checksum_sha256 }}</dd>
                         </div>
                     @endif
                     <div class="datagrid-item">
-                        <dt class="datagrid-title">Skor kualitas</dt>
+                        <dt class="datagrid-title">{{ __('datasets.show_info_score') }}</dt>
                         <dd class="datagrid-content">
                             @if ($score !== null)
                                 {{ \Illuminate\Support\Number::percentage($score * 100, precision: 1, locale: 'id') }}
                             @else
-                                belum dinilai
+                                {{ __('datasets.show_info_score_none') }}
                             @endif
                         </dd>
                     </div>
                     <div class="datagrid-item">
-                        <dt class="datagrid-title">Diperbarui</dt>
+                        <dt class="datagrid-title">{{ __('datasets.show_info_updated') }}</dt>
                         <dd class="datagrid-content">
-                            {{ $dataset->updated_at ? $dataset->updated_at->locale('id')->translatedFormat('d M Y H:i') : 'Tidak diketahui' }}
+                            {{ $dataset->updated_at ? $dataset->updated_at->locale('id')->translatedFormat('d M Y H:i') : __('datasets.show_info_updated_unknown') }}
                         </dd>
                     </div>
                 </dl>
             </x-card>
 
             @if ($canWrite)
-                <x-card title="Hapus dataset" description="Tindakan ini menghapus berkas dan seluruh metadatanya.">
+                <x-card title="{{ __('datasets.show_delete_title') }}" description="{{ __('datasets.show_delete_desc') }}">
                     <p class="text-secondary">
-                        Job impor yang sedang berjalan tidak dapat dibatalkan. Hapus hanya dilakukan bila Anda yakin tidak lagi membutuhkan data ini.
+                        {{ __('datasets.show_delete_hint') }}
                     </p>
 
                     <form
                         method="POST"
                         action="{{ route('datasets.destroy', $dataset) }}"
-                        x-on:submit.confirm="Hapus dataset ini? Tindakan ini tidak dapat dibatalkan."
+                        x-on:submit.confirm="{{ __('datasets.show_delete_confirm') }}"
                     >
                         @csrf
                         @method('DELETE')
                         <button
                             type="submit"
                             class="btn btn-outline-danger"
-                        >Hapus dataset</button>
+                        >{{ __('datasets.show_delete_button') }}</button>
                     </form>
                 </x-card>
             @endif

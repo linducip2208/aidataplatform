@@ -8,36 +8,36 @@
     @endphp
 
     <div class="page-header">
-        <h1 class="page-title">Impor</h1>
+        <h1 class="page-title">{{ __('imports.title') }}</h1>
         <p class="page-subtitle">
-            Dataset yang sudah memiliki job impor. Buka salah satu untuk memantau progres baris yang diproses oleh worker.
+            {{ __('imports.subtitle') }}
         </p>
     </div>
 
-    <x-card title="Job impor" description="{{ number_format($datasets->total(), 0, ',', '.') }} dataset memiliki job impor.">
+    <x-card title="{{ __('imports.jobs_title') }}" description="{{ __('imports.jobs_description', ['count' => number_format($datasets->total(), 0, ',', '.')]) }}">
         @if ($datasets->isEmpty())
             <x-empty-state
-                title="Belum ada job impor"
-                description="Job impor dibuat otomatis saat dataset diunggah dan dikomit ke gudang data."
+                title="{{ __('imports.empty_title') }}"
+                description="{{ __('imports.empty_description') }}"
             >
                 <x-slot:action>
                     <a
                         href="{{ route('datasets.index') }}"
                         class="btn"
-                    >Lihat dataset</a>
+                    >{{ __('imports.view_datasets') }}</a>
                 </x-slot:action>
             </x-empty-state>
         @else
-            <x-table-wrapper label="Daftar job impor">
+            <x-table-wrapper label="{{ __('imports.table_label') }}">
                 <table class="table table-vcenter card-table">
                     <thead>
                         <tr>
-                            <th scope="col">Dataset</th>
-                            <th scope="col">Status alur</th>
-                            <th scope="col" class="text-end">Job ID</th>
-                            <th scope="col" class="text-end">Baris</th>
-                            <th scope="col" class="text-end">Diperbarui</th>
-                            <th scope="col"><span class="visually-hidden">Aksi</span></th>
+                            <th scope="col">{{ __('imports.col_dataset') }}</th>
+                            <th scope="col">{{ __('imports.col_flow_status') }}</th>
+                            <th scope="col" class="text-end">{{ __('imports.col_job_id') }}</th>
+                            <th scope="col" class="text-end">{{ __('imports.col_rows') }}</th>
+                            <th scope="col" class="text-end">{{ __('imports.col_updated') }}</th>
+                            <th scope="col"><span class="visually-hidden">{{ __('imports.col_actions') }}</span></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -58,14 +58,14 @@
                                     @if ($dataset->updated_at)
                                         <span class="text-secondary">{{ $dataset->updated_at->locale('id')->translatedFormat('d M Y H:i') }}</span>
                                     @else
-                                        <span class="text-secondary">Tidak diketahui</span>
+                                        <span class="text-secondary">{{ __('imports.unknown') }}</span>
                                     @endif
                                 </td>
                                 <td class="text-end">
                                     <a
                                         href="{{ route('imports.show', $dataset) }}"
                                         class="btn"
-                                    >Detail</a>
+                                    >{{ __('imports.detail') }}</a>
                                 </td>
                             </tr>
                         @endforeach

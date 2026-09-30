@@ -17,7 +17,7 @@
             <div class="col">
                 <h1 class="page-title">Dashboard</h1>
                 <div class="page-subtitle">
-                    Ringkasan data, status mesin AI, dan aktivitas terbaru di workspace.
+                    {{ __('dashboard.subtitle') }}
                 </div>
             </div>
         </div>
@@ -25,67 +25,67 @@
 
     <div class="row row-cards mb-3">
         <div class="col-sm-6 col-lg-3">
-            <x-stat label="Total dataset" :value="number_format((int) $stats['datasets'], 0, ',', '.')" hint="Seluruh dataset yang pernah diunggah" />
+            <x-stat label="{{ __('dashboard.total_label') }}" :value="number_format((int) $stats['datasets'], 0, ',', '.')" hint="{{ __('dashboard.total_hint') }}" />
         </div>
         <div class="col-sm-6 col-lg-3">
             <x-stat
                 :label="\App\Enums\DatasetStatus::Committed->localizedLabel()"
                 :value="number_format((int) $stats['committed'], 0, ',', '.')"
-                hint="Data siap dipakai analitik"
+                hint="{{ __('dashboard.committed_hint') }}"
             />
         </div>
         <div class="col-sm-6 col-lg-3">
             <x-stat
                 :label="\App\Enums\DatasetStatus::Quarantined->localizedLabel()"
                 :value="number_format((int) $stats['quarantined'], 0, ',', '.')"
-                hint="Gagal melewati ambang kualitas"
+                hint="{{ __('dashboard.quarantined_hint') }}"
             />
         </div>
         {{-- Spans uploaded, previewing and importing, so it names the group
              rather than borrowing the label of any one status. --}}
         <div class="col-sm-6 col-lg-3">
-            <x-stat label="Sedang diproses" :value="number_format((int) $stats['importing'], 0, ',', '.')" hint="Unggah, pratinjau, atau impor yang sedang berjalan" />
+            <x-stat label="{{ __('dashboard.processing_label') }}" :value="number_format((int) $stats['importing'], 0, ',', '.')" hint="{{ __('dashboard.processing_hint') }}" />
         </div>
     </div>
 
     <x-card
         class="mb-3"
-        title="Mesin AI"
-        description="Status koneksi dari FastAPI yang menjalankan ingestion, kualitas, machine learning, agen, dan RAG."
+        title="{{ __('dashboard.engine_title') }}"
+        description="{{ __('dashboard.engine_desc') }}"
     >
         @if (is_null($engineHealth))
             <div role="status" class="d-flex flex-wrap align-items-center gap-2">
-                <x-badge variant="warning">Tidak terjangkau</x-badge>
+                <x-badge variant="warning">{{ __('dashboard.engine_unreachable') }}</x-badge>
                 <p class="text-secondary">
-                    Mesin AI tidak merespons. Periksa apakah service <code>fastapi</code> berjalan
-                    dan variabel <code>AI_ENGINE_URL</code> sudah benar. Data lokal tetap dapat dikelola.
+                    {{ __('dashboard.engine_unreachable_lead') }} <code>fastapi</code>
+                    {{ __('dashboard.engine_unreachable_middle') }} <code>AI_ENGINE_URL</code> {{ __('dashboard.engine_unreachable_trail') }}
                 </p>
             </div>
         @else
             <dl class="datagrid">
                 <div class="datagrid-item">
-                    <dt class="datagrid-title">Status</dt>
+                    <dt class="datagrid-title">{{ __('dashboard.status_label') }}</dt>
                     <dd class="datagrid-content">
                         @if ($engineIsHealthy)
-                            <x-badge variant="success">Sehat</x-badge>
+                            <x-badge variant="success">{{ __('dashboard.healthy') }}</x-badge>
                         @else
-                            <x-badge variant="danger">Gangguan</x-badge>
-                            <span class="text-secondary">{{ $engineHealth['status'] ?? 'tidak diketahui' }}</span>
+                            <x-badge variant="danger">{{ __('dashboard.degraded') }}</x-badge>
+                            <span class="text-secondary">{{ $engineHealth['status'] ?? __('dashboard.unknown_status') }}</span>
                         @endif
                     </dd>
                 </div>
                 <div class="datagrid-item">
-                    <dt class="datagrid-title">Aplikasi</dt>
+                    <dt class="datagrid-title">{{ __('dashboard.app_label') }}</dt>
                     <dd class="datagrid-content">
-                        {{ $engineHealth['app'] ?? 'tidak dilaporkan' }}
+                        {{ $engineHealth['app'] ?? __('dashboard.unreported') }}
                     </dd>
                 </div>
                 <div class="datagrid-item">
-                    <dt class="datagrid-title">Lingkungan</dt>
+                    <dt class="datagrid-title">{{ __('dashboard.env_label') }}</dt>
                     <dd class="datagrid-content">
-                        <span>{{ $engineHealth['env'] ?? 'tidak dilaporkan' }}</span>
+                        <span>{{ $engineHealth['env'] ?? __('dashboard.unreported') }}</span>
                         @if (! empty($engineHealth['version']))
-                            <x-badge variant="neutral">versi {{ $engineHealth['version'] }}</x-badge>
+                            <x-badge variant="neutral">{{ __('dashboard.version_badge', ['version' => $engineHealth['version']]) }}</x-badge>
                         @endif
                     </dd>
                 </div>
@@ -95,13 +95,13 @@
 
     <x-card
         class="mb-3"
-        title="KPI penjualan"
-        description="Dihitung mesin AI dari data yang sudah dikomit, agregasi harian."
+        title="{{ __('dashboard.kpi_title') }}"
+        description="{{ __('dashboard.kpi_desc') }}"
     >
         @if (is_null($kpi))
             <x-empty-state
-                title="KPI belum tersedia"
-                description="Mesin AI tidak merespons atau belum ada data penjualan yang dikomit. Buka halaman Analitik untuk mencoba lagi."
+                title="{{ __('dashboard.kpi_empty_title') }}"
+                description="{{ __('dashboard.kpi_empty_desc') }}"
             />
         @else
             <div class="row row-cards">
@@ -109,29 +109,29 @@
                      percentage fields in 0-100, so they are passed through
                      un-scaled. --}}
                 <div class="col-sm-6 col-lg-4">
-                    <x-stat label="Pendapatan" :value="\Illuminate\Support\Number::currency((float) ($kpi['revenue'] ?? 0), in: 'idr', locale: 'id', precision: 0)" />
+                    <x-stat label="{{ __('dashboard.revenue') }}" :value="\Illuminate\Support\Number::currency((float) ($kpi['revenue'] ?? 0), in: 'idr', locale: 'id', precision: 0)" />
                 </div>
                 <div class="col-sm-6 col-lg-4">
-                    <x-stat label="Jumlah pesanan" :value="number_format((int) ($kpi['orders'] ?? 0), 0, ',', '.')" />
+                    <x-stat label="{{ __('dashboard.orders') }}" :value="number_format((int) ($kpi['orders'] ?? 0), 0, ',', '.')" />
                 </div>
                 <div class="col-sm-6 col-lg-4">
-                    <x-stat label="Unit terjual" :value="number_format((float) ($kpi['units'] ?? 0), 0, ',', '.')" />
+                    <x-stat label="{{ __('dashboard.units') }}" :value="number_format((float) ($kpi['units'] ?? 0), 0, ',', '.')" />
                 </div>
                 <div class="col-sm-6 col-lg-4">
-                    <x-stat label="Nilai pesanan rata-rata" :value="\Illuminate\Support\Number::currency((float) ($kpi['aov'] ?? 0), in: 'idr', locale: 'id', precision: 0)" />
+                    <x-stat label="{{ __('dashboard.aov') }}" :value="\Illuminate\Support\Number::currency((float) ($kpi['aov'] ?? 0), in: 'idr', locale: 'id', precision: 0)" />
                 </div>
                 <div class="col-sm-6 col-lg-4">
                     <x-stat
-                        label="Pertumbuhan"
+                        label="{{ __('dashboard.growth') }}"
                         :value="\Illuminate\Support\Number::percentage((float) ($kpi['growth_pct'] ?? 0), precision: 1, locale: 'id')"
-                        :hint="((float) ($kpi['growth_pct'] ?? 0)) >= 0 ? 'Naik dibanding periode sebelumnya' : 'Turun dibanding periode sebelumnya'"
+                        :hint="((float) ($kpi['growth_pct'] ?? 0)) >= 0 ? __('dashboard.growth_up') : __('dashboard.growth_down')"
                     />
                 </div>
                 <div class="col-sm-6 col-lg-4">
                     <x-stat
-                        label="Margin"
+                        label="{{ __('dashboard.margin') }}"
                         :value="\Illuminate\Support\Number::percentage((float) ($kpi['margin_pct'] ?? 0), precision: 1, locale: 'id')"
-                        hint="Margin kotor dari laporan keuangan"
+                        hint="{{ __('dashboard.margin_hint') }}"
                     />
                 </div>
             </div>
@@ -140,35 +140,35 @@
 
     <div class="row row-cards">
         <div class="col-md-6">
-            <x-card title="Dataset terbaru" description="Delapan dataset yang terakhir diunggah.">
+            <x-card title="{{ __('dashboard.recent_title') }}" description="{{ __('dashboard.recent_desc') }}">
                 <x-slot:actions>
                     <a
                         href="{{ route('datasets.index') }}"
                         class="btn"
-                    >Lihat semua</a>
+                    >{{ __('dashboard.view_all') }}</a>
                 </x-slot:actions>
 
                 @if ($recentDatasets->isEmpty())
                     <x-empty-state
-                        title="Belum ada dataset"
-                        description="Unggah berkas pertama untuk memulai alur pratinjau, pemetaan kolom, pemeriksaan kualitas, dan komit."
+                        title="{{ __('dashboard.empty_datasets_title') }}"
+                        description="{{ __('dashboard.empty_datasets_desc') }}"
                     >
                         <x-slot:action>
                             <a
                                 href="{{ route('datasets.create') }}"
                                 class="btn btn-primary"
-                            >Unggah dataset</a>
+                            >{{ __('dashboard.upload_dataset') }}</a>
                         </x-slot:action>
                     </x-empty-state>
                 @else
-                    <x-table-wrapper label="Dataset terbaru">
+                    <x-table-wrapper label="{{ __('dashboard.recent_table_label') }}">
                         <table class="table table-vcenter card-table">
                             <thead>
                                 <tr>
-                                    <th scope="col">Dataset</th>
-                                    <th scope="col">Tipe</th>
-                                    <th scope="col">Status</th>
-                                    <th scope="col" class="text-end">Baris</th>
+                                    <th scope="col">{{ __('dashboard.table_dataset') }}</th>
+                                    <th scope="col">{{ __('dashboard.table_type') }}</th>
+                                    <th scope="col">{{ __('dashboard.table_status') }}</th>
+                                    <th scope="col" class="text-end">{{ __('dashboard.table_rows') }}</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -179,7 +179,7 @@
                                             <a
                                                 href="{{ route('datasets.show', $dataset) }}"
                                             >{{ $dataset->name }}</a>
-                                            <span class="d-block text-secondary small">{{ $dataset->source_filename ?: 'Tanpa nama berkas' }}</span>
+                                            <span class="d-block text-secondary small">{{ $dataset->source_filename ?: __('dashboard.no_file') }}</span>
                                         </td>
                                         <td>{{ $typeLabels[$dataset->dataset_type] ?? $dataset->dataset_type }}</td>
                                         <td><x-badge :class="$status->badgeClass()">{{ $status->localizedLabel() }}</x-badge></td>
@@ -194,18 +194,18 @@
         </div>
 
         <div class="col-md-6">
-            <x-card title="Percakapan terakhir" description="Riwayat obrolan Anda dengan asisten data.">
+            <x-card title="{{ __('dashboard.threads_title') }}" description="{{ __('dashboard.threads_desc') }}">
                 <x-slot:actions>
                     <a
                         href="{{ route('assistant.index') }}"
                         class="btn"
-                    >Buka asisten</a>
+                    >{{ __('dashboard.open_assistant') }}</a>
                 </x-slot:actions>
 
                 @if ($recentThreads->isEmpty())
                     <x-empty-state
-                        title="Belum ada percakapan"
-                        description="Ajukan pertanyaan apa saja tentang data Anda kepada asisten AI."
+                        title="{{ __('dashboard.empty_threads_title') }}"
+                        description="{{ __('dashboard.empty_threads_desc') }}"
                     />
                 @else
                     <ul class="list-group list-group-flush">
@@ -214,9 +214,9 @@
                                 <div>
                                     <a
                                         href="{{ route('assistant.threads.show', $thread) }}"
-                                    >{{ $thread->title ?: 'Percakapan tanpa judul' }}</a>
+                                    >{{ $thread->title ?: __('dashboard.no_thread_title') }}</a>
                                     <p class="text-secondary small">
-                                        {{ number_format((int) $thread->message_count, 0, ',', '.') }} pesan
+                                        {{ __('dashboard.messages_count', ['count' => number_format((int) $thread->message_count, 0, ',', '.')]) }}
                                         @if ($thread->last_message_at)
                                             &middot; {{ $thread->last_message_at->locale('id')->translatedFormat('d M Y H:i') }}
                                         @endif

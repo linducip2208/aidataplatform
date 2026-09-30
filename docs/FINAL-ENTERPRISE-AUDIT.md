@@ -15,7 +15,20 @@ Date: 2026-09-29 (UTC). Branch: `main`. Scope: master enterprise commands, itera
    `WebWorkflowTest` updated to act as owner + new non-owner 403 cases.
    Suite → **929 tests, 0 failures**.
 
-## Iteration 19 (this commit, commercial directive C1)
+## Iteration 20 (this commit, ultimate directive U1)
+
+31. **Laravel 13 upgrade.** `upgrade/laravel-13` branch → full suite green
+   (997/997) → merged to main. No app code changes required.
+32. **aaPanel production package.** `infrastructure/aapanel/` (4 Supervisor
+   templates, nginx site template with edge allowlist parity, cron,
+   idempotent `deploy-aapanel.sh`, `backup-native.sh`) + full
+   `docs/AA_PANEL_DEPLOYMENT.md`. Docker demoted to dev/test in prose.
+33. **i18n wave 2.** dashboard + datasets + imports + quality views fully
+   keyed (`lang/{id,en}/{dashboard,datasets,imports,quality}.php`, id
+   byte-identical); English pages verified key-leak-free; multi-tenancy
+   explicitly declined (single-org profile stands; all data global).
+
+## Iteration 19 (previous commit, commercial directive C1)
 
 28. **i18n foundation (EN+ID).** `SetLocale` middleware (user → session →
    app default `id`), `lang/{id,en}/{nav,auth,common}.php`, shell + login

@@ -24,43 +24,43 @@
     <div class="page-header">
         <div class="row align-items-center">
             <div class="col">
-                <nav aria-label="Remah roti">
+                <nav aria-label="{{ __('imports.breadcrumb') }}">
                     <ol class="breadcrumb">
                         <li class="breadcrumb-item">
                             <a
                                 href="{{ route('imports.index') }}"
-                            >Impor</a>
+                            >{{ __('imports.title') }}</a>
                         </li>
                         <li class="breadcrumb-item active" aria-current="page">{{ $dataset->name }}</li>
                     </ol>
                 </nav>
 
-                <h1 class="page-title">Status impor</h1>
+                <h1 class="page-title">{{ __('imports.show_title') }}</h1>
                 <p class="page-subtitle">
                     <x-badge :class="$status->badgeClass()">{{ $status->localizedLabel() }}</x-badge>
-                    <span>ID job impor {{ number_format((int) $dataset->import_job_id, 0, ',', '.') }}</span>
+                    <span>{{ __('imports.job_id_label', ['id' => number_format((int) $dataset->import_job_id, 0, ',', '.')]) }}</span>
                 </p>
             </div>
             <div class="col-auto">
                 <a
                     href="{{ route('imports.show', ['dataset' => $dataset, 'refresh' => 1]) }}"
                     class="btn btn-primary"
-                >Perbarui status</a>
+                >{{ __('imports.refresh') }}</a>
                 <a
                     href="{{ route('datasets.show', $dataset) }}"
                     class="btn"
-                >Kembali ke dataset</a>
+                >{{ __('imports.back_to_dataset') }}</a>
             </div>
         </div>
     </div>
 
     <div class="row row-cards">
         <div class="col-lg-8">
-            <x-card title="Progres" description="Diambil dari mesin AI ketika tautan Perbarui status diklik.">
+            <x-card title="{{ __('imports.progress_title') }}" description="{{ __('imports.progress_description') }}">
                 @if ($progress === null)
                     <x-empty-state
-                        title="Belum ada data progres"
-                        description="Mesin AI belum melaporkan progres untuk job ini. Klik Perbarui status untuk mengambil laporan terbaru."
+                        title="{{ __('imports.progress_empty_title') }}"
+                        description="{{ __('imports.progress_empty_description') }}"
                     />
                 @else
                     <div>
@@ -73,7 +73,7 @@
                         aria-valuenow="{{ number_format($progress, 1, '.', '') }}"
                         aria-valuemin="0"
                         aria-valuemax="100"
-                        aria-label="Progres impor {{ $dataset->name }}"
+                        aria-label="{{ __('imports.progress_label', ['name' => $dataset->name]) }}"
                     >
                         <div
                             class="progress-bar {{ $progress >= 100 ? 'bg-success' : '' }}"
@@ -83,41 +83,41 @@
                 @endif
             </x-card>
 
-            <x-card title="Rincian baris" description="Jumlah baris yang diproses, berhasil, dan bermasalah.">
+            <x-card title="{{ __('imports.rows_title') }}" description="{{ __('imports.rows_description') }}">
                 @if ($job === [])
                     <x-empty-state
-                        title="Laporan job belum tersedia"
-                        description="Klik Perbarui status untuk mengambil laporan terbaru dari mesin AI."
+                        title="{{ __('imports.report_unavailable_title') }}"
+                        description="{{ __('imports.report_unavailable_description') }}"
                     />
                 @else
                     <dl class="datagrid">
                         <div class="datagrid-item">
-                            <dt class="datagrid-title">Total baris</dt>
+                            <dt class="datagrid-title">{{ __('imports.total_rows') }}</dt>
                             <dd class="datagrid-content">{{ number_format((int) ($job['total_rows'] ?? 0), 0, ',', '.') }}</dd>
                         </div>
                         <div class="datagrid-item">
-                            <dt class="datagrid-title">Baris diproses</dt>
+                            <dt class="datagrid-title">{{ __('imports.processed_rows') }}</dt>
                             <dd class="datagrid-content">{{ number_format((int) ($job['processed_rows'] ?? 0), 0, ',', '.') }}</dd>
                         </div>
                         <div class="datagrid-item">
-                            <dt class="datagrid-title">Baris berhasil</dt>
+                            <dt class="datagrid-title">{{ __('imports.success_rows') }}</dt>
                             <dd class="datagrid-content">
                                 {{ number_format(max(0, (int) ($job['processed_rows'] ?? 0) - (int) ($job['error_rows'] ?? 0)), 0, ',', '.') }}
                             </dd>
                         </div>
                         <div class="datagrid-item">
-                            <dt class="datagrid-title">Baris bermasalah</dt>
+                            <dt class="datagrid-title">{{ __('imports.error_rows') }}</dt>
                             <dd class="datagrid-content">{{ number_format((int) ($job['error_rows'] ?? 0), 0, ',', '.') }}</dd>
                         </div>
                     </dl>
                 @endif
             </x-card>
 
-            <x-card title="Laporan mesin AI" description="Output mentah dari laporan status impor pada mesin AI.">
+            <x-card title="{{ __('imports.engine_report_title') }}" description="{{ __('imports.engine_report_description') }}">
                 @if (! is_array($job['report'] ?? null) || ($job['report'] ?? []) === [])
                     <x-empty-state
-                        title="Laporan kosong"
-                        description="Mesin AI belum memberikan laporan rinci untuk job ini."
+                        title="{{ __('imports.report_empty_title') }}"
+                        description="{{ __('imports.report_empty_description') }}"
                     />
                 @else
                     <dl class="datagrid">
@@ -140,28 +140,28 @@
         </div>
 
         <div class="col-lg-4">
-            <x-card title="Dataset" description="Ringkasan berkas yang diimpor.">
+            <x-card title="{{ __('imports.dataset_title') }}" description="{{ __('imports.dataset_description') }}">
                 <dl class="datagrid">
                     <div class="datagrid-item">
-                        <dt class="datagrid-title">Nama</dt>
+                        <dt class="datagrid-title">{{ __('imports.field_name') }}</dt>
                         <dd class="datagrid-content">{{ $dataset->name }}</dd>
                     </div>
                     <div class="datagrid-item">
-                        <dt class="datagrid-title">Tipe</dt>
+                        <dt class="datagrid-title">{{ __('imports.field_type') }}</dt>
                         <dd class="datagrid-content">{{ $typeLabels[$dataset->dataset_type] ?? $dataset->dataset_type }}</dd>
                     </div>
                     <div class="datagrid-item">
-                        <dt class="datagrid-title">Berkas</dt>
-                        <dd class="datagrid-content">{{ $dataset->source_filename ?: 'Tidak diketahui' }}</dd>
+                        <dt class="datagrid-title">{{ __('imports.field_file') }}</dt>
+                        <dd class="datagrid-content">{{ $dataset->source_filename ?: __('imports.unknown') }}</dd>
                     </div>
                     <div class="datagrid-item">
-                        <dt class="datagrid-title">Jumlah baris tercatat</dt>
+                        <dt class="datagrid-title">{{ __('imports.field_row_count') }}</dt>
                         <dd class="datagrid-content">{{ number_format((int) $dataset->row_count, 0, ',', '.') }}</dd>
                     </div>
                     <div class="datagrid-item">
-                        <dt class="datagrid-title">Waktu komit</dt>
+                        <dt class="datagrid-title">{{ __('imports.field_committed_at') }}</dt>
                         <dd class="datagrid-content">
-                            {{ $dataset->committed_at ? $dataset->committed_at->locale('id')->translatedFormat('d M Y H:i') : 'Belum dikomit' }}
+                            {{ $dataset->committed_at ? $dataset->committed_at->locale('id')->translatedFormat('d M Y H:i') : __('imports.not_committed') }}
                         </dd>
                     </div>
                 </dl>

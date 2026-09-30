@@ -8,9 +8,9 @@
     @endphp
 
     <div class="page-header">
-        <h1 class="page-title">Kualitas data</h1>
+        <h1 class="page-title">{{ __('quality.title') }}</h1>
         <p class="page-subtitle">
-            Riwayat pemeriksaan kualitas dataset dan dataset yang belum dinilai.
+            {{ __('quality.subtitle') }}
         </p>
     </div>
 
@@ -19,38 +19,38 @@
             <x-stat
                 :label="\App\Enums\QualityVerdict::Pass->localizedLabel()"
                 :value="number_format((int) ($breakdown['pass'] ?? 0), 0, ',', '.')"
-                hint="Dataset di atas ambang minimum"
+                hint="{{ __('quality.pass_hint') }}"
             />
         </div>
         <div class="col-sm-6 col-lg-3">
             <x-stat
                 :label="\App\Enums\QualityVerdict::Quarantine->localizedLabel()"
                 :value="number_format((int) ($breakdown['quarantine'] ?? 0), 0, ',', '.')"
-                hint="Dataset di bawah ambang minimum"
+                hint="{{ __('quality.quarantine_hint') }}"
             />
         </div>
         <div class="col-sm-6 col-lg-3">
-            <x-stat label="Belum dinilai" :value="number_format((int) ($breakdown['unscored'] ?? 0), 0, ',', '.')" hint="Dataset tanpa laporan kualitas" />
+            <x-stat label="{{ __('quality.unscored_label') }}" :value="number_format((int) ($breakdown['unscored'] ?? 0), 0, ',', '.')" hint="{{ __('quality.unscored_hint') }}" />
         </div>
         <div class="col-sm-6 col-lg-3">
             <x-stat
-                label="Ambang minimum"
+                label="{{ __('quality.threshold_label') }}"
                 :value="\Illuminate\Support\Number::percentage($threshold * 100, precision: 1, locale: 'id')"
-                hint="Dataset dengan skor di bawah nilai ini dikarantina"
+                hint="{{ __('quality.threshold_hint') }}"
             />
         </div>
     </div>
 
-    <x-card title="Filter" description="Saring berdasarkan tipe dataset atau vonis kualitas.">
+    <x-card title="{{ __('quality.filter_title') }}" description="{{ __('quality.filter_description') }}">
         <form method="GET" action="{{ route('quality.index') }}" class="row row-cards">
             <div class="col-md-6">
-                <x-field label="Tipe dataset" for="dataset_type">
+                <x-field label="{{ __('quality.field_dataset_type') }}" for="dataset_type">
                     <select
                         id="dataset_type"
                         name="dataset_type"
                         class="form-select"
                     >
-                        <option value="">Semua tipe</option>
+                        <option value="">{{ __('quality.all_types') }}</option>
                         @foreach (array_keys($typeLabels) as $type)
                             <option value="{{ $type }}" @selected(($filters['dataset_type'] ?? '') === $type)>{{ $typeLabels[$type] }}</option>
                         @endforeach
@@ -59,13 +59,13 @@
             </div>
 
             <div class="col-md-6">
-                <x-field label="Vonis kualitas" for="verdict">
+                <x-field label="{{ __('quality.field_verdict') }}" for="verdict">
                     <select
                         id="verdict"
                         name="verdict"
                         class="form-select"
                     >
-                        <option value="">Semua vonis</option>
+                        <option value="">{{ __('quality.all_verdicts') }}</option>
                         @foreach ($verdicts as $verdict)
                             <option value="{{ $verdict->value }}" @selected(($filters['verdict'] ?? '') === $verdict->value)>
                                 {{ $verdict->localizedLabel() }}
@@ -79,39 +79,39 @@
                 <button
                     type="submit"
                     class="btn btn-primary"
-                >Terapkan</button>
+                >{{ __('quality.apply') }}</button>
                 <a
                     href="{{ route('quality.index') }}"
                     class="btn"
-                >Atur ulang</a>
+                >{{ __('quality.reset') }}</a>
             </div>
         </form>
     </x-card>
 
-    <x-card title="Hasil pemeriksaan" description="{{ number_format($datasets->total(), 0, ',', '.') }} dataset punya laporan kualitas.">
+    <x-card title="{{ __('quality.results_title') }}" description="{{ __('quality.results_description', ['count' => number_format($datasets->total(), 0, ',', '.')]) }}">
         @if ($datasets->isEmpty())
             <x-empty-state
-                title="Belum ada laporan kualitas"
-                description="Jalankan pemeriksaan kualitas pada halaman dataset untuk melihat hasilnya di sini."
+                title="{{ __('quality.results_empty_title') }}"
+                description="{{ __('quality.results_empty_description') }}"
             >
                 <x-slot:action>
                     <a
                         href="{{ route('datasets.index') }}"
                         class="btn"
-                    >Lihat dataset</a>
+                    >{{ __('quality.view_datasets') }}</a>
                 </x-slot:action>
             </x-empty-state>
         @else
-            <x-table-wrapper label="Hasil pemeriksaan kualitas">
+            <x-table-wrapper label="{{ __('quality.table_label') }}">
                 <table class="table table-vcenter card-table">
                     <thead>
                         <tr>
-                            <th scope="col">Dataset</th>
-                            <th scope="col">Tipe</th>
-                            <th scope="col" class="text-end">Skor</th>
-                            <th scope="col">Vonis</th>
-                            <th scope="col">Status alur</th>
-                            <th scope="col" class="text-end">Diperiksa</th>
+                            <th scope="col">{{ __('quality.col_dataset') }}</th>
+                            <th scope="col">{{ __('quality.col_type') }}</th>
+                            <th scope="col" class="text-end">{{ __('quality.col_score') }}</th>
+                            <th scope="col">{{ __('quality.col_verdict') }}</th>
+                            <th scope="col">{{ __('quality.col_flow_status') }}</th>
+                            <th scope="col" class="text-end">{{ __('quality.col_checked') }}</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -127,7 +127,7 @@
                                         href="{{ route('datasets.show', $dataset) }}"
                                         class="fw-bold text-secondary"
                                     >{{ $dataset->name }}</a>
-                                    <span class="text-secondary">{{ $dataset->source_filename ?: 'Tanpa nama berkas' }}</span>
+                                    <span class="text-secondary">{{ $dataset->source_filename ?: __('quality.no_filename') }}</span>
                                 </td>
                                 <td>{{ $typeLabels[$dataset->dataset_type] ?? $dataset->dataset_type }}</td>
                                 <td class="text-end">
@@ -135,12 +135,12 @@
                                         {{ \Illuminate\Support\Number::percentage((float) $dataset->quality_score * 100, precision: 1, locale: 'id') }}
                                     </span>
                                     <span class="text-secondary">
-                                        {{ $meetsThreshold ? 'Di atas ambang' : 'Di bawah ambang' }}
+                                        {{ $meetsThreshold ? __('quality.above_threshold') : __('quality.below_threshold') }}
                                     </span>
                                 </td>
                                 <td>
                                     <x-badge :class="$verdict ? $verdict->badgeClass() : 'badge-neutral'">
-                                        {{ $verdict ? $verdict->localizedLabel() : 'Tidak diketahui' }}
+                                        {{ $verdict ? $verdict->localizedLabel() : __('quality.unknown') }}
                                     </x-badge>
                                 </td>
                                 <td><x-badge :class="$status->badgeClass()">{{ $status->localizedLabel() }}</x-badge></td>
@@ -148,7 +148,7 @@
                                     @if ($dataset->quality_checked_at)
                                         <span class="text-secondary">{{ $dataset->quality_checked_at->locale('id')->translatedFormat('d M Y H:i') }}</span>
                                     @else
-                                        <span class="text-secondary">Tidak diketahui</span>
+                                        <span class="text-secondary">{{ __('quality.unknown') }}</span>
                                     @endif
                                 </td>
                             </tr>

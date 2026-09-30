@@ -1,0 +1,11 @@
+# AIDataPlatform — native cron entries (aaPanel > Cron, type "Shell script").
+# Replace {{APP_USER}}, {{APP_DIR}}, {{PHP_BIN}} (e.g. /www/server/php/83/bin/php).
+# Laravel's schedule:run fires every due task each minute; WITHOUT this line
+# NOTHING scheduled runs (sync jobs, weekly report). Exactly ONE such line:
+# two copies double-fire every job.
+
+* * * * * {{APP_USER}} {{PHP_BIN}} {{APP_DIR}}/application/artisan schedule:run >> /www/wwwlogs/aidata-schedule.log 2>&1
+
+# Nightly database + files backup (native mysqldump; credentials from the
+# environment file written by deploy-aapanel.sh, never on this command line).
+0 2 * * * {{APP_USER}} /bin/bash {{APP_DIR}}/infrastructure/aapanel/backup-native.sh >> /www/wwwlogs/aidata-backup.log 2>&1

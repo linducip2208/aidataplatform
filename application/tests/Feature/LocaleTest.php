@@ -68,4 +68,23 @@ class LocaleTest extends TestCase
             ->assertOk()
             ->assertSee('Masuk ke platform', false);
     }
+
+    public function test_english_pages_show_no_raw_translation_keys(): void
+    {
+        $user = User::factory()->admin()->create();
+        $user->forceFill(['locale' => 'en'])->save();
+
+        foreach (['dashboard', 'datasets.index', 'datasets.create', 'imports.index', 'quality.index'] as $route) {
+            $html = $this->actingAs($user)->get(route($route))->assertOk()->getContent();
+
+            foreach (['dashboard.', 'datasets.', 'imports.', 'quality.', 'nav.', 'auth.', 'common.'] as $prefix) {
+                // A missing translation renders as the key itself.
+                $this->assertDoesNotMatchRegularExpression(
+                    '/[\'"\s>]'.preg_quote($prefix, '/').'[a-z0-9_.]+/i',
+                    $html,
+                    "Raw {$prefix}* key leaked on {$route}."
+                );
+            }
+        }
+    }
 }
