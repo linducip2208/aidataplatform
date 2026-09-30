@@ -233,7 +233,8 @@ envelope; `App\Services\AiEngineClient` has a method for each one.
 | POST | `/api/v1/training/predict` | key | `{model_type,model_name,payload{}}` |
 | POST | `/api/v1/ai/chat` | key | `{message,conversation_id,context}` |
 | POST | `/api/v1/ai/report` | key | `{period,branch,format}`; `format: "html"` returns raw HTML, not the envelope |
-| POST | `/api/v1/rag/ingest` | key | `{title,content,source,doc_type}`, synchronous + `?visibility=` (`public`/`internal`/`confidential`) |
+| POST | `/api/v1/rag/ingest` | key | `{title,content,source,doc_type}`, synchronous + `?visibility=` (`public`/`internal`/`confidential`/`private`, `private` needs `?owner=`) |
+| GET | `/api/v1/rag/documents` | key | newest-first headers with `visibility`/`owner`/`n_chunks`, `?limit=` 1-200 |
 | POST | `/api/v1/rag/query` | key | `{query,top_k}` + `?allow=` visibility list (omit = legacy allow-all) |
 | GET | `/api/v1/ai/usage/summary` | key | cost aggregation (`totals`, `by_model`, `by_day`), `?days=` 1-365 |
 | POST | `/api/v1/forecast` | key | `{history[],horizon,granularity}` |

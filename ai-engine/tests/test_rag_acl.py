@@ -73,6 +73,59 @@ def _query(db_session, text, allow):
     return res["citations"]
 
 
+def test_list_documents_reports_audience(warehouse):
+    # Own session like ai_session: importing the app registers router-side
+    # tables the shared db_session fixture never created, so build and clean
+    # locally instead of borrowing it.
+    import app.ai.rag  # noqa: F401
+    try:
+        import app.main  # noqa: F401
+    except Exception:
+        pass
+    from sqlalchemy import delete
+
+    from app.database.connection import Base, SessionLocal
+
+    Base.metadata.create_all(warehouse)
+    with warehouse.begin() as conn:
+        for table in reversed(Base.metadata.sorted_tables):
+            try:
+                conn.execute(delete(table))
+            except Exception:
+                pass
+    db_session = SessionLocal()
+    try:
+        from fastapi.testclient import TestClient
+
+        from app.core.config import settings
+        from app.core.security import SERVICE_KEY_HEADER
+        from app.main import create_app
+
+        _ingest(db_session, "Terbuka", "dokumen terbuka", "public")
+        from app.ai.rag import ingest_text
+        ingest_text("Pribadi", "dokumen pemilik", source="acl-test",
+                    db_session=db_session, visibility="private", owner="7")
+
+        with TestClient(create_app()) as client:
+            res = client.get("/api/v1/rag/documents?limit=10",
+                             headers={SERVICE_KEY_HEADER: settings.service_api_key})
+    finally:
+        try:
+            db_session.rollback()
+        except Exception:
+            pass
+        try:
+            db_session.close()
+        except Exception:
+            pass
+    assert res.status_code == 200
+    docs = {d["title"]: d for d in res.json()["data"]}
+    assert docs["Terbuka"]["visibility"] == "public"
+    assert docs["Pribadi"]["visibility"] == "private"
+    assert docs["Pribadi"]["owner"] == "7"
+    assert docs["Pribadi"]["n_chunks"] >= 1
+
+
 def test_private_needs_an_owner(db_session):
     from app.ai.rag import ingest_text
 

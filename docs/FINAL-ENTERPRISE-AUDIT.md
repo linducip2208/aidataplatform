@@ -15,7 +15,18 @@ Date: 2026-09-29 (UTC). Branch: `main`. Scope: master enterprise commands, itera
    `WebWorkflowTest` updated to act as owner + new non-owner 403 cases.
    Suite → **929 tests, 0 failures**.
 
-## Iteration 17 (this commit)
+## Iteration 18 (this commit)
+
+27. **Knowledge + glossary UI + private RAG completion.** Engine
+   `GET /rag/documents` (newest-first headers with audience); Laravel
+   knowledge page (list + ingest form with visibility, owner forced) and
+   glossary page (certified definitions + formulas); sidebar entries;
+   `POST /api/rag/documents` API. Fixed a real fail-closed bug (legacy
+   fast-path bypassed private filtering) and a fixture-ordering fragility
+   (local warehouse pattern). Tests: engine `test_rag_acl.py` (8), Laravel
+   `RagAclTest` (6), `KnowledgeBaseTest` (6), `TrendChartTest` (3).
+
+## Iteration 17 (previous commit)
 
 26. **Full engine suite + README/env sync** — entire engine suite green
    (1 pre-existing xfail); README service map (report schedule, engine

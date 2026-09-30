@@ -4,6 +4,8 @@ use App\Http\Controllers\Admin\AuditLogController;
 use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\AiCostController;
 use App\Http\Controllers\AlertController;
+use App\Http\Controllers\GlossaryController;
+use App\Http\Controllers\KnowledgeBaseController;
 use App\Http\Controllers\AnalyticsController;
 use App\Http\Controllers\AssistantController;
 use App\Http\Controllers\AuthController;
@@ -49,6 +51,8 @@ Route::middleware('auth')->group(function (): void {
 
     Route::get('/quality', [QualityController::class, 'index'])->name('quality.index');
     Route::get('/alerts', [AlertController::class, 'index'])->name('alerts.index');
+    Route::get('/knowledge', [KnowledgeBaseController::class, 'index'])->name('knowledge.index');
+    Route::get('/glossary', [GlossaryController::class, 'index'])->name('glossary.index');
     Route::get('/ai/usage', [AiCostController::class, 'index'])->name('ai.usage');
     Route::get('/analytics', [AnalyticsController::class, 'index'])->name('analytics.index');
     Route::get('/ml', [MlController::class, 'index'])->name('ml.index');
@@ -75,6 +79,7 @@ Route::middleware('auth')->group(function (): void {
         Route::post('/alerts/{id}/ack', [AlertController::class, 'acknowledge'])->whereNumber('id')->name('alerts.ack');
         Route::post('/alerts/rules', [AlertController::class, 'storeRule'])->name('alerts.rules.store');
         Route::post('/alerts/rules/{id}/toggle', [AlertController::class, 'toggleRule'])->whereNumber('id')->name('alerts.rules.toggle');
+        Route::post('/knowledge', [KnowledgeBaseController::class, 'store'])->name('knowledge.store');
         Route::delete('/datasets/{dataset}', [DatasetController::class, 'destroy'])->name('datasets.destroy');
         Route::delete('/assistant/threads/{thread}', [AssistantController::class, 'destroy'])->name('assistant.threads.destroy');
     });

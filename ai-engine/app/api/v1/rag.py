@@ -74,6 +74,42 @@ def ingest(body: RagIngestRequest, db: Session = Depends(get_db),
     return {"success": True, "data": res}
 
 
+@router.get("/rag/documents")
+def list_documents(db: Session = Depends(get_db),
+                   _: str = Depends(require_service_auth),
+                   limit: int = Query(default=50, ge=1, le=200)):
+    """Newest-first document headers for the knowledge-base UI.
+
+    Read-only; visibility/owner come from each document's ``meta`` so the
+    caller can render audience badges without fetching chunks.
+    """
+    from app.ai.rag import doc_visibility
+    from app.database.models import RagDocument
+
+    try:
+        rows = (db.query(RagDocument).order_by(RagDocument.id.desc())
+                .limit(max(1, min(int(limit), 200))).all())
+    except Exception:
+        return {"success": True, "data": []}
+    out = []
+    for doc in rows:
+        try:
+            meta = doc.meta if isinstance(doc.meta, dict) else {}
+            out.append({
+                "id": int(doc.id),
+                "title": str(doc.title or "untitled"),
+                "source": str(doc.source or ""),
+                "doc_type": str(doc.doc_type or "txt"),
+                "visibility": doc_visibility(meta),
+                "owner": str(meta.get("owner") or "") or None,
+                "n_chunks": int(meta.get("n_chunks") or 0),
+                "created_at": doc.created_at.isoformat() if doc.created_at else None,
+            })
+        except Exception:
+            continue
+    return {"success": True, "data": out}
+
+
 @router.post("/rag/query")
 def query(body: RagQueryRequest, db: Session = Depends(get_db),
           _: str = Depends(require_service_auth),

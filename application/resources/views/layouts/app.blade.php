@@ -11,6 +11,8 @@
         ['route' => 'analytics.index', 'pattern' => 'analytics.*', 'label' => 'Analitik', 'icon' => 'chart-bar'],
         ['route' => 'ml.index', 'pattern' => 'ml.*', 'label' => 'Pembelajaran mesin', 'icon' => 'brain'],
         ['route' => 'assistant.index', 'pattern' => 'assistant.*', 'label' => 'Asisten', 'icon' => 'message-chatbot'],
+        ['route' => 'knowledge.index', 'pattern' => 'knowledge.*', 'label' => 'Basis pengetahuan', 'icon' => 'books'],
+        ['route' => 'glossary.index', 'pattern' => 'glossary.*', 'label' => 'Glosarium', 'icon' => 'dictionary'],
         ['route' => 'reports.index', 'pattern' => 'reports.*', 'label' => 'Laporan', 'icon' => 'report'],
         ['route' => 'decisions.index', 'pattern' => 'decisions.*', 'label' => 'Keputusan', 'icon' => 'scale'],
         ['route' => 'ai.usage', 'pattern' => 'ai.usage', 'label' => 'Biaya AI', 'icon' => 'coins'],
