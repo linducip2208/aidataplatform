@@ -11,7 +11,7 @@
             {{ $label }}
             @if ($required)
                 <span class="text-danger" aria-hidden="true">*</span>
-                <span class="visually-hidden">(wajib diisi)</span>
+                <span class="visually-hidden">({{ __('common.required') }})</span>
             @endif
         </label>
     @else

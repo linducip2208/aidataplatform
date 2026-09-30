@@ -116,19 +116,17 @@ class QueryCountTest extends TestCase
         ],
 
         'analytics.index' => [
-            'min' => 0,
-            'max' => 0,
-            'why' => 'Every figure on this page comes from the AI engine over HTTP (kpi, trend, rfm, abc, '
-                .'cohort, branches, finance) and Laravel keeps no local copy of any of it. Zero is the '
-                .'correct number, not a generous budget: the moment one row is looked up locally to decorate '
-                .'an engine result, the engine is no longer the only source of truth for that page.',
+            'min' => 1,
+            'max' => 1,
+            'why' => 'Figures come from the engine, but the shell brand reads the single organization row '
+                .'(1-hour cached in production). One constant query, never per row.',
         ],
 
         'ml.index' => [
-            'min' => 0,
-            'max' => 0,
-            'why' => 'The model registry lives in the engine. The page reads the signed-in user from the '
-                .'session, never from a query. Zero, for the same reason as analytics.index.',
+            'min' => 1,
+            'max' => 1,
+            'why' => 'The model registry lives in the engine; the one local query is the cached shell '
+                .'brand row, constant in row count.',
         ],
 
         'assistant.index' => [
@@ -165,10 +163,10 @@ class QueryCountTest extends TestCase
         ],
 
         'password.edit' => [
-            'min' => 0,
-            'max' => 0,
-            'why' => 'A static form. The user comes from the session, so the page needs no query at all. '
-                .'Anything above zero means the form started reading a table it does not display.',
+            'min' => 1,
+            'max' => 1,
+            'why' => 'A static form plus the one cached shell brand row. Anything above one means '
+                .'the form started reading a table it does not display.',
         ],
 
         'api.datasets.index' => [
@@ -307,6 +305,11 @@ class QueryCountTest extends TestCase
     {
         $this->seedCorpus(...self::REALISTIC);
 
+        // These pages are engine-backed but no longer zero-SQL: the shell
+        // brand reads one cached organization row and reports.index reads
+        // its history table. The exact budgets (all shape-constant) live in
+        // the budget test above; what matters here is that every figure
+        // still comes from these engine endpoints and no others.
         $expected = [
             'analytics.index' => [
                 '/api/v1/analytics/kpi', '/api/v1/analytics/trend', '/api/v1/analytics/rfm',
@@ -316,10 +319,7 @@ class QueryCountTest extends TestCase
                 '/api/v1/analytics/dashboards/resolve',
             ],
             'ml.index' => ['/api/v1/models', '/api/v1/training/experiments'],
-            // reports.index left this list when report history landed: the
-            // page keeps its engine calls but also reads its local history
-            // table (budgeted 1-2 above), so "zero SQL" no longer describes
-            // it. The endpoint half of this contract moved to ReportsTest.
+            'reports.index' => ['/api/v1/ai/report', '/api/v1/analytics/kpi/history'],
         ];
 
         foreach ($expected as $page => $endpoints) {
@@ -334,10 +334,14 @@ class QueryCountTest extends TestCase
                 $endpoints,
                 array_values(array_unique($called)),
                 "{$page} must be backed by the engine: it must ask for these endpoints and no others. "
-                .'A page that quietly stopped calling the engine would pass the zero-query assertion below for the wrong reason.',
+                .'A page that quietly stopped calling the engine would pass the query assertion below for the wrong reason.',
             );
 
-            $this->assertSame(0, $queries, "{$page} is backed entirely by the engine and must issue no SQL.\n".$this->sqlLog());
+            $this->assertLessThanOrEqual(
+                2,
+                $queries,
+                "{$page} must stay near-SQL-free: only the documented local reads (shell brand, report history).\n".$this->sqlLog()
+            );
         }
     }
 

@@ -1,11 +1,10 @@
 <?php
 
 use App\Http\Controllers\Admin\AuditLogController;
+use App\Http\Controllers\Admin\OrganizationController;
 use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\AiCostController;
 use App\Http\Controllers\AlertController;
-use App\Http\Controllers\GlossaryController;
-use App\Http\Controllers\KnowledgeBaseController;
 use App\Http\Controllers\AnalyticsController;
 use App\Http\Controllers\AssistantController;
 use App\Http\Controllers\AuthController;
@@ -13,7 +12,10 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DatasetController;
 use App\Http\Controllers\DatasetWorkflowController;
 use App\Http\Controllers\DecisionCenterController;
+use App\Http\Controllers\GlossaryController;
 use App\Http\Controllers\ImportController;
+use App\Http\Controllers\KnowledgeBaseController;
+use App\Http\Controllers\LocaleController;
 use App\Http\Controllers\MlController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\QualityController;
@@ -35,6 +37,8 @@ Route::post('/logout', [AuthController::class, 'destroy'])->name('logout');
 | Authenticated UI
 |--------------------------------------------------------------------------
 */
+
+Route::post('/locale', [LocaleController::class, 'update'])->name('locale.update');
 
 Route::middleware('auth')->group(function (): void {
     Route::get('/', [DashboardController::class, 'index'])->name('dashboard');
@@ -89,6 +93,8 @@ Route::middleware('auth')->group(function (): void {
         Route::post('/ml/experiments/{experimentId}/promote', [MlController::class, 'promoteExperiment'])->name('ml.experiments.promote');
         Route::post('/ml/{modelId}/rollback', [MlController::class, 'rollback'])->name('ml.rollback');
         Route::get('/admin/users', [UserController::class, 'index'])->name('admin.users.index');
+        Route::get('/admin/organization', [OrganizationController::class, 'edit'])->name('admin.organization.edit');
+        Route::put('/admin/organization', [OrganizationController::class, 'update'])->name('admin.organization.update');
         Route::post('/admin/users', [UserController::class, 'store'])->name('admin.users.store');
         Route::patch('/admin/users/{user}', [UserController::class, 'update'])->name('admin.users.update');
         Route::delete('/admin/users/{user}', [UserController::class, 'destroy'])->name('admin.users.destroy');

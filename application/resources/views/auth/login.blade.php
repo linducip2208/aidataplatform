@@ -1,19 +1,19 @@
 @extends('layouts.guest')
 
-@section('title', 'Masuk')
+@section('title', __('auth.sign_in'))
 
 @section('content')
     <div class="card card-md">
         <div class="card-body">
             <div class="mb-3">
-                <h1 class="card-title">Masuk ke platform</h1>
-                <p class="text-secondary mb-0">Gunakan email dan password akun yang terdaftar.</p>
+                <h1 class="card-title">{{ __('auth.sign_in_to_platform') }}</h1>
+                <p class="text-secondary mb-0">{{ __('auth.sign_in_hint') }}</p>
             </div>
 
             <form method="POST" action="{{ route('login.store') }}">
                 @csrf
 
-                <x-field label="Email" for="email" name="email" required>
+                <x-field label="{{ __('auth.email') }}" for="email" name="email" required>
                     <input
                         id="email"
                         name="email"
@@ -22,20 +22,20 @@
                         autocomplete="username"
                         required
                         autofocus
-                        placeholder="nama@perusahaan.com"
+                        placeholder="{{ __('auth.email_placeholder') }}"
                         @error('email') aria-invalid="true" aria-describedby="email-error" @enderror
                         class="form-control"
                     >
                 </x-field>
 
-                <x-field label="Password" for="password" name="password" required>
+                <x-field label="{{ __('auth.password') }}" for="password" name="password" required>
                     <input
                         id="password"
                         name="password"
                         type="password"
                         autocomplete="current-password"
                         required
-                        placeholder="Minimal 8 karakter"
+                        placeholder="{{ __('auth.password_placeholder') }}"
                         @error('password') aria-invalid="true" @enderror
                         class="form-control"
                     >
@@ -50,21 +50,21 @@
                         @checked(old('remember'))
                         class="form-check-input"
                     >
-                    <label for="remember" class="form-check-label">Ingat saya di perangkat ini</label>
+                    <label for="remember" class="form-check-label">{{ __('auth.remember_me') }}</label>
                 </div>
 
                 <button
                     type="submit"
                     class="btn btn-primary w-100"
-                >Masuk</button>
+                >{{ __('auth.sign_in') }}</button>
             </form>
         </div>
     </div>
 
     @if (app()->environment(['local', 'development', 'testing']))
         <div class="alert alert-warning mt-3 mb-0" role="note">
-            <p class="fw-bold mb-1">Akun demo (lingkungan pengembangan)</p>
-            <p class="small mb-3">Hanya ditampilkan di luar produksi. Jangan aktifkan di server produksi.</p>
+            <p class="fw-bold mb-1">{{ __('auth.demo_accounts') }}</p>
+            <p class="small mb-3">{{ __('auth.demo_hint') }}</p>
 
             <ul class="list-unstyled mb-0 d-grid gap-2">
                 <li class="d-flex flex-wrap align-items-center justify-content-between gap-2">

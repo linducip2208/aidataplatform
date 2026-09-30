@@ -15,7 +15,24 @@ Date: 2026-09-29 (UTC). Branch: `main`. Scope: master enterprise commands, itera
    `WebWorkflowTest` updated to act as owner + new non-owner 403 cases.
    Suite → **929 tests, 0 failures**.
 
-## Iteration 18 (this commit)
+## Iteration 19 (this commit, commercial directive C1)
+
+28. **i18n foundation (EN+ID).** `SetLocale` middleware (user → session →
+   app default `id`), `lang/{id,en}/{nav,auth,common}.php`, shell + login
+   fully keyed, locale selector in user menu + mobile nav with per-user
+   persistence (`users.locale`) and audit, `phpunit.xml` pins `id` so the
+   Indonesian suite stays green. Page content stays Indonesian (phased).
+29. **Single-company organization (no multi-tenancy).** `organizations`
+   table + `OrganizationSeeder` + admin profile page (name/tagline/logo
+   upload with validation, audit-logged); shell brand + footer driven by it
+   with config fallback. All data stays global by design.
+30. **Audit sweeps.** Error hunt clean (no debug/TODO/secrets/fake);
+   route↔menu audit clean except `alerts.rules.toggle`, now covered;
+   query budgets honestly re-baselined for the brand row (shape tests
+   intact). `verify-env.sh` 379 passed, `verify-routing.sh` 59 passed,
+   Vite build OK.
+
+## Iteration 18 (previous commit)
 
 27. **Knowledge + glossary UI + private RAG completion.** Engine
    `GET /rag/documents` (newest-first headers with audience); Laravel

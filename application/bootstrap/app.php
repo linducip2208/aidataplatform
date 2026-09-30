@@ -4,6 +4,7 @@ use App\Exceptions\AiEngineException;
 use App\Http\Middleware\EnsureAccountActive;
 use App\Http\Middleware\EnsureAiBudget;
 use App\Http\Middleware\EnsureRole;
+use App\Http\Middleware\SetLocale;
 use App\Http\Middleware\ForceJsonResponse;
 use App\Http\Middleware\SecurityHeaders;
 use Illuminate\Foundation\Application;
@@ -31,6 +32,7 @@ return Application::configure(basePath: dirname(__DIR__))
         // deactivated account must lose read access too, not only the ability
         // to write.
         $middleware->web(append: [
+            SetLocale::class,
             EnsureAccountActive::class,
         ]);
         $middleware->api(append: [

@@ -119,6 +119,23 @@ class AlertCenterTest extends TestCase
             ->assertForbidden();
     }
 
+    public function test_web_rule_toggle_flips_active_flag(): void
+    {
+        $this->actingAs(User::factory()->analyst()->create())
+            ->from(route('alerts.index'))
+            ->post(route('alerts.rules.toggle', ['id' => 3]), ['is_active' => false])
+            ->assertRedirect()
+            ->assertSessionHas('status');
+
+        $request = Http::recorded()->map(fn (array $pair): ClientRequest => $pair[0])->first(
+            fn (ClientRequest $request): bool => $request->method() === 'PATCH'
+                && str_ends_with((string) strtok($request->url(), '?'), '/alerts/rules/3')
+        );
+
+        $this->assertNotNull($request);
+        $this->assertFalse($request->data()['is_active']);
+    }
+
     public function test_web_rule_creation_validates_its_payload(): void
     {
         $this->actingAs(User::factory()->analyst()->create())
