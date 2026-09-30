@@ -8,10 +8,12 @@ use App\Exceptions\AiEngineException;
 use App\Models\AuditLog;
 use App\Models\DataLineage;
 use App\Models\Dataset;
+use Illuminate\Support\Facades\Log;
 use App\Models\User;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Throwable;
 
 /**
  * Dataset lifecycle orchestration: Laravel keeps the file and the metadata, the
@@ -231,6 +233,13 @@ class DatasetIngestionService
             'async' => $runAsync,
         ]);
 
+        $this->emitWebhook('dataset.committed', [
+            'dataset_id' => $dataset->uuid,
+            'name' => $dataset->name,
+            'status' => $status,
+            'import_job_id' => $dataset->import_job_id,
+        ]);
+
         return $result;
     }
 
@@ -294,6 +303,25 @@ class DatasetIngestionService
                 422,
                 'dataset.import_job',
             );
+        }
+    }
+
+    /**
+     * Fan out a domain event to webhook subscribers. Webhooks must never
+     * break the operation that raised them, so every failure is logged and
+     * swallowed here.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    private function emitWebhook(string $event, array $payload): void
+    {
+        try {
+            app(WebhookDispatcher::class)->dispatch($event, $payload);
+        } catch (Throwable $exception) {
+            Log::warning('webhook.emit_failed', [
+                'event' => $event,
+                'error' => substr($exception->getMessage(), 0, 160),
+            ]);
         }
     }
 

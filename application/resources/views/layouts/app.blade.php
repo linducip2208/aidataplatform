@@ -24,6 +24,7 @@
         ['route' => 'audit.index', 'pattern' => 'audit.*', 'key' => 'audit'],
         ['route' => 'admin.organization.edit', 'pattern' => 'admin.organization.*', 'key' => 'organization'],
         ['route' => 'admin.providers.index', 'pattern' => 'admin.providers.*', 'key' => 'providers'],
+        ['route' => 'admin.webhooks.index', 'pattern' => 'admin.webhooks.*', 'key' => 'webhooks'],
     ];
 
     $user = auth()->user();

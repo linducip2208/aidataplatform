@@ -31,6 +31,7 @@ return [
         'audit' => 'Audit log',
         'organization' => 'Organization',
         'providers' => 'AI Providers',
+        'webhooks' => 'Webhooks',
     ],
 
     'change_password' => 'Change password',

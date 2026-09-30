@@ -6,6 +6,8 @@ use App\Exceptions\AiEngineException;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 /**
  * Server-to-server client for the engine alert center
@@ -73,9 +75,16 @@ class AlertService
      */
     public function acknowledge(int $alertId, string $note = ''): array
     {
-        return $this->enginePost("/alerts/alerts/{$alertId}/ack", [
+        $row = $this->enginePost("/alerts/alerts/{$alertId}/ack", [
             'note' => $note,
         ], 'alerts.ack');
+
+        $this->emitWebhook('alert.acknowledged', [
+            'alert_id' => $alertId,
+            'status' => $row['status'] ?? 'acknowledged',
+        ]);
+
+        return $row;
     }
 
     /**
@@ -234,6 +243,21 @@ class AlertService
                 503,
                 $operation,
             );
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    private function emitWebhook(string $event, array $payload): void
+    {
+        try {
+            app(WebhookDispatcher::class)->dispatch($event, $payload);
+        } catch (Throwable $exception) {
+            Log::warning('webhook.emit_failed', [
+                'event' => $event,
+                'error' => substr($exception->getMessage(), 0, 160),
+            ]);
         }
     }
 }

@@ -6,6 +6,8 @@ use App\Exceptions\AiEngineException;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 /**
  * Server-to-server client for the decision/scenario engine endpoints.
@@ -68,11 +70,19 @@ class DecisionService
      */
     public function audit(int $caseId, string $actor, string $decision, string $rationale = ''): array
     {
-        return $this->enginePost("/decision/cases/{$caseId}/audit", [
+        $row = $this->enginePost("/decision/cases/{$caseId}/audit", [
             'actor' => $actor,
             'decision' => $decision,
             'rationale' => $rationale,
         ], 'decision.audit');
+
+        $this->emitWebhook('decision.audited', [
+            'case_id' => $caseId,
+            'actor' => $actor,
+            'decision' => $decision,
+        ]);
+
+        return $row;
     }
 
     /**
@@ -208,6 +218,21 @@ class DecisionService
                 503,
                 $operation,
             );
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    private function emitWebhook(string $event, array $payload): void
+    {
+        try {
+            app(WebhookDispatcher::class)->dispatch($event, $payload);
+        } catch (Throwable $exception) {
+            Log::warning('webhook.emit_failed', [
+                'event' => $event,
+                'error' => substr($exception->getMessage(), 0, 160),
+            ]);
         }
     }
 }

@@ -3,6 +3,7 @@
 use App\Http\Controllers\Admin\AiProviderController;
 use App\Http\Controllers\Admin\AuditLogController;
 use App\Http\Controllers\Admin\OrganizationController;
+use App\Http\Controllers\Admin\WebhookController;
 use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\AiCostController;
 use App\Http\Controllers\AlertController;
@@ -96,6 +97,11 @@ Route::middleware('auth')->group(function (): void {
         Route::get('/admin/users', [UserController::class, 'index'])->name('admin.users.index');
         Route::get('/admin/organization', [OrganizationController::class, 'edit'])->name('admin.organization.edit');
         Route::put('/admin/organization', [OrganizationController::class, 'update'])->name('admin.organization.update');
+        Route::get('/admin/webhooks', [WebhookController::class, 'index'])->name('admin.webhooks.index');
+        Route::post('/admin/webhooks', [WebhookController::class, 'store'])->name('admin.webhooks.store');
+        Route::post('/admin/webhooks/{webhook}/toggle', [WebhookController::class, 'toggle'])->name('admin.webhooks.toggle');
+        Route::delete('/admin/webhooks/{webhook}', [WebhookController::class, 'destroy'])->name('admin.webhooks.destroy');
+        Route::post('/admin/webhooks/deliveries/{delivery}/replay', [WebhookController::class, 'replay'])->name('admin.webhooks.replay');
         Route::get('/admin/providers', [AiProviderController::class, 'index'])->name('admin.providers.index');
         Route::get('/admin/providers/create', [AiProviderController::class, 'create'])->name('admin.providers.create');
         Route::post('/admin/providers', [AiProviderController::class, 'store'])->name('admin.providers.store');

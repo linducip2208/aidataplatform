@@ -15,7 +15,16 @@ Date: 2026-09-29 (UTC). Branch: `main`. Scope: master enterprise commands, itera
    `WebWorkflowTest` updated to act as owner + new non-owner 403 cases.
    Suite → **929 tests, 0 failures**.
 
-## Iteration 23 (this commit, develop wave 4)
+## Iteration 24 (this commit, webhooks)
+
+38. **Outbound webhook platform.** `webhooks` + `webhook_deliveries`
+   tables (encrypted secrets, shown once); HMAC-signed fan-out with SSRF
+   guard at subscribe *and* send; queued retry with backoff; replay;
+   events wired at the service choke points (commit/report/ack/audit) with
+   emit-never-breaks semantics; admin UI + audit; `docs/webhooks.md`.
+   Tests `WebhookTest` → **9 passed**.
+
+## Iteration 23 (previous commit, develop wave 4)
 
 37. **i18n wave 4 (all pages).** alerts/aicost/decisions/knowledge/
    glossary/admin/profile/errors fully keyed EN+ID via parallel agents
