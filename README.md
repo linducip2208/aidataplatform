@@ -1,6 +1,8 @@
 # AIDataPlatform — Enterprise AI Data Platform
 
-Laravel (app/orchestration) + FastAPI AI Engine (ingestion, quality, ML, agent, RAG) + MySQL 8 + Redis/Celery + Prometheus/Grafana, all behind Nginx.
+Laravel (app/orchestration) + FastAPI AI Engine (ingestion, quality, ML, agent, RAG, decisions, alerts, semantic glossary) + MySQL 8 + Redis/Celery + Prometheus/Grafana, all behind Nginx.
+
+UI highlights: Tabler shell with Executive/DATA/BI/AI/Decision/Governance nav, Alert Center, Decision Center, AI Cost dashboard, report history, product images on ABC, trend + branch charts.
 
 ```
                          +------------------+
@@ -28,7 +30,7 @@ Laravel (app/orchestration) + FastAPI AI Engine (ingestion, quality, ML, agent, 
 `laravel-queue` and `laravel-schedule` are the same image as `laravel` with the
 entrypoint cleared, so they share its environment, volumes and build.
 
-**Service map:** `laravel` (UI + REST orchestration, calls FastAPI with `SERVICE_API_KEY`), `fastapi` (stateless API + enqueues Celery), `celery-worker` (imports/quality/ML/agent/RAG jobs), `celery-beat` (engine schedule: `nightly-data-sync` at 01:15, `hourly-ai-report` at :00, `alert-evaluation` every minute, all `Asia/Jakarta`), `laravel-queue` (Laravel queue worker for the `datasets` and `default` queues), `laravel-schedule` (`php artisan schedule:work --whisper`: `sync:import-status` at 02:15 and `sync:quality` at 02:45), `mysql` (all tables live in the single `aidata` database, `utf8mb4`, and are namespaced by prefix: `raw_*`, `staging_*`, `fact_*`/`dim_*`, `ml_*`, `rag_*`, `ai_*`, `alert_*`, `audit_logs`; RAG embeddings are stored as JSON and scored Python-side), `redis` (cache + broker), `prometheus`/`grafana` (metrics).
+**Service map:** `laravel` (UI + REST orchestration, calls FastAPI with `SERVICE_API_KEY`), `fastapi` (stateless API + enqueues Celery), `celery-worker` (imports/quality/ML/agent/RAG jobs), `celery-beat` (engine schedule: `nightly-data-sync` at 01:15, `hourly-ai-report` at :00, `alert-evaluation` every minute, all `Asia/Jakarta`), `laravel-queue` (Laravel queue worker for the `datasets` and `default` queues), `laravel-schedule` (`php artisan schedule:work --whisper`: `sync:import-status` at 02:15, `sync:quality` at 02:45, and `report:generate --period=weekly` Mondays at 06:00), `mysql` (all tables live in the single `aidata` database, `utf8mb4`, and are namespaced by prefix: `raw_*`, `staging_*`, `fact_*`/`dim_*`, `ml_*`, `rag_*`, `ai_*`, `alert_*`, `audit_logs`; RAG embeddings are stored as JSON and scored Python-side), `redis` (cache + broker), `prometheus`/`grafana` (metrics).
 
 ## Repo layout
 
