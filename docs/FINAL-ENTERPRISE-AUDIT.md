@@ -15,7 +15,14 @@ Date: 2026-09-29 (UTC). Branch: `main`. Scope: master enterprise commands, itera
    `WebWorkflowTest` updated to act as owner + new non-owner 403 cases.
    Suite → **929 tests, 0 failures**.
 
-## Iteration 16 (this commit)
+## Iteration 17 (this commit)
+
+26. **Full engine suite + README/env sync** — entire engine suite green
+   (1 pre-existing xfail); README service map (report schedule, engine
+   capabilities, UI highlights) and `.env.example`
+   (`AI_MONTHLY_BUDGET_USD`) synced; `verify-env.sh` 379 passed.
+
+## Iteration 16 (previous commit)
 
 25. **Report history + scheduler** — `generated_reports` table stores the
    engine answer verbatim (scheduled Monday 06:00 via `report:generate`
