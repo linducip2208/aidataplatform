@@ -30,6 +30,7 @@ return [
         'users' => 'Pengguna',
         'audit' => 'Log audit',
         'organization' => 'Organisasi',
+        'providers' => 'Provider AI',
     ],
 
     'change_password' => 'Ubah password',

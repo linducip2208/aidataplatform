@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Admin\AiProviderController;
 use App\Http\Controllers\Admin\AuditLogController;
 use App\Http\Controllers\Admin\OrganizationController;
 use App\Http\Controllers\Admin\UserController;
@@ -95,6 +96,15 @@ Route::middleware('auth')->group(function (): void {
         Route::get('/admin/users', [UserController::class, 'index'])->name('admin.users.index');
         Route::get('/admin/organization', [OrganizationController::class, 'edit'])->name('admin.organization.edit');
         Route::put('/admin/organization', [OrganizationController::class, 'update'])->name('admin.organization.update');
+        Route::get('/admin/providers', [AiProviderController::class, 'index'])->name('admin.providers.index');
+        Route::get('/admin/providers/create', [AiProviderController::class, 'create'])->name('admin.providers.create');
+        Route::post('/admin/providers', [AiProviderController::class, 'store'])->name('admin.providers.store');
+        Route::get('/admin/providers/{provider}/edit', [AiProviderController::class, 'edit'])->name('admin.providers.edit');
+        Route::put('/admin/providers/{provider}', [AiProviderController::class, 'update'])->name('admin.providers.update');
+        Route::delete('/admin/providers/{provider}', [AiProviderController::class, 'destroy'])->name('admin.providers.destroy');
+        Route::post('/admin/providers/{provider}/toggle', [AiProviderController::class, 'toggle'])->name('admin.providers.toggle');
+        Route::post('/admin/providers/{provider}/test', [AiProviderController::class, 'test'])->name('admin.providers.test');
+        Route::post('/admin/providers/{provider}/publish', [AiProviderController::class, 'publish'])->name('admin.providers.publish');
         Route::post('/admin/users', [UserController::class, 'store'])->name('admin.users.store');
         Route::patch('/admin/users/{user}', [UserController::class, 'update'])->name('admin.users.update');
         Route::delete('/admin/users/{user}', [UserController::class, 'destroy'])->name('admin.users.destroy');

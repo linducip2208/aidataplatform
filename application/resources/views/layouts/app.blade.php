@@ -23,6 +23,7 @@
         ['route' => 'admin.users.index', 'pattern' => 'admin.users.*', 'key' => 'users'],
         ['route' => 'audit.index', 'pattern' => 'audit.*', 'key' => 'audit'],
         ['route' => 'admin.organization.edit', 'pattern' => 'admin.organization.*', 'key' => 'organization'],
+        ['route' => 'admin.providers.index', 'pattern' => 'admin.providers.*', 'key' => 'providers'],
     ];
 
     $user = auth()->user();

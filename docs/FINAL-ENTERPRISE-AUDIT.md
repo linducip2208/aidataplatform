@@ -15,7 +15,16 @@ Date: 2026-09-29 (UTC). Branch: `main`. Scope: master enterprise commands, itera
    `WebWorkflowTest` updated to act as owner + new non-owner 403 cases.
    Suite → **929 tests, 0 failures**.
 
-## Iteration 21 (this commit, ultimate directive U1)
+## Iteration 22 (this commit, BYOK directive)
+
+36. **BYOK provider registry.** `ai_providers` table holds metadata only —
+   keys are never stored/logged/returned. Admin UI (CRUD, test-connection,
+   enable/disable, masked-by-design) + `AiProviderService` (probe, managed
+   env-block publish with backup + 0600, container-vs-native honesty).
+   Provider/model hardcode sweep: clean (only type labels + key slots).
+   Docs `ai-providers.md`. Tests `AiProviderTest` → **8 passed**.
+
+## Iteration 21 (previous commit, ultimate directive U1)
 
 34. **Double-escape fix + supervisor fix.** `attr="{{ __() }}"` on Blade
    components escaped twice (`Target &amp;amp; …`); all 159 component props

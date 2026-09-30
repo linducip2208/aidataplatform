@@ -30,6 +30,7 @@ return [
         'users' => 'Users',
         'audit' => 'Audit log',
         'organization' => 'Organization',
+        'providers' => 'AI Providers',
     ],
 
     'change_password' => 'Change password',
