@@ -126,7 +126,7 @@
     </ol>
 
     @unless ($canWrite)
-        <x-card class="mb-3" title="{{ __('datasets.show_readonly_title') }}">
+        <x-card class="mb-3" :title="__('datasets.show_readonly_title')">
             <p class="text-secondary">
                 {{ __('datasets.show_readonly_prefix') }} <strong>{{ auth()->user()->role()->localizedLabel() }}</strong> {{ __('datasets.show_readonly_suffix', ['admin' => \App\Enums\UserRole::Admin->localizedLabel(), 'analyst' => \App\Enums\UserRole::Analyst->localizedLabel()]) }}
             </p>
@@ -136,7 +136,7 @@
     <div class="row row-cards">
         <div class="col-lg-8">
             <x-card
-                title="{{ __('datasets.show_stage1_title') }}"
+                :title="__('datasets.show_stage1_title')"
                 description="{{ __('datasets.show_stage1_desc') }}"
             >
                 @if (! $hasJob)
@@ -183,12 +183,12 @@
             </x-card>
 
             <x-card
-                title="{{ __('datasets.show_stage2_title') }}"
+                :title="__('datasets.show_stage2_title')"
                 description="{{ __('datasets.show_stage2_desc') }}"
             >
                 @if (! $hasProfile)
                     <x-empty-state
-                        title="{{ __('datasets.show_stage2_empty_title') }}"
+                        :title="__('datasets.show_stage2_empty_title')"
                         description="{{ __('datasets.show_stage2_empty_desc') }}"
                     />
                 @else
@@ -196,7 +196,7 @@
                         <form method="POST" action="{{ route('datasets.mapping', $dataset) }}">
                             @csrf
 
-                            <x-table-wrapper label="{{ __('datasets.show_mapping_label') }}" class="mb-3">
+                            <x-table-wrapper :label="__('datasets.show_mapping_label')" class="mb-3">
                                 <table class="table table-vcenter card-table">
                                     <thead>
                                         <tr>
@@ -257,7 +257,7 @@
                             @enderror
 
                             <x-field
-                                label="{{ __('datasets.show_template_label') }}"
+                                :label="__('datasets.show_template_label')"
                                 for="save_as_template"
                                 name="save_as_template"
                                 hint="{{ __('datasets.show_template_hint') }}"
@@ -290,7 +290,7 @@
                             @endforeach
 
                             @if ($mappings === [])
-                                <x-empty-state title="{{ __('datasets.show_no_mapping_title') }}" description="{{ __('datasets.show_no_mapping_desc') }}" />
+                                <x-empty-state :title="__('datasets.show_no_mapping_title')" description="{{ __('datasets.show_no_mapping_desc') }}" />
                             @endif
                         </dl>
                     @endif
@@ -298,7 +298,7 @@
             </x-card>
 
             <x-card
-                title="{{ __('datasets.show_stage3_title') }}"
+                :title="__('datasets.show_stage3_title')"
                 description="{{ __('datasets.show_stage3_desc') }}"
             >
                 @if ($score === null)
@@ -335,7 +335,7 @@
                 @endif
 
                 @if ($issues !== [])
-                    <x-table-wrapper label="{{ __('datasets.show_issues_label') }}" class="mb-3">
+                    <x-table-wrapper :label="__('datasets.show_issues_label')" class="mb-3">
                         <table class="table table-vcenter card-table">
                             <thead>
                                 <tr>
@@ -383,7 +383,7 @@
             </x-card>
 
             <x-card
-                title="{{ __('datasets.show_stage4_title') }}"
+                :title="__('datasets.show_stage4_title')"
                 description="{{ __('datasets.show_stage4_desc') }}"
             >
                 @if ($isCommitted)
@@ -448,14 +448,14 @@
                 @endif
             </x-card>
 
-            <x-card title="{{ __('datasets.show_sample_title') }}" description="{{ __('datasets.show_sample_desc') }}">
+            <x-card :title="__('datasets.show_sample_title')" description="{{ __('datasets.show_sample_desc') }}">
                 @if ($sampleRows === [] || $sampleColumns === [])
                     <x-empty-state
-                        title="{{ __('datasets.show_sample_empty_title') }}"
+                        :title="__('datasets.show_sample_empty_title')"
                         description="{{ __('datasets.show_sample_empty_desc') }}"
                     />
                 @else
-                    <x-table-wrapper label="{{ __('datasets.show_sample_title') }}">
+                    <x-table-wrapper :label="__('datasets.show_sample_title')">
                         <table class="table table-vcenter card-table">
                             <thead>
                                 <tr>
@@ -489,7 +489,7 @@
         </div>
 
         <div class="col-lg-4">
-            <x-card title="{{ __('datasets.show_info_title') }}" description="{{ __('datasets.show_info_desc') }}">
+            <x-card :title="__('datasets.show_info_title')" description="{{ __('datasets.show_info_desc') }}">
                 <dl class="datagrid">
                     <div class="datagrid-item">
                         <dt class="datagrid-title">{{ __('datasets.show_info_type') }}</dt>
@@ -533,7 +533,7 @@
             </x-card>
 
             @if ($canWrite)
-                <x-card title="{{ __('datasets.show_delete_title') }}" description="{{ __('datasets.show_delete_desc') }}">
+                <x-card :title="__('datasets.show_delete_title')" description="{{ __('datasets.show_delete_desc') }}">
                     <p class="text-secondary">
                         {{ __('datasets.show_delete_hint') }}
                     </p>

@@ -19,32 +19,32 @@
             <x-stat
                 :label="\App\Enums\QualityVerdict::Pass->localizedLabel()"
                 :value="number_format((int) ($breakdown['pass'] ?? 0), 0, ',', '.')"
-                hint="{{ __('quality.pass_hint') }}"
+                :hint="__('quality.pass_hint')"
             />
         </div>
         <div class="col-sm-6 col-lg-3">
             <x-stat
                 :label="\App\Enums\QualityVerdict::Quarantine->localizedLabel()"
                 :value="number_format((int) ($breakdown['quarantine'] ?? 0), 0, ',', '.')"
-                hint="{{ __('quality.quarantine_hint') }}"
+                :hint="__('quality.quarantine_hint')"
             />
         </div>
         <div class="col-sm-6 col-lg-3">
-            <x-stat label="{{ __('quality.unscored_label') }}" :value="number_format((int) ($breakdown['unscored'] ?? 0), 0, ',', '.')" hint="{{ __('quality.unscored_hint') }}" />
+            <x-stat :label="__('quality.unscored_label')" :value="number_format((int) ($breakdown['unscored'] ?? 0), 0, ',', '.')" hint="{{ __('quality.unscored_hint') }}" />
         </div>
         <div class="col-sm-6 col-lg-3">
             <x-stat
-                label="{{ __('quality.threshold_label') }}"
+                :label="__('quality.threshold_label')"
                 :value="\Illuminate\Support\Number::percentage($threshold * 100, precision: 1, locale: 'id')"
                 hint="{{ __('quality.threshold_hint') }}"
             />
         </div>
     </div>
 
-    <x-card title="{{ __('quality.filter_title') }}" description="{{ __('quality.filter_description') }}">
+    <x-card :title="__('quality.filter_title')" description="{{ __('quality.filter_description') }}">
         <form method="GET" action="{{ route('quality.index') }}" class="row row-cards">
             <div class="col-md-6">
-                <x-field label="{{ __('quality.field_dataset_type') }}" for="dataset_type">
+                <x-field :label="__('quality.field_dataset_type')" for="dataset_type">
                     <select
                         id="dataset_type"
                         name="dataset_type"
@@ -59,7 +59,7 @@
             </div>
 
             <div class="col-md-6">
-                <x-field label="{{ __('quality.field_verdict') }}" for="verdict">
+                <x-field :label="__('quality.field_verdict')" for="verdict">
                     <select
                         id="verdict"
                         name="verdict"
@@ -88,10 +88,10 @@
         </form>
     </x-card>
 
-    <x-card title="{{ __('quality.results_title') }}" description="{{ __('quality.results_description', ['count' => number_format($datasets->total(), 0, ',', '.')]) }}">
+    <x-card :title="__('quality.results_title')" description="{{ __('quality.results_description', ['count' => number_format($datasets->total(), 0, ',', '.')]) }}">
         @if ($datasets->isEmpty())
             <x-empty-state
-                title="{{ __('quality.results_empty_title') }}"
+                :title="__('quality.results_empty_title')"
                 description="{{ __('quality.results_empty_description') }}"
             >
                 <x-slot:action>
@@ -102,7 +102,7 @@
                 </x-slot:action>
             </x-empty-state>
         @else
-            <x-table-wrapper label="{{ __('quality.table_label') }}">
+            <x-table-wrapper :label="__('quality.table_label')">
                 <table class="table table-vcenter card-table">
                     <thead>
                         <tr>

@@ -24,10 +24,10 @@
         </div>
     </div>
 
-    <x-card class="mb-3" title="{{ __('datasets.index_filter_title') }}" description="{{ __('datasets.index_filter_desc') }}">
+    <x-card class="mb-3" :title="__('datasets.index_filter_title')" description="{{ __('datasets.index_filter_desc') }}">
         <form method="GET" action="{{ route('datasets.index') }}" class="row row-cards">
             <div class="col-sm-6 col-lg-3">
-                <x-field label="{{ __('datasets.index_search_label') }}" for="q" hint="{{ __('datasets.index_search_hint') }}">
+                <x-field :label="__('datasets.index_search_label')" for="q" hint="{{ __('datasets.index_search_hint') }}">
                     <input
                         id="q"
                         name="q"
@@ -40,7 +40,7 @@
             </div>
 
             <div class="col-sm-6 col-lg-3">
-                <x-field label="{{ __('datasets.index_type_label') }}" for="dataset_type">
+                <x-field :label="__('datasets.index_type_label')" for="dataset_type">
                     <select
                         id="dataset_type"
                         name="dataset_type"
@@ -55,7 +55,7 @@
             </div>
 
             <div class="col-sm-6 col-lg-3">
-                <x-field label="{{ __('datasets.index_status_label') }}" for="status">
+                <x-field :label="__('datasets.index_status_label')" for="status">
                     <select
                         id="status"
                         name="status"
@@ -84,14 +84,14 @@
         </form>
     </x-card>
 
-    <x-card title="{{ __('datasets.index_list_title') }}" description="{{ __('datasets.index_list_desc', ['count' => number_format($datasets->total(), 0, ',', '.')]) }}">
+    <x-card :title="__('datasets.index_list_title')" description="{{ __('datasets.index_list_desc', ['count' => number_format($datasets->total(), 0, ',', '.')]) }}">
         @if ($datasets->isEmpty())
             <x-empty-state
-                title="{{ __('datasets.index_empty_title') }}"
+                :title="__('datasets.index_empty_title')"
                 description="{{ __('datasets.index_empty_desc') }}"
             />
         @else
-            <x-table-wrapper label="{{ __('datasets.index_list_title') }}">
+            <x-table-wrapper :label="__('datasets.index_list_title')">
                 <table class="table table-vcenter card-table">
                     <thead>
                         <tr>

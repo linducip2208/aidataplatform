@@ -56,10 +56,10 @@
 
     <div class="row row-cards">
         <div class="col-lg-8">
-            <x-card title="{{ __('imports.progress_title') }}" description="{{ __('imports.progress_description') }}">
+            <x-card :title="__('imports.progress_title')" description="{{ __('imports.progress_description') }}">
                 @if ($progress === null)
                     <x-empty-state
-                        title="{{ __('imports.progress_empty_title') }}"
+                        :title="__('imports.progress_empty_title')"
                         description="{{ __('imports.progress_empty_description') }}"
                     />
                 @else
@@ -83,10 +83,10 @@
                 @endif
             </x-card>
 
-            <x-card title="{{ __('imports.rows_title') }}" description="{{ __('imports.rows_description') }}">
+            <x-card :title="__('imports.rows_title')" description="{{ __('imports.rows_description') }}">
                 @if ($job === [])
                     <x-empty-state
-                        title="{{ __('imports.report_unavailable_title') }}"
+                        :title="__('imports.report_unavailable_title')"
                         description="{{ __('imports.report_unavailable_description') }}"
                     />
                 @else
@@ -113,10 +113,10 @@
                 @endif
             </x-card>
 
-            <x-card title="{{ __('imports.engine_report_title') }}" description="{{ __('imports.engine_report_description') }}">
+            <x-card :title="__('imports.engine_report_title')" description="{{ __('imports.engine_report_description') }}">
                 @if (! is_array($job['report'] ?? null) || ($job['report'] ?? []) === [])
                     <x-empty-state
-                        title="{{ __('imports.report_empty_title') }}"
+                        :title="__('imports.report_empty_title')"
                         description="{{ __('imports.report_empty_description') }}"
                     />
                 @else
@@ -140,7 +140,7 @@
         </div>
 
         <div class="col-lg-4">
-            <x-card title="{{ __('imports.dataset_title') }}" description="{{ __('imports.dataset_description') }}">
+            <x-card :title="__('imports.dataset_title')" description="{{ __('imports.dataset_description') }}">
                 <dl class="datagrid">
                     <div class="datagrid-item">
                         <dt class="datagrid-title">{{ __('imports.field_name') }}</dt>

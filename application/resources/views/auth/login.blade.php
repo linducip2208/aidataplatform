@@ -13,7 +13,7 @@
             <form method="POST" action="{{ route('login.store') }}">
                 @csrf
 
-                <x-field label="{{ __('auth.email') }}" for="email" name="email" required>
+                <x-field :label="__('auth.email')" for="email" name="email" required>
                     <input
                         id="email"
                         name="email"
@@ -28,7 +28,7 @@
                     >
                 </x-field>
 
-                <x-field label="{{ __('auth.password') }}" for="password" name="password" required>
+                <x-field :label="__('auth.password')" for="password" name="password" required>
                     <input
                         id="password"
                         name="password"

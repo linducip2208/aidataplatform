@@ -19,9 +19,9 @@
     <div class="page-header">
         <div class="row align-items-center">
             <div class="col">
-                <h1 class="page-title">Pembelajaran mesin</h1>
+                <h1 class="page-title">{{ __('ml.header_title') }}</h1>
                 <div class="page-subtitle">
-                    Latih model, tinjau metrik setiap versi, dan promosikan versi terbaik ke produksi sesuai tata kelola model.
+                    {{ __('ml.header_subtitle') }}
                 </div>
             </div>
         </div>
@@ -30,7 +30,7 @@
     @if (filled($error))
         <x-card class="mb-3">
             <div role="alert" class="alert alert-danger mb-0">
-                <x-badge variant="danger">Gagal</x-badge>
+                <x-badge variant="danger">{{ __('ml.failed') }}</x-badge>
                 <span>{{ $error }}</span>
             </div>
         </x-card>
@@ -38,22 +38,22 @@
 
     <div class="row row-cards">
         <div class="col-lg-8">
-            <x-card title="Daftar model" description="Model yang terdaftar di registry mesin AI.">
+            <x-card :title="__('ml.models_title')" description="{{ __('ml.models_desc') }}">
                 @if ($models === [])
                     <x-empty-state
-                        title="Belum ada model"
-                        description="Jalankan pelatihan pertama melalui formulir di samping untuk membuat model baru."
+                        :title="__('ml.models_empty_title')"
+                        description="{{ __('ml.models_empty_desc') }}"
                     />
                 @else
-                    <x-table-wrapper label="Daftar model">
+                    <x-table-wrapper :label="__('ml.models_table')">
                         <table class="table table-vcenter card-table">
                             <thead>
                                 <tr>
-                                    <th scope="col">Model</th>
-                                    <th scope="col">Tipe</th>
-                                    <th scope="col">Status</th>
-                                    <th scope="col" class="text-end">Versi produksi</th>
-                                    <th scope="col"><span class="visually-hidden">Aksi</span></th>
+                                    <th scope="col">{{ __('ml.th_model') }}</th>
+                                    <th scope="col">{{ __('ml.th_type') }}</th>
+                                    <th scope="col">{{ __('ml.th_status') }}</th>
+                                    <th scope="col" class="text-end">{{ __('ml.th_prod_version') }}</th>
+                                    <th scope="col"><span class="visually-hidden">{{ __('ml.th_actions') }}</span></th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -64,17 +64,17 @@
                                     @endphp
                                     <tr @if ($selectedId === $modelId) class="table-active" @endif>
                                         <td>
-                                            <span class="fw-medium">{{ $model['name'] ?? 'Tanpa nama' }}</span>
+                                            <span class="fw-medium">{{ $model['name'] ?? __('ml.unnamed') }}</span>
                                             <span class="d-block small text-secondary">ID {{ $modelId }}</span>
                                         </td>
-                                        <td>{{ $typeLabels[$model['model_type'] ?? ''] ?? ($model['model_type'] ?? 'Tidak diketahui') }}</td>
+                                        <td>{{ $typeLabels[$model['model_type'] ?? ''] ?? ($model['model_type'] ?? __('ml.unknown')) }}</td>
                                         <td>
                                             <x-badge :class="$statuses[$statusKey]['badge'] ?? 'badge-neutral'">
-                                                {{ $statuses[$statusKey]['label'] ?? 'Status tidak dikenal' }}
+                                                {{ $statuses[$statusKey]['label'] ?? __('ml.status_unknown') }}
                                             </x-badge>
                                         </td>
                                         <td class="text-end">
-                                            {{ ! empty($model['production_version_id']) ? number_format((int) $model['production_version_id'], 0, ',', '.') : 'Belum ada' }}
+                                            {{ ! empty($model['production_version_id']) ? number_format((int) $model['production_version_id'], 0, ',', '.') : __('ml.no_production') }}
                                         </td>
                                         <td class="text-end">
                                             <form method="GET" action="{{ route('ml.index') }}">
@@ -82,7 +82,7 @@
                                                 <button
                                                     type="submit"
                                                     class="btn"
-                                                >{{ $selectedId === $modelId ? 'Sedang dibuka' : 'Lihat versi' }}</button>
+                                                >{{ $selectedId === $modelId ? __('ml.opening') : __('ml.view_versions') }}</button>
                                             </form>
                                         </td>
                                     </tr>
@@ -94,24 +94,24 @@
             </x-card>
 
             <x-card
-                title="Versi model"
-                :description="$selectedId ? 'Riwayat versi untuk model yang dipilih beserta metrik evaluasinya.' : 'Pilih salah satu model di tabel untuk melihat riwayat versinya.'"
+                :title="__('ml.versions_title')"
+                :description="$selectedId ? __('ml.versions_desc_selected') : __('ml.versions_desc_empty')"
             >
                 @if ($versions === [])
                     <x-empty-state
-                        title="Belum ada versi"
-                        description="Model ini belum memiliki versi. Latih model untuk membuat versi pertama."
+                        :title="__('ml.versions_empty_title')"
+                        description="{{ __('ml.versions_empty_desc') }}"
                     />
                 @else
-                    <x-table-wrapper label="Versi model">
+                    <x-table-wrapper :label="__('ml.versions_table')">
                         <table class="table table-vcenter card-table">
                             <thead>
                                 <tr>
-                                    <th scope="col">Versi</th>
-                                    <th scope="col">Status</th>
-                                    <th scope="col">Metrik</th>
+                                    <th scope="col">{{ __('ml.th_version') }}</th>
+                                    <th scope="col">{{ __('ml.th_status') }}</th>
+                                    <th scope="col">{{ __('ml.th_metrics') }}</th>
                                     @if ($canApprove)
-                                        <th scope="col"><span class="visually-hidden">Promosi</span></th>
+                                        <th scope="col"><span class="visually-hidden">{{ __('ml.th_promote') }}</span></th>
                                     @endif
                                 </tr>
                             </thead>
@@ -129,12 +129,12 @@
                                         </td>
                                         <td>
                                             <x-badge :class="$statuses[$versionStatus]['badge'] ?? 'badge-neutral'">
-                                                {{ $statuses[$versionStatus]['label'] ?? 'Status tidak dikenal' }}
+                                                {{ $statuses[$versionStatus]['label'] ?? __('ml.status_unknown') }}
                                             </x-badge>
                                         </td>
                                         <td>
                                             @if ($metrics === [])
-                                                <span class="small text-secondary">Tidak ada metrik</span>
+                                                <span class="small text-secondary">{{ __('ml.no_metrics') }}</span>
                                             @else
                                                 <dl class="datagrid">
                                                     @foreach ($metrics as $metricKey => $metricValue)
@@ -142,7 +142,7 @@
                                                             <dt class="datagrid-title">{{ \Illuminate\Support\Str::headline((string) $metricKey) }}</dt>
                                                             <dd class="datagrid-content">
                                                                 @if (is_bool($metricValue))
-                                                                    {{ $metricValue ? 'Ya' : 'Tidak' }}
+                                                                    {{ $metricValue ? __('ml.yes') : __('ml.no') }}
                                                                 @elseif (is_scalar($metricValue) || $metricValue === null)
                                                                     {{ \Illuminate\Support\Str::limit((string) $metricValue, 40) }}
                                                                 @else
@@ -160,7 +160,7 @@
                                                     @csrf
                                                     <input type="hidden" name="version_id" value="{{ $versionId }}">
 
-                                                    <label for="to_status-{{ $versionId }}" class="visually-hidden">Status tujuan untuk versi {{ $version['version'] ?? $versionId }}</label>
+                                                    <label for="to_status-{{ $versionId }}" class="visually-hidden">{{ __('ml.promote_target_label', ['version' => $version['version'] ?? $versionId]) }}</label>
                                                     <select
                                                         id="to_status-{{ $versionId }}"
                                                         name="to_status"
@@ -174,7 +174,7 @@
                                                     <button
                                                         type="submit"
                                                         class="btn btn-primary w-100 mt-2"
-                                                    >Promosikan</button>
+                                                    >{{ __('ml.promote') }}</button>
                                                 </form>
                                             </td>
                                         @endif
@@ -189,11 +189,11 @@
 
         <div class="col-lg-4">
             @if (auth()->user()->isAnalyst())
-                <x-card title="Latih model baru" description="Pelatihan dijalankan mesin AI dan menghasilkan versi tervalidasi.">
+                <x-card :title="__('ml.train_title')" description="{{ __('ml.train_desc') }}">
                     <form method="POST" action="{{ route('ml.train') }}">
                         @csrf
 
-                        <x-field label="Tipe model" for="model_type" name="model_type" required>
+                        <x-field :label="__('ml.field_model_type')" for="model_type" name="model_type" required>
                             <select
                                 id="model_type"
                                 name="model_type"
@@ -201,14 +201,14 @@
                                 @error('model_type') aria-invalid="true" @enderror
                                 class="form-select"
                             >
-                                <option value="">Pilih tipe model</option>
+                                <option value="">{{ __('ml.type_placeholder') }}</option>
                                 @foreach ($modelTypes as $type)
                                     <option value="{{ $type }}" @selected(old('model_type') === $type)>{{ $typeLabels[$type] ?? $type }}</option>
                                 @endforeach
                             </select>
                         </x-field>
 
-                        <x-field label="Nama model" for="name" name="name" required>
+                        <x-field :label="__('ml.field_model_name')" for="name" name="name" required>
                             <input
                                 id="name"
                                 name="name"
@@ -216,17 +216,17 @@
                                 value="{{ old('name') }}"
                                 required
                                 maxlength="100"
-                                placeholder="mis. forecast_penjualan_harian"
+                                placeholder="{{ __('ml.name_placeholder') }}"
                                 @error('name') aria-invalid="true" @enderror
                                 class="form-control"
                             >
                         </x-field>
 
                         <x-field
-                            label="Parameter JSON"
+                            :label="__('ml.field_params')"
                             for="params"
                             name="params"
-                            hint="Objek JSON kosong {}, misalnya {&quot;horizon&quot;: 30, &quot;n_clusters&quot;: 4}."
+                            hint="{{ __('ml.field_params_hint') }}"
                         >
                             <textarea
                                 id="params"
@@ -241,23 +241,22 @@
                         <button
                             type="submit"
                             class="btn btn-primary w-100"
-                        >Mulai pelatihan</button>
+                        >{{ __('ml.start_training') }}</button>
                     </form>
                 </x-card>
             @else
-                <x-card title="Akses baca saja">
+                <x-card :title="__('ml.readonly_title')">
                     <p class="text-secondary mb-0">
-                        Peran <strong>{{ auth()->user()->role()->localizedLabel() }}</strong> tidak dapat menjalankan pelatihan model.
-                        Pelatihan tersedia untuk {{ \App\Enums\UserRole::Admin->localizedLabel() }} dan {{ \App\Enums\UserRole::Analyst->localizedLabel() }}.
+                        {{ __('ml.readonly_lead') }} <strong>{{ auth()->user()->role()->localizedLabel() }}</strong> {{ __('ml.readonly_trail', ['admin' => \App\Enums\UserRole::Admin->localizedLabel(), 'analyst' => \App\Enums\UserRole::Analyst->localizedLabel()]) }}
                     </p>
                 </x-card>
             @endif
 
-            <x-card title="Tata kelola model" description="Aturan promosi versi model.">
+            <x-card :title="__('ml.governance_title')" description="{{ __('ml.governance_desc') }}">
                 <ul class="list-unstyled mb-0 text-secondary">
-                    <li>Hanya {{ \App\Enums\UserRole::Admin->localizedLabel() }} yang dapat menaikkan versi model ke produksi.</li>
-                    <li>Setiap versi menyimpan metrik evaluasi hasil validasi.</li>
-                    <li>Model produksi dipakai untuk prediksi dan analitik otomatis.</li>
+                    <li>{{ __('ml.governance_admin', ['admin' => \App\Enums\UserRole::Admin->localizedLabel()]) }}</li>
+                    <li>{{ __('ml.governance_metrics') }}</li>
+                    <li>{{ __('ml.governance_production') }}</li>
                 </ul>
             </x-card>
         </div>
@@ -272,31 +271,31 @@
 
     <div class="d-grid gap-3 mt-3">
         <x-card
-            title="Eksperimen"
-            description="Jejak pelatihan dengan pembagian train/validasi/test, metrik per split, dan promosi versi terbaik."
+            :title="__('ml.experiments_title')"
+            description="{{ __('ml.experiments_desc') }}"
         >
             @if (filled($experimentsError))
                 <div role="alert" class="alert alert-danger mb-0">
-                    <x-badge variant="danger">Gagal</x-badge>
+                    <x-badge variant="danger">{{ __('ml.failed') }}</x-badge>
                     <span>{{ $experimentsError }}</span>
                 </div>
             @elseif ($experiments === [])
                 <x-empty-state
-                    title="Belum ada eksperimen"
-                    description="Buat eksperimen pertama melalui formulir di bawah untuk mencatat split dan metrik pelatihan."
+                    :title="__('ml.experiments_empty_title')"
+                    description="{{ __('ml.experiments_empty_desc') }}"
                 />
             @else
-                <x-table-wrapper label="Daftar eksperimen">
+                <x-table-wrapper :label="__('ml.experiments_table')">
                     <table class="table table-vcenter card-table">
                         <thead>
                             <tr>
-                                <th scope="col">Eksperimen</th>
-                                <th scope="col">Tipe</th>
-                                <th scope="col">Status</th>
-                                <th scope="col">Split</th>
-                                <th scope="col">Metrik validasi</th>
+                                <th scope="col">{{ __('ml.th_experiment') }}</th>
+                                <th scope="col">{{ __('ml.th_type') }}</th>
+                                <th scope="col">{{ __('ml.th_status') }}</th>
+                                <th scope="col">{{ __('ml.th_split') }}</th>
+                                <th scope="col">{{ __('ml.th_validate_metrics') }}</th>
                                 @if ($canApprove)
-                                    <th scope="col"><span class="visually-hidden">Promosi eksperimen</span></th>
+                                    <th scope="col"><span class="visually-hidden">{{ __('ml.th_promote_experiment') }}</span></th>
                                 @endif
                             </tr>
                         </thead>
@@ -311,28 +310,28 @@
                                 @endphp
                                 <tr>
                                     <td>
-                                        <span class="fw-medium">{{ $experiment['name'] ?? 'Tanpa nama' }}</span>
+                                        <span class="fw-medium">{{ $experiment['name'] ?? __('ml.unnamed') }}</span>
                                         <span class="d-block small text-secondary">ID {{ $experimentId }}</span>
                                     </td>
-                                    <td>{{ $typeLabels[$experiment['model_type'] ?? ''] ?? ($experiment['model_type'] ?? 'Tidak diketahui') }}</td>
+                                    <td>{{ $typeLabels[$experiment['model_type'] ?? ''] ?? ($experiment['model_type'] ?? __('ml.unknown')) }}</td>
                                     <td>
                                         <x-badge :class="$statuses[$experimentStatus]['badge'] ?? 'badge-neutral'">
                                             {{ $statuses[$experimentStatus]['label'] ?? $experimentStatus }}
                                         </x-badge>
                                     </td>
                                     <td class="text-secondary">
-                                        {{ $splitConfig['strategy'] ?? 'belum dibagi' }}
+                                        {{ $splitConfig['strategy'] ?? __('ml.not_split') }}
                                         @if ($splitSizes !== [])
                                             <span class="d-block small">
-                                                latih {{ $splitSizes['train'] ?? 0 }} /
-                                                validasi {{ $splitSizes['validate'] ?? 0 }} /
-                                                uji {{ $splitSizes['test'] ?? 0 }}
+                                                {{ __('ml.split_train') }} {{ $splitSizes['train'] ?? 0 }} /
+                                                {{ __('ml.split_validate') }} {{ $splitSizes['validate'] ?? 0 }} /
+                                                {{ __('ml.split_test') }} {{ $splitSizes['test'] ?? 0 }}
                                             </span>
                                         @endif
                                     </td>
                                     <td>
                                         @if ($validateMetrics === [])
-                                            <span class="small text-secondary">Tidak ada metrik</span>
+                                            <span class="small text-secondary">{{ __('ml.no_metrics') }}</span>
                                         @else
                                             <dl class="datagrid">
                                                 @foreach ($validateMetrics as $metricKey => $metricValue)
@@ -357,7 +356,7 @@
                                                 <button
                                                     type="submit"
                                                     class="btn btn-primary w-100"
-                                                >Promosikan versi</button>
+                                                >{{ __('ml.promote_version') }}</button>
                                             </form>
                                         </td>
                                     @endif
@@ -371,29 +370,29 @@
 
         @if (isset($selected['id']))
             <x-card
-                title="Jejak audit model"
-                description="Riwayat promosi, rollback, dan status deployment untuk model yang dipilih."
+                :title="__('ml.audit_title')"
+                description="{{ __('ml.audit_desc') }}"
             >
                 @if (filled($eventsError))
                     <div role="alert" class="alert alert-danger mb-0">
-                        <x-badge variant="danger">Gagal</x-badge>
+                        <x-badge variant="danger">{{ __('ml.failed') }}</x-badge>
                         <span>{{ $eventsError }}</span>
                     </div>
                 @elseif ($events === [])
                     <x-empty-state
-                        title="Belum ada peristiwa"
-                        description="Promosi atau rollback pertama akan tercatat di sini."
+                        :title="__('ml.audit_empty_title')"
+                        description="{{ __('ml.audit_empty_desc') }}"
                     />
                 @else
-                    <x-table-wrapper label="Jejak audit model">
+                    <x-table-wrapper :label="__('ml.audit_table')">
                         <table class="table table-vcenter card-table">
                             <thead>
                                 <tr>
-                                    <th scope="col">Waktu</th>
-                                    <th scope="col">Peristiwa</th>
-                                    <th scope="col">Versi</th>
-                                    <th scope="col">Perubahan</th>
-                                    <th scope="col">Catatan</th>
+                                    <th scope="col">{{ __('ml.th_time') }}</th>
+                                    <th scope="col">{{ __('ml.th_event') }}</th>
+                                    <th scope="col">{{ __('ml.th_version') }}</th>
+                                    <th scope="col">{{ __('ml.th_change') }}</th>
+                                    <th scope="col">{{ __('ml.th_note') }}</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -416,13 +415,13 @@
                         @csrf
                         <div class="row g-2 align-items-end">
                             <div class="col-md-8">
-                                <label for="rollback-note" class="form-label">Catatan rollback</label>
+                                <label for="rollback-note" class="form-label">{{ __('ml.rollback_label') }}</label>
                                 <input
                                     id="rollback-note"
                                     name="note"
                                     type="text"
                                     maxlength="1024"
-                                    placeholder="mis. versi bermasalah di produksi"
+                                    placeholder="{{ __('ml.rollback_placeholder') }}"
                                     class="form-control"
                                 >
                             </div>
@@ -430,7 +429,7 @@
                                 <button
                                     type="submit"
                                     class="btn btn-outline-danger w-100"
-                                >Kembalikan ke versi sebelumnya</button>
+                                >{{ __('ml.rollback_submit') }}</button>
                             </div>
                         </div>
                     </form>
@@ -441,31 +440,31 @@
         @if (auth()->user()->isAnalyst())
             <div class="row row-cards">
                 <div class="col-md-6">
-                    <x-card title="Buat eksperimen" description="Catat split train/validasi/test beserta metrik per split.">
+                    <x-card :title="__('ml.create_experiment_title')" description="{{ __('ml.create_experiment_desc') }}">
                         <form method="POST" action="{{ url('/ml/experiments') }}">
                             @csrf
 
-                            <x-field label="Tipe model" for="experiment_model_type" name="model_type" required>
+                            <x-field :label="__('ml.field_model_type')" for="experiment_model_type" name="model_type" required>
                                 <select
                                     id="experiment_model_type"
                                     name="model_type"
                                     required
                                     class="form-select"
                                 >
-                                    <option value="">Pilih tipe model</option>
+                                    <option value="">{{ __('ml.type_placeholder') }}</option>
                                     @foreach ($modelTypes as $type)
                                         <option value="{{ $type }}">{{ $typeLabels[$type] ?? $type }}</option>
                                     @endforeach
                                 </select>
                             </x-field>
 
-                            <x-field label="Nama eksperimen" for="experiment_name" name="name">
+                            <x-field :label="__('ml.field_experiment_name')" for="experiment_name" name="name">
                                 <input
                                     id="experiment_name"
                                     name="name"
                                     type="text"
                                     maxlength="128"
-                                    placeholder="mis. churn_q1_baseline"
+                                    placeholder="{{ __('ml.experiment_name_placeholder') }}"
                                     class="form-control"
                                 >
                             </x-field>
@@ -473,46 +472,46 @@
                             <button
                                 type="submit"
                                 class="btn btn-primary w-100"
-                            >Jalankan eksperimen</button>
+                            >{{ __('ml.run_experiment') }}</button>
                         </form>
                     </x-card>
                 </div>
 
                 <div class="col-md-6">
-                    <x-card title="Batch prediksi" description="Nilai dataset baris demi chunk dengan versi produksi dan simpan riwayatnya.">
+                    <x-card :title="__('ml.batch_title')" description="{{ __('ml.batch_desc') }}">
                         <form method="POST" action="{{ url('/ml/batch-predict') }}">
                             @csrf
 
-                            <x-field label="Tipe model" for="batch_model_type" name="model_type" required>
+                            <x-field :label="__('ml.field_model_type')" for="batch_model_type" name="model_type" required>
                                 <select
                                     id="batch_model_type"
                                     name="model_type"
                                     required
                                     class="form-select"
                                 >
-                                    <option value="">Pilih tipe model</option>
+                                    <option value="">{{ __('ml.type_placeholder') }}</option>
                                     @foreach ($modelTypes as $type)
                                         <option value="{{ $type }}">{{ $typeLabels[$type] ?? $type }}</option>
                                     @endforeach
                                 </select>
                             </x-field>
 
-                            <x-field label="Nama model" for="batch_model_name" name="model_name">
+                            <x-field :label="__('ml.field_model_name')" for="batch_model_name" name="model_name">
                                 <input
                                     id="batch_model_name"
                                     name="model_name"
                                     type="text"
                                     maxlength="128"
-                                    placeholder="mis. churn-model"
+                                    placeholder="{{ __('ml.batch_name_placeholder') }}"
                                     class="form-control"
                                 >
                             </x-field>
 
                             <x-field
-                                label="Dataset JSON"
+                                :label="__('ml.field_dataset')"
                                 for="batch_dataset"
                                 name="dataset"
-                                hint="Array JSON dari baris data, misalnya [{&quot;recency&quot;: 12}]."
+                                hint="{{ __('ml.field_dataset_hint') }}"
                             >
                                 <textarea
                                     id="batch_dataset"
@@ -526,7 +525,7 @@
                             <button
                                 type="submit"
                                 class="btn btn-primary w-100"
-                            >Jalankan batch prediksi</button>
+                            >{{ __('ml.run_batch') }}</button>
                         </form>
                     </x-card>
                 </div>

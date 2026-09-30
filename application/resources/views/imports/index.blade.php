@@ -14,10 +14,10 @@
         </p>
     </div>
 
-    <x-card title="{{ __('imports.jobs_title') }}" description="{{ __('imports.jobs_description', ['count' => number_format($datasets->total(), 0, ',', '.')]) }}">
+    <x-card :title="__('imports.jobs_title')" description="{{ __('imports.jobs_description', ['count' => number_format($datasets->total(), 0, ',', '.')]) }}">
         @if ($datasets->isEmpty())
             <x-empty-state
-                title="{{ __('imports.empty_title') }}"
+                :title="__('imports.empty_title')"
                 description="{{ __('imports.empty_description') }}"
             >
                 <x-slot:action>
@@ -28,7 +28,7 @@
                 </x-slot:action>
             </x-empty-state>
         @else
-            <x-table-wrapper label="{{ __('imports.table_label') }}">
+            <x-table-wrapper :label="__('imports.table_label')">
                 <table class="table table-vcenter card-table">
                     <thead>
                         <tr>

@@ -30,28 +30,28 @@
     @endphp
 
     <div class="page-header">
-        <h1 class="page-title">Analitik</h1>
+        <h1 class="page-title">{{ __('analytics.header_title') }}</h1>
         <p class="page-subtitle">
-            Perbandingan cabang, segmentasi RFM, klasifikasi ABC, retensi cohort, dan ringkasan keuangan.
+            {{ __('analytics.header_subtitle') }}
         </p>
     </div>
 
     @unless ($engineAvailable)
         <x-card>
             <div role="status" class="alert alert-warning">
-                <x-badge variant="warning">Mesin AI tidak tersedia</x-badge>
+                <x-badge variant="warning">{{ __('analytics.engine_unavailable_badge') }}</x-badge>
                 <p class="text-secondary">
-                    Data analitik belum dapat dihitung. Periksa layanan <code>fastapi</code>
-                    lalu muat ulang halaman ini.
+                    {{ __('analytics.engine_unavailable_lead') }} <code>fastapi</code>
+                    {{ __('analytics.engine_unavailable_trail') }}
                 </p>
             </div>
         </x-card>
     @endunless
 
-    <x-card title="Filter" description="Batasi hasil analitik berdasarkan periode, cabang, dan kategori.">
+    <x-card :title="__('analytics.filter_title')" description="{{ __('analytics.filter_desc') }}">
         <form method="GET" action="{{ route('analytics.index') }}" class="row row-cards">
             <div class="col-md-6">
-                <x-field label="Tanggal mulai" for="date_from">
+                <x-field :label="__('analytics.field_start')" for="date_from">
                     <input
                         id="date_from"
                         name="date_from"
@@ -64,7 +64,7 @@
             </div>
 
             <div class="col-md-6">
-                <x-field label="Tanggal akhir" for="date_to">
+                <x-field :label="__('analytics.field_end')" for="date_to">
                     <input
                         id="date_to"
                         name="date_to"
@@ -77,13 +77,13 @@
             </div>
 
             <div class="col-md-6">
-                <x-field label="Cabang" for="branch" hint="Kosongkan untuk seluruh cabang.">
+                <x-field :label="__('analytics.field_branch')" for="branch" hint="{{ __('analytics.field_branch_hint') }}">
                     <select
                         id="branch"
                         name="branch"
                         class="form-select"
                     >
-                        <option value="">Semua cabang</option>
+                        <option value="">{{ __('analytics.branch_all') }}</option>
                         @foreach ($branchOptions as $branch)
                             <option value="{{ $branch }}" @selected(($filters['branch'] ?? '') === $branch)>{{ $branch }}</option>
                         @endforeach
@@ -92,13 +92,13 @@
             </div>
 
             <div class="col-md-6">
-                <x-field label="Kategori" for="category" hint="Kosongkan untuk seluruh kategori.">
+                <x-field :label="__('analytics.field_category')" for="category" hint="{{ __('analytics.field_category_hint') }}">
                     <input
                         id="category"
                         name="category"
                         type="text"
                         value="{{ $filters['category'] ?? '' }}"
-                        placeholder="mis. Elektronik"
+                        placeholder="{{ __('analytics.field_category_placeholder') }}"
                         @error('category') aria-invalid="true" @enderror
                         class="form-control"
                     >
@@ -106,7 +106,7 @@
             </div>
 
             <div class="col-md-6">
-                <x-field label="Granularitas" for="granularity">
+                <x-field :label="__('analytics.field_granularity')" for="granularity">
                     <select
                         id="granularity"
                         name="granularity"
@@ -123,62 +123,62 @@
                 <button
                     type="submit"
                     class="btn btn-primary"
-                >Terapkan</button>
+                >{{ __('analytics.apply') }}</button>
                 <a
                     href="{{ route('analytics.index') }}"
                     class="btn"
-                >Atur ulang</a>
+                >{{ __('analytics.reset') }}</a>
             </div>
         </form>
     </x-card>
 
-    <x-card title="KPI periode" description="Ringkasan angka penjualan untuk filter yang dipilih.">
+    <x-card :title="__('analytics.kpi_title')" description="{{ __('analytics.kpi_desc') }}">
         <div class="row row-cards">
             <div class="col-sm-6 col-lg-4">
-                <x-stat label="Pendapatan" :value="\Illuminate\Support\Number::currency((float) ($kpi['revenue'] ?? 0), in: 'idr', locale: 'id', precision: 0)" />
+                <x-stat :label="__('analytics.kpi_revenue')" :value="\Illuminate\Support\Number::currency((float) ($kpi['revenue'] ?? 0), in: 'idr', locale: 'id', precision: 0)" />
             </div>
             <div class="col-sm-6 col-lg-4">
-                <x-stat label="Jumlah pesanan" :value="number_format((int) ($kpi['orders'] ?? 0), 0, ',', '.')" />
+                <x-stat :label="__('analytics.kpi_orders')" :value="number_format((int) ($kpi['orders'] ?? 0), 0, ',', '.')" />
             </div>
             <div class="col-sm-6 col-lg-4">
-                <x-stat label="Unit terjual" :value="number_format((float) ($kpi['units'] ?? 0), 0, ',', '.')" />
+                <x-stat :label="__('analytics.kpi_units')" :value="number_format((float) ($kpi['units'] ?? 0), 0, ',', '.')" />
             </div>
             <div class="col-sm-6 col-lg-4">
-                <x-stat label="Nilai pesanan rata-rata" :value="\Illuminate\Support\Number::currency((float) ($kpi['aov'] ?? 0), in: 'idr', locale: 'id', precision: 0)" />
+                <x-stat :label="__('analytics.kpi_aov')" :value="\Illuminate\Support\Number::currency((float) ($kpi['aov'] ?? 0), in: 'idr', locale: 'id', precision: 0)" />
             </div>
             <div class="col-sm-6 col-lg-4">
                 <x-stat
-                    label="Pertumbuhan"
+                    :label="__('analytics.kpi_growth')"
                     :value="\Illuminate\Support\Number::percentage((float) ($kpi['growth_pct'] ?? 0), precision: 1, locale: 'id')"
-                    :hint="((float) ($kpi['growth_pct'] ?? 0)) >= 0 ? 'Naik dibanding periode sebelumnya' : 'Turun dibanding periode sebelumnya'"
+                    :hint="((float) ($kpi['growth_pct'] ?? 0)) >= 0 ? __('analytics.kpi_growth_up') : __('analytics.kpi_growth_down')"
                 />
             </div>
             <div class="col-sm-6 col-lg-4">
                 <x-stat
-                    label="Margin"
+                    :label="__('analytics.kpi_margin')"
                     :value="\Illuminate\Support\Number::percentage((float) ($kpi['margin_pct'] ?? 0), precision: 1, locale: 'id')"
-                    hint="Margin kotor periode berjalan"
+                    hint="{{ __('analytics.kpi_margin_hint') }}"
                 />
             </div>
         </div>
     </x-card>
 
-    <x-card title="Target & ambang KPI" description="Status tiap KPI terhadap target dan ambang peringatan dari mesin AI.">
+    <x-card :title="__('analytics.targets_title')" description="{{ __('analytics.targets_desc') }}">
         @php $evaluated = $kpiEvaluated ?? []; @endphp
         @if ($evaluated === [])
             <x-empty-state
-                title="Definisi KPI belum tersedia"
-                description="Mesin AI tidak mengembalikan definisi target. Nilai KPI di atas tetap dapat dibaca."
+                :title="__('analytics.targets_empty_title')"
+                description="{{ __('analytics.targets_empty_desc') }}"
             />
         @else
-            <x-table-wrapper label="Target dan ambang KPI">
+            <x-table-wrapper :label="__('analytics.targets_table')">
                 <table class="table table-vcenter card-table">
                     <thead>
                         <tr>
-                            <th scope="col">KPI</th>
-                            <th scope="col" class="text-end">Nilai</th>
-                            <th scope="col" class="text-end">Target</th>
-                            <th scope="col">Status</th>
+                            <th scope="col">{{ __('analytics.th_kpi') }}</th>
+                            <th scope="col" class="text-end">{{ __('analytics.th_value') }}</th>
+                            <th scope="col" class="text-end">{{ __('analytics.th_target') }}</th>
+                            <th scope="col">{{ __('analytics.th_status') }}</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -189,7 +189,7 @@
                                 $label = $status === 'crit' ? 'Kritis' : ($status === 'warn' ? 'Waspada' : 'OK');
                             @endphp
                             <tr>
-                                <td class="fw-bold text-secondary">{{ $row['name'] ?? 'Tidak diketahui' }}</td>
+                                <td class="fw-bold text-secondary">{{ $row['name'] ?? __('analytics.unknown') }}</td>
                                 <td class="text-end">{{ number_format((float) ($row['value'] ?? 0), 2, ',', '.') }}</td>
                                 <td class="text-end">
                                     @if (($row['target'] ?? null) === null)
@@ -207,7 +207,7 @@
         @endif
     </x-card>
 
-    <x-card title="Perbandingan periode" description="Selisih KPI periode berjalan terhadap periode pembanding dari mesin AI.">
+    <x-card :title="__('analytics.compare_title')" description="{{ __('analytics.compare_desc') }}">
         @php
             $compareRows = [];
             $comparisonData = $comparison ?? [];
@@ -217,19 +217,19 @@
         @endphp
         @if ($compareRows === [])
             <x-empty-state
-                title="Belum ada perbandingan"
-                description="Mesin AI tidak mengembalikan delta periode. Coba muat ulang atau longgarkan filter."
+                :title="__('analytics.compare_empty_title')"
+                description="{{ __('analytics.compare_empty_desc') }}"
             />
         @else
-            <x-table-wrapper label="Perbandingan periode">
+            <x-table-wrapper :label="__('analytics.compare_table')">
                 <table class="table table-vcenter card-table">
                     <thead>
                         <tr>
-                            <th scope="col">KPI</th>
-                            <th scope="col" class="text-end">Berjalan</th>
-                            <th scope="col" class="text-end">Pembanding</th>
-                            <th scope="col" class="text-end">Selisih</th>
-                            <th scope="col" class="text-end">Selisih %</th>
+                            <th scope="col">{{ __('analytics.th_kpi') }}</th>
+                            <th scope="col" class="text-end">{{ __('analytics.th_current') }}</th>
+                            <th scope="col" class="text-end">{{ __('analytics.th_previous') }}</th>
+                            <th scope="col" class="text-end">{{ __('analytics.th_delta') }}</th>
+                            <th scope="col" class="text-end">{{ __('analytics.th_delta_pct') }}</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -248,31 +248,31 @@
         @endif
     </x-card>
 
-    <x-card title="Tren penjualan" description="Pendapatan, pesanan, dan unit per periode.">
+    <x-card :title="__('analytics.trend_title')" description="{{ __('analytics.trend_desc') }}">
         @if ($trend === [])
             <x-empty-state
-                title="Belum ada data tren"
-                description="Tidak ada transaksi pada rentang tanggal yang dipilih. Longgarkan filter atau tambahkan dataset penjualan."
+                :title="__('analytics.trend_empty_title')"
+                description="{{ __('analytics.trend_empty_desc') }}"
             />
         @else
             <x-trend-chart
-                label="Grafik tren pendapatan"
+                :label="__('analytics.trend_chart_label')"
                 :points="collect($trend)->map(fn ($point): array => ['label' => (string) ($point['period'] ?? ''), 'value' => (float) ($point['revenue'] ?? 0)])->values()->all()"
             />
-            <x-table-wrapper label="Tren penjualan">
+            <x-table-wrapper :label="__('analytics.trend_table')">
                 <table class="table table-vcenter card-table">
                     <thead>
                         <tr>
-                            <th scope="col">Periode</th>
-                            <th scope="col" class="text-end">Pendapatan</th>
-                            <th scope="col" class="text-end">Pesanan</th>
-                            <th scope="col" class="text-end">Unit</th>
+                            <th scope="col">{{ __('analytics.th_period') }}</th>
+                            <th scope="col" class="text-end">{{ __('analytics.th_revenue') }}</th>
+                            <th scope="col" class="text-end">{{ __('analytics.th_orders') }}</th>
+                            <th scope="col" class="text-end">{{ __('analytics.th_units') }}</th>
                         </tr>
                     </thead>
                     <tbody>
                         @foreach ($trend as $point)
                             <tr>
-                                <td class="fw-bold text-secondary">{{ $point['period'] ?? 'Tidak diketahui' }}</td>
+                                <td class="fw-bold text-secondary">{{ $point['period'] ?? __('analytics.unknown') }}</td>
                                 <td class="text-end">{{ \Illuminate\Support\Number::currency((float) ($point['revenue'] ?? 0), in: 'idr', locale: 'id', precision: 0) }}</td>
                                 <td class="text-end">{{ number_format((int) ($point['orders'] ?? 0), 0, ',', '.') }}</td>
                                 <td class="text-end">{{ number_format((float) ($point['units'] ?? 0), 0, ',', '.') }}</td>
@@ -286,12 +286,12 @@
 
     <div class="row row-cards">
         <div class="col-md-6">
-            <x-card title="Kinerja cabang" description="Peringkat cabang berdasarkan pendapatan.">
+            <x-card :title="__('analytics.branches_title')" description="{{ __('analytics.branches_desc') }}">
                 @if ($branches === [])
-                    <x-empty-state title="Belum ada data cabang" description="Data penjualan belum memuat informasi cabang." />
+                    <x-empty-state :title="__('analytics.branches_empty_title')" description="{{ __('analytics.branches_empty_desc') }}" />
                 @else
                     @php $maxBranchRevenue = max(1.0, (float) collect($branches)->max('revenue')); @endphp
-                    <div class="mb-3" role="img" aria-label="Grafik batang pendapatan per cabang">
+                    <div class="mb-3" role="img" aria-label="{{ __('analytics.branches_chart_aria') }}">
                         @foreach ($branches as $row)
                             @php $barPct = max(0.0, min(100.0, (float) ($row['revenue'] ?? 0) / $maxBranchRevenue * 100)); @endphp
                             <div class="d-flex align-items-center gap-2 mb-1">
@@ -302,20 +302,20 @@
                             </div>
                         @endforeach
                     </div>
-                    <x-table-wrapper label="Kinerja cabang">
+                    <x-table-wrapper :label="__('analytics.branches_table')">
                         <table class="table table-vcenter card-table">
                             <thead>
                                 <tr>
-                                    <th scope="col">Cabang</th>
-                                    <th scope="col" class="text-end">Pendapatan</th>
-                                    <th scope="col" class="text-end">Pesanan</th>
-                                    <th scope="col" class="text-end">Porsi</th>
+                                    <th scope="col">{{ __('analytics.th_branch') }}</th>
+                                    <th scope="col" class="text-end">{{ __('analytics.th_revenue') }}</th>
+                                    <th scope="col" class="text-end">{{ __('analytics.th_orders') }}</th>
+                                    <th scope="col" class="text-end">{{ __('analytics.th_share') }}</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 @foreach ($branches as $row)
                                     <tr>
-                                        <td class="fw-bold text-secondary">{{ $row['branch'] ?? 'Tidak diketahui' }}</td>
+                                        <td class="fw-bold text-secondary">{{ $row['branch'] ?? __('analytics.unknown') }}</td>
                                         <td class="text-end">{{ \Illuminate\Support\Number::currency((float) ($row['revenue'] ?? 0), in: 'idr', locale: 'id', precision: 0) }}</td>
                                         <td class="text-end">{{ number_format((int) ($row['orders'] ?? 0), 0, ',', '.') }}</td>
                                         <td class="text-end">{{ \Illuminate\Support\Number::percentage((float) ($row['share_pct'] ?? 0), precision: 1, locale: 'id') }}</td>
@@ -329,9 +329,9 @@
         </div>
 
         <div class="col-md-6">
-            <x-card title="Ringkasan keuangan" description="Pendapatan, beban pokok, dan laba bersih.">
+            <x-card :title="__('analytics.finance_title')" description="{{ __('analytics.finance_desc') }}">
                 @if ($finance === [])
-                    <x-empty-state title="Belum ada data keuangan" description="Data keuangan belum tersedia dari mesin AI." />
+                    <x-empty-state :title="__('analytics.finance_empty_title')" description="{{ __('analytics.finance_empty_desc') }}" />
                 @else
                     <dl class="datagrid">
                         @foreach ($finance as $key => $value)
@@ -340,7 +340,7 @@
                                 <dt class="datagrid-title">{{ $financeLabels[$key] ?? \Illuminate\Support\Str::headline((string) $key) }}</dt>
                                 <dd class="datagrid-content">
                                     @if (is_bool($value))
-                                        {{ $value ? 'Ya' : 'Tidak' }}
+                                        {{ $value ? __('analytics.yes') : __('analytics.no') }}
                                     @elseif ($isMoney)
                                         {{ \Illuminate\Support\Number::currency((float) $value, in: 'idr', locale: 'id', precision: 0) }}
                                     @else
@@ -355,11 +355,11 @@
         </div>
     </div>
 
-    <x-card title="Segmentasi RFM" description="Pelanggan berdasarkan recency, frequency, dan monetary.">
+    <x-card :title="__('analytics.rfm_title')" description="{{ __('analytics.rfm_desc') }}">
         @if ($rfm === [])
-            <x-empty-state title="Belum ada data RFM" description="Segmentasi membutuhkan data transaksi pelanggan." />
+            <x-empty-state :title="__('analytics.rfm_empty_title')" description="{{ __('analytics.rfm_empty_desc') }}" />
         @else
-            <x-table-wrapper label="Segmentasi RFM">
+            <x-table-wrapper :label="__('analytics.rfm_table')">
                 <table class="table table-vcenter card-table">
                     <thead>
                         <tr>
@@ -391,19 +391,19 @@
         @endif
     </x-card>
 
-    <x-card title="Klasifikasi ABC" description="Kontribusi pendapatan per produk dengan akumulasi porsi.">
+    <x-card :title="__('analytics.abc_title')" description="{{ __('analytics.abc_desc') }}">
         @if ($abc === [])
-            <x-empty-state title="Belum ada klasifikasi ABC" description="Data produk belum tersedia untuk diklasifikasikan." />
+            <x-empty-state :title="__('analytics.abc_empty_title')" description="{{ __('analytics.abc_empty_desc') }}" />
         @else
-            <x-table-wrapper label="Klasifikasi ABC produk">
+            <x-table-wrapper :label="__('analytics.abc_table')">
                 <table class="table table-vcenter card-table">
                     <thead>
                         <tr>
-                            <th scope="col">Produk</th>
-                            <th scope="col" class="text-end">Pendapatan</th>
-                            <th scope="col" class="text-end">Porsi</th>
-                            <th scope="col" class="text-end">Kumulatif</th>
-                            <th scope="col">Kelas</th>
+                            <th scope="col">{{ __('analytics.th_product') }}</th>
+                            <th scope="col" class="text-end">{{ __('analytics.th_revenue') }}</th>
+                            <th scope="col" class="text-end">{{ __('analytics.th_share') }}</th>
+                            <th scope="col" class="text-end">{{ __('analytics.th_cumulative') }}</th>
+                            <th scope="col">{{ __('analytics.th_class') }}</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -437,7 +437,7 @@
                                 <td class="text-end">{{ \Illuminate\Support\Number::percentage((float) ($row['cumulative_pct'] ?? 0), precision: 1, locale: 'id') }}</td>
                                 <td>
                                     <x-badge variant="{{ $grade === 'A' ? 'success' : ($grade === 'B' ? 'info' : 'neutral') }}">
-                                        Kelas {{ $grade }}
+                                        {{ __('analytics.grade_label', ['grade' => $grade]) }}
                                     </x-badge>
                                 </td>
                             </tr>
@@ -448,7 +448,7 @@
         @endif
     </x-card>
 
-    <x-card title="Retensi cohort" description="Persentase pelanggan aktif pada setiap periode setelah cohort pertama.">
+    <x-card :title="__('analytics.cohort_title')" description="{{ __('analytics.cohort_desc') }}">
         @php
             $cohortPeriods = collect($cohort)->pluck('period_offset')->filter(fn ($value): bool => is_numeric($value))->map(fn ($value): int => (int) $value)->unique()->sort()->values();
             $cohortNames = collect($cohort)->pluck('cohort')->filter()->unique()->values();
@@ -472,16 +472,16 @@
         @endphp
 
         @if ($cohort === [])
-            <x-empty-state title="Belum ada data cohort" description="Analisis cohort membutuhkan data pelanggan yang berulang." />
+            <x-empty-state :title="__('analytics.cohort_empty_title')" description="{{ __('analytics.cohort_empty_desc') }}" />
         @else
-            <x-table-wrapper label="Retensi cohort">
+            <x-table-wrapper :label="__('analytics.cohort_table')">
                 <table class="table table-vcenter card-table">
                     <thead>
                         <tr>
-                            <th scope="col">Cohort</th>
+                            <th scope="col">{{ __('analytics.th_cohort') }}</th>
                             @foreach ($cohortPeriods as $offset)
                                 <th scope="col" class="text-end">
-                                    {{ $offset === 0 ? 'Awal' : '+'.$offset }}
+                                    {{ $offset === 0 ? __('analytics.cohort_initial') : '+'.$offset }}
                                 </th>
                             @endforeach
                         </tr>
@@ -504,7 +504,7 @@
                                                 {{ \Illuminate\Support\Number::percentage((float) ($cell['retention_pct'] ?? 0), precision: 1, locale: 'id') }}
                                             </span>
                                             <span class="text-secondary">
-                                                {{ number_format((int) ($cell['active_customers'] ?? 0), 0, ',', '.') }} pelanggan
+                                                {{ __('analytics.customers_count', ['count' => number_format((int) ($cell['active_customers'] ?? 0), 0, ',', '.')]) }}
                                             </span>
                                         @endif
                                     </td>
@@ -517,7 +517,7 @@
         @endif
     </x-card>
 
-    <x-card title="Dasbor eksekutif" description="Kumpulan widget dasbor dari mesin AI untuk filter yang dipilih.">
+    <x-card :title="__('analytics.dashboard_title')" description="{{ __('analytics.dashboard_desc') }}">
         @php
             $dashboardData = $dashboard ?? [];
             $widgets = is_array($dashboardData) && isset($dashboardData['widgets']) && is_array($dashboardData['widgets'])
@@ -526,8 +526,8 @@
         @endphp
         @if ($widgets === [])
             <x-empty-state
-                title="Widget dasbor belum tersedia"
-                description="Mesin AI tidak mengembalikan widget dasbor untuk filter ini."
+                :title="__('analytics.dashboard_empty_title')"
+                description="{{ __('analytics.dashboard_empty_desc') }}"
             />
         @else
             <div class="row row-cards">
@@ -542,7 +542,7 @@
                                 <h3 class="fw-bold">{{ $widget['title'] ?? $widget['id'] ?? 'Widget' }}</h3>
                                 <x-badge variant="info">{{ $widget['chart_type'] ?? 'table' }}</x-badge>
                                 <p class="text-secondary">
-                                    {{ $count }} baris dari endpoint <code>{{ $widget['endpoint'] ?? '—' }}</code>
+                                    {{ __('analytics.widget_rows', ['count' => $count]) }} <code>{{ $widget['endpoint'] ?? '—' }}</code>
                                 </p>
                             </div>
                         </div>
@@ -552,7 +552,7 @@
         @endif
     </x-card>
 
-    <x-card title="Ekspor dataset" description="Unduh hasil analitik periode ini sebagai CSV atau XLSX.">
+    <x-card :title="__('analytics.export_title')" description="{{ __('analytics.export_desc') }}">
         <div>
             <form method="POST" action="{{ url('/api/analytics/export') }}">
                 @csrf
@@ -561,7 +561,7 @@
                 <button
                     type="submit"
                     class="btn"
-                >Unduh CSV</button>
+                >{{ __('analytics.export_csv') }}</button>
             </form>
             <form method="POST" action="{{ url('/api/analytics/export') }}">
                 @csrf
@@ -570,10 +570,10 @@
                 <button
                     type="submit"
                     class="btn"
-                >Unduh XLSX</button>
+                >{{ __('analytics.export_xlsx') }}</button>
             </form>
         </div>
-        <p class="text-secondary">Ekspor PDF belum tersedia — lihat batasan di dokumentasi BI.</p>
+        <p class="text-secondary">{{ __('analytics.export_pdf_note') }}</p>
     </x-card>
 
     @php

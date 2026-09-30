@@ -15,7 +15,18 @@ Date: 2026-09-29 (UTC). Branch: `main`. Scope: master enterprise commands, itera
    `WebWorkflowTest` updated to act as owner + new non-owner 403 cases.
    Suite → **929 tests, 0 failures**.
 
-## Iteration 20 (this commit, ultimate directive U1)
+## Iteration 21 (this commit, ultimate directive U1)
+
+34. **Double-escape fix + supervisor fix.** `attr="{{ __() }}"` on Blade
+   components escaped twice (`Target &amp;amp; …`); all 159 component props
+   converted to `:attr="__()"` (native HTML attrs untouched), verified by
+   suite + `view:cache`. Supervisor templates fixed to use install-time
+   `{{APP_DIR}}` (`%(ENV_*)s` reads the daemon env, not the program env).
+35. **i18n waves 2–3.** dashboard/datasets/imports/quality/analytics/ml/
+   assistant/reports fully keyed EN+ID (id byte-identical); English pages
+   verified key-leak-free across 9 routes.
+
+## Iteration 20 (previous commit, ultimate directive U1)
 
 31. **Laravel 13 upgrade.** `upgrade/laravel-13` branch → full suite green
    (997/997) → merged to main. No app code changes required.

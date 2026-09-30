@@ -17,15 +17,15 @@
     <div class="page-header">
         <div class="row align-items-center">
             <div class="col">
-                <h1 class="page-title">Laporan eksekutif</h1>
+                <h1 class="page-title">{{ __('reports.header_title') }}</h1>
                 <div class="page-subtitle">
-                    Ringkasan periode yang disusun mesin AI dari KPI, tren penjualan, inventori, dan keuangan.
+                    {{ __('reports.header_subtitle') }}
                 </div>
             </div>
         </div>
     </div>
 
-    <nav aria-label="Pilih periode laporan" class="mb-3">
+    <nav aria-label="{{ __('reports.period_nav_aria') }}" class="mb-3">
         <ul class="list-unstyled d-flex flex-wrap gap-2 mb-0">
             @foreach ($periods as $value)
                 @php $isActive = $period === $value; @endphp
@@ -43,31 +43,31 @@
     @unless ($engineAvailable)
         <x-card class="mb-3">
             <div role="status" class="alert alert-warning mb-0">
-                <x-badge variant="warning">Mesin AI tidak tersedia</x-badge>
+                <x-badge variant="warning">{{ __('reports.engine_unavailable') }}</x-badge>
                 <p class="mb-0 text-secondary">
-                    Laporan belum dapat disusun. Periksa layanan <code>fastapi</code>
-                    lalu muat ulang halaman ini.
+                    {{ __('reports.engine_unavailable_lead') }} <code>fastapi</code>
+                    {{ __('reports.engine_unavailable_trail') }}
                 </p>
             </div>
         </x-card>
     @endunless
 
-    <x-card class="mb-3" title="Riwayat laporan" description="Dibuat terjadwal setiap Senin 06:00 atau manual di bawah.">
+    <x-card class="mb-3" :title="__('reports.history_title')" description="{{ __('reports.history_desc') }}">
         @if (($history ?? collect())->isEmpty())
             <x-empty-state
-                title="Belum ada laporan tersimpan"
-                description="Buat laporan pertama melalui formulir di bawah."
+                :title="__('reports.history_empty_title')"
+                description="{{ __('reports.history_empty_desc') }}"
             />
         @else
-            <x-table-wrapper label="Riwayat laporan">
+            <x-table-wrapper :label="__('reports.history_table_label')">
                 <table class="table table-vcenter card-table">
                     <thead>
                         <tr>
-                            <th scope="col" class="text-end">ID</th>
-                            <th scope="col">Periode</th>
-                            <th scope="col">Ringkasan</th>
-                            <th scope="col">Oleh</th>
-                            <th scope="col" class="text-end">Dibuat</th>
+                            <th scope="col" class="text-end">{{ __('reports.col_id') }}</th>
+                            <th scope="col">{{ __('reports.col_period') }}</th>
+                            <th scope="col">{{ __('reports.col_summary') }}</th>
+                            <th scope="col">{{ __('reports.col_by') }}</th>
+                            <th scope="col" class="text-end">{{ __('reports.col_created') }}</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -76,7 +76,7 @@
                                 <td class="text-end">{{ $item->getKey() }}</td>
                                 <td><x-badge variant="info">{{ $periodLabels[$item->period] ?? $item->period }}</x-badge></td>
                                 <td class="small text-secondary">{{ \Illuminate\Support\Str::limit($item->narrative(), 120) }}</td>
-                                <td class="small text-secondary">{{ $item->creator?->name ?? 'terjadwal' }}</td>
+                                <td class="small text-secondary">{{ $item->creator?->name ?? __('reports.scheduled') }}</td>
                                 <td class="text-end"><span class="small text-secondary">{{ $item->created_at?->locale('id')->translatedFormat('d M Y H:i') ?? '?' }}</span></td>
                             </tr>
                         @endforeach
@@ -89,7 +89,7 @@
             <form method="POST" action="{{ route('reports.store') }}" class="row row-cards mt-3">
                 @csrf
                 <div class="col-md-6">
-                    <x-field label="Periode" for="history_period">
+                    <x-field :label="__('reports.field_period')" for="history_period">
                         <select id="history_period" name="period" class="form-select">
                             @foreach ($periods as $value)
                                 <option value="{{ $value }}" @selected($period === $value)>{{ $periodLabels[$value] ?? $value }}</option>
@@ -98,29 +98,29 @@
                     </x-field>
                 </div>
                 <div class="col-md-6 d-flex align-items-end">
-                    <button type="submit" class="btn btn-primary">Buat laporan sekarang</button>
+                    <button type="submit" class="btn btn-primary">{{ __('reports.create_now') }}</button>
                 </div>
             </form>
         @endif
     </x-card>
 
     @unless ($hasContent)
-        <x-card title="Laporan periode {{ $periodLabels[$period] ?? $period }}">
+        <x-card :title="__('reports.report_title', ['period' => $periodLabels[$period] ?? $period])">
             <x-empty-state
-                title="Laporan belum tersedia"
-                description="Mesin AI tidak mengembalikan ringkasan untuk periode ini. Pastikan ada dataset penjualan yang sudah dikomit."
+                :title="__('reports.report_empty_title')"
+                description="{{ __('reports.report_empty_desc') }}"
             />
         </x-card>
     @else
         <x-card
             class="mb-3"
-            title="Ringkasan {{ $periodLabels[$period] ?? $period }}"
-            description="Disusun dari data yang sudah dikomit, lalu dinarasi oleh mesin AI."
+            :title="__('reports.summary_title', ['period' => $periodLabels[$period] ?? $period])"
+            description="{{ __('reports.summary_desc') }}"
         >
             @if ($narrative === '')
                 <x-empty-state
-                    title="Narasi belum tersedia"
-                    description="Mesin AI tidak menghasilkan narasi untuk periode ini. Nilai KPI di bawah tetap dapat dibaca."
+                    :title="__('reports.narrative_empty_title')"
+                    description="{{ __('reports.narrative_empty_desc') }}"
                 />
             @else
                 <p class="text-secondary mb-0" style="white-space: pre-line;">{{ $narrative }}</p>
@@ -128,7 +128,7 @@
         </x-card>
 
         @if ($sections !== [])
-            <x-card class="mb-3" title="Rincian per bagian" description="Highlight, risiko, dan rekomendasi dari mesin AI.">
+            <x-card class="mb-3" :title="__('reports.sections_title')" description="{{ __('reports.sections_desc') }}">
                 <div class="d-grid gap-3">
                     @foreach ($sections as $sectionKey => $section)
                         <div>
@@ -156,22 +156,22 @@
 
         <div class="row row-cards">
             <div class="col-md-6">
-                <x-card title="KPI periode" description="Angka penjualan yang menjadi dasar laporan.">
+                <x-card :title="__('reports.kpi_title')" description="{{ __('reports.kpi_desc') }}">
                     <div class="row row-cards">
-                        <div class="col-sm-6"><x-stat label="Pendapatan" :value="\Illuminate\Support\Number::currency((float) ($kpi['revenue'] ?? 0), in: 'idr', locale: 'id', precision: 0)" /></div>
-                        <div class="col-sm-6"><x-stat label="Jumlah pesanan" :value="number_format((int) ($kpi['orders'] ?? 0), 0, ',', '.')" /></div>
-                        <div class="col-sm-6"><x-stat label="Unit terjual" :value="number_format((float) ($kpi['units'] ?? 0), 0, ',', '.')" /></div>
-                        <div class="col-sm-6"><x-stat label="Nilai pesanan rata-rata" :value="\Illuminate\Support\Number::currency((float) ($kpi['aov'] ?? 0), in: 'idr', locale: 'id', precision: 0)" /></div>
-                        <div class="col-sm-6"><x-stat label="Pertumbuhan" :value="\Illuminate\Support\Number::percentage((float) ($kpi['growth_pct'] ?? 0), precision: 1, locale: 'id')" /></div>
-                        <div class="col-sm-6"><x-stat label="Margin" :value="\Illuminate\Support\Number::percentage((float) ($kpi['margin_pct'] ?? 0), precision: 1, locale: 'id')" /></div>
+                        <div class="col-sm-6"><x-stat :label="__('reports.stat_revenue')" :value="\Illuminate\Support\Number::currency((float) ($kpi['revenue'] ?? 0), in: 'idr', locale: 'id', precision: 0)" /></div>
+                        <div class="col-sm-6"><x-stat :label="__('reports.stat_orders')" :value="number_format((int) ($kpi['orders'] ?? 0), 0, ',', '.')" /></div>
+                        <div class="col-sm-6"><x-stat :label="__('reports.stat_units')" :value="number_format((float) ($kpi['units'] ?? 0), 0, ',', '.')" /></div>
+                        <div class="col-sm-6"><x-stat :label="__('reports.stat_aov')" :value="\Illuminate\Support\Number::currency((float) ($kpi['aov'] ?? 0), in: 'idr', locale: 'id', precision: 0)" /></div>
+                        <div class="col-sm-6"><x-stat :label="__('reports.stat_growth')" :value="\Illuminate\Support\Number::percentage((float) ($kpi['growth_pct'] ?? 0), precision: 1, locale: 'id')" /></div>
+                        <div class="col-sm-6"><x-stat :label="__('reports.stat_margin')" :value="\Illuminate\Support\Number::percentage((float) ($kpi['margin_pct'] ?? 0), precision: 1, locale: 'id')" /></div>
                     </div>
                 </x-card>
             </div>
 
             <div class="col-md-6">
-                <x-card title="Keuangan periode" description="Pendapatan, beban, dan laba periode berjalan.">
+                <x-card :title="__('reports.finance_title')" description="{{ __('reports.finance_desc') }}">
                     @if ($finance === [])
-                        <x-empty-state title="Data keuangan kosong" description="Mesin AI tidak mengembalikan ringkasan keuangan untuk periode ini." />
+                        <x-empty-state :title="__('reports.finance_empty_title')" description="{{ __('reports.finance_empty_desc') }}" />
                     @else
                         <dl class="datagrid">
                             @foreach ($finance as $key => $value)
@@ -181,7 +181,7 @@
                                         @if ($key === 'margin_pct')
                                             {{ \Illuminate\Support\Number::percentage((float) $value, precision: 1, locale: 'id') }}
                                         @elseif (is_bool($value))
-                                            {{ $value ? 'Ya' : 'Tidak' }}
+                                            {{ $value ? __('reports.yes') : __('reports.no') }}
                                         @else
                                             {{ \Illuminate\Support\Number::currency((float) $value, in: 'idr', locale: 'id', precision: 0) }}
                                         @endif
@@ -194,29 +194,29 @@
             </div>
         </div>
 
-        <x-card class="mt-3" title="Laporan otomatis" description="Snapshot KPI terjadwal dari mesin AI (bi.snapshot_kpis).">
+        <x-card class="mt-3" :title="__('reports.auto_title')" description="{{ __('reports.auto_desc') }}">
             @php $autoSnapshots = $snapshots ?? []; @endphp
             @if (($snapshotsAvailable ?? false) === false)
                 <x-empty-state
-                    title="Snapshot belum tersedia"
-                    description="Mesin AI tidak dapat dihubungi untuk daftar snapshot. Periksa layanan fastapi lalu muat ulang."
+                    :title="__('reports.snapshot_unavailable_title')"
+                    description="{{ __('reports.snapshot_unavailable_desc') }}"
                 />
             @elseif ($autoSnapshots === [])
                 <x-empty-state
-                    title="Belum ada snapshot terjadwal"
-                    description="Belum ada KPI yang di-snapshot. Jadwalkan bi.snapshot_kpis di Celery beat (lihat docs/bi.md)."
+                    :title="__('reports.snapshot_empty_title')"
+                    description="{{ __('reports.snapshot_empty_desc') }}"
                 />
             @else
-                <x-table-wrapper label="Snapshot KPI otomatis">
+                <x-table-wrapper :label="__('reports.snapshot_table_label')">
                     <table class="table table-vcenter card-table">
                         <thead>
                             <tr>
-                                <th scope="col">KPI</th>
-                                <th scope="col" class="text-end">Nilai</th>
-                                <th scope="col" class="text-end">Target</th>
-                                <th scope="col">Status</th>
-                                <th scope="col">Periode</th>
-                                <th scope="col">Dihitung</th>
+                                <th scope="col">{{ __('reports.snap_kpi') }}</th>
+                                <th scope="col" class="text-end">{{ __('reports.snap_value') }}</th>
+                                <th scope="col" class="text-end">{{ __('reports.snap_target') }}</th>
+                                <th scope="col">{{ __('reports.snap_status') }}</th>
+                                <th scope="col">{{ __('reports.snap_period') }}</th>
+                                <th scope="col">{{ __('reports.snap_computed') }}</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -226,7 +226,7 @@
                                     $svariant = $sstatus === 'crit' ? 'danger' : ($sstatus === 'warn' ? 'warning' : 'success');
                                 @endphp
                                 <tr>
-                                    <td class="fw-medium">{{ $snap['kpi_name'] ?? 'Tidak diketahui' }}</td>
+                                    <td class="fw-medium">{{ $snap['kpi_name'] ?? __('reports.unknown') }}</td>
                                     <td class="text-end">{{ number_format((float) ($snap['value'] ?? 0), 2, ',', '.') }}</td>
                                     <td class="text-end">
                                         @if (($snap['target'] ?? null) === null)
@@ -251,7 +251,7 @@
                         <button
                             type="submit"
                             class="btn"
-                        >Unduh snapshot (CSV)</button>
+                        >{{ __('reports.download_csv') }}</button>
                     </form>
                     <form method="POST" action="{{ url('/api/analytics/export') }}">
                         @csrf
@@ -260,7 +260,7 @@
                         <button
                             type="submit"
                             class="btn"
-                        >Unduh snapshot (XLSX)</button>
+                        >{{ __('reports.download_xlsx') }}</button>
                     </form>
                 </div>
             @endif

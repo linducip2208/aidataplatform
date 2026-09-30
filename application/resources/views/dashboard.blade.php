@@ -25,32 +25,32 @@
 
     <div class="row row-cards mb-3">
         <div class="col-sm-6 col-lg-3">
-            <x-stat label="{{ __('dashboard.total_label') }}" :value="number_format((int) $stats['datasets'], 0, ',', '.')" hint="{{ __('dashboard.total_hint') }}" />
+            <x-stat :label="__('dashboard.total_label')" :value="number_format((int) $stats['datasets'], 0, ',', '.')" hint="{{ __('dashboard.total_hint') }}" />
         </div>
         <div class="col-sm-6 col-lg-3">
             <x-stat
                 :label="\App\Enums\DatasetStatus::Committed->localizedLabel()"
                 :value="number_format((int) $stats['committed'], 0, ',', '.')"
-                hint="{{ __('dashboard.committed_hint') }}"
+                :hint="__('dashboard.committed_hint')"
             />
         </div>
         <div class="col-sm-6 col-lg-3">
             <x-stat
                 :label="\App\Enums\DatasetStatus::Quarantined->localizedLabel()"
                 :value="number_format((int) $stats['quarantined'], 0, ',', '.')"
-                hint="{{ __('dashboard.quarantined_hint') }}"
+                :hint="__('dashboard.quarantined_hint')"
             />
         </div>
         {{-- Spans uploaded, previewing and importing, so it names the group
              rather than borrowing the label of any one status. --}}
         <div class="col-sm-6 col-lg-3">
-            <x-stat label="{{ __('dashboard.processing_label') }}" :value="number_format((int) $stats['importing'], 0, ',', '.')" hint="{{ __('dashboard.processing_hint') }}" />
+            <x-stat :label="__('dashboard.processing_label')" :value="number_format((int) $stats['importing'], 0, ',', '.')" hint="{{ __('dashboard.processing_hint') }}" />
         </div>
     </div>
 
     <x-card
         class="mb-3"
-        title="{{ __('dashboard.engine_title') }}"
+        :title="__('dashboard.engine_title')"
         description="{{ __('dashboard.engine_desc') }}"
     >
         @if (is_null($engineHealth))
@@ -95,12 +95,12 @@
 
     <x-card
         class="mb-3"
-        title="{{ __('dashboard.kpi_title') }}"
+        :title="__('dashboard.kpi_title')"
         description="{{ __('dashboard.kpi_desc') }}"
     >
         @if (is_null($kpi))
             <x-empty-state
-                title="{{ __('dashboard.kpi_empty_title') }}"
+                :title="__('dashboard.kpi_empty_title')"
                 description="{{ __('dashboard.kpi_empty_desc') }}"
             />
         @else
@@ -109,27 +109,27 @@
                      percentage fields in 0-100, so they are passed through
                      un-scaled. --}}
                 <div class="col-sm-6 col-lg-4">
-                    <x-stat label="{{ __('dashboard.revenue') }}" :value="\Illuminate\Support\Number::currency((float) ($kpi['revenue'] ?? 0), in: 'idr', locale: 'id', precision: 0)" />
+                    <x-stat :label="__('dashboard.revenue')" :value="\Illuminate\Support\Number::currency((float) ($kpi['revenue'] ?? 0), in: 'idr', locale: 'id', precision: 0)" />
                 </div>
                 <div class="col-sm-6 col-lg-4">
-                    <x-stat label="{{ __('dashboard.orders') }}" :value="number_format((int) ($kpi['orders'] ?? 0), 0, ',', '.')" />
+                    <x-stat :label="__('dashboard.orders')" :value="number_format((int) ($kpi['orders'] ?? 0), 0, ',', '.')" />
                 </div>
                 <div class="col-sm-6 col-lg-4">
-                    <x-stat label="{{ __('dashboard.units') }}" :value="number_format((float) ($kpi['units'] ?? 0), 0, ',', '.')" />
+                    <x-stat :label="__('dashboard.units')" :value="number_format((float) ($kpi['units'] ?? 0), 0, ',', '.')" />
                 </div>
                 <div class="col-sm-6 col-lg-4">
-                    <x-stat label="{{ __('dashboard.aov') }}" :value="\Illuminate\Support\Number::currency((float) ($kpi['aov'] ?? 0), in: 'idr', locale: 'id', precision: 0)" />
+                    <x-stat :label="__('dashboard.aov')" :value="\Illuminate\Support\Number::currency((float) ($kpi['aov'] ?? 0), in: 'idr', locale: 'id', precision: 0)" />
                 </div>
                 <div class="col-sm-6 col-lg-4">
                     <x-stat
-                        label="{{ __('dashboard.growth') }}"
+                        :label="__('dashboard.growth')"
                         :value="\Illuminate\Support\Number::percentage((float) ($kpi['growth_pct'] ?? 0), precision: 1, locale: 'id')"
                         :hint="((float) ($kpi['growth_pct'] ?? 0)) >= 0 ? __('dashboard.growth_up') : __('dashboard.growth_down')"
                     />
                 </div>
                 <div class="col-sm-6 col-lg-4">
                     <x-stat
-                        label="{{ __('dashboard.margin') }}"
+                        :label="__('dashboard.margin')"
                         :value="\Illuminate\Support\Number::percentage((float) ($kpi['margin_pct'] ?? 0), precision: 1, locale: 'id')"
                         hint="{{ __('dashboard.margin_hint') }}"
                     />
@@ -140,7 +140,7 @@
 
     <div class="row row-cards">
         <div class="col-md-6">
-            <x-card title="{{ __('dashboard.recent_title') }}" description="{{ __('dashboard.recent_desc') }}">
+            <x-card :title="__('dashboard.recent_title')" description="{{ __('dashboard.recent_desc') }}">
                 <x-slot:actions>
                     <a
                         href="{{ route('datasets.index') }}"
@@ -150,7 +150,7 @@
 
                 @if ($recentDatasets->isEmpty())
                     <x-empty-state
-                        title="{{ __('dashboard.empty_datasets_title') }}"
+                        :title="__('dashboard.empty_datasets_title')"
                         description="{{ __('dashboard.empty_datasets_desc') }}"
                     >
                         <x-slot:action>
@@ -161,7 +161,7 @@
                         </x-slot:action>
                     </x-empty-state>
                 @else
-                    <x-table-wrapper label="{{ __('dashboard.recent_table_label') }}">
+                    <x-table-wrapper :label="__('dashboard.recent_table_label')">
                         <table class="table table-vcenter card-table">
                             <thead>
                                 <tr>
@@ -194,7 +194,7 @@
         </div>
 
         <div class="col-md-6">
-            <x-card title="{{ __('dashboard.threads_title') }}" description="{{ __('dashboard.threads_desc') }}">
+            <x-card :title="__('dashboard.threads_title')" description="{{ __('dashboard.threads_desc') }}">
                 <x-slot:actions>
                     <a
                         href="{{ route('assistant.index') }}"
@@ -204,7 +204,7 @@
 
                 @if ($recentThreads->isEmpty())
                     <x-empty-state
-                        title="{{ __('dashboard.empty_threads_title') }}"
+                        :title="__('dashboard.empty_threads_title')"
                         description="{{ __('dashboard.empty_threads_desc') }}"
                     />
                 @else

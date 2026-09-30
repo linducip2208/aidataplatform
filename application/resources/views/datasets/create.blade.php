@@ -20,7 +20,7 @@
 
     <div class="row row-cards">
         <div class="col-lg-8">
-            <x-card class="mb-3" title="{{ __('datasets.create_form_title') }}" description="{{ __('datasets.create_form_desc') }}">
+            <x-card class="mb-3" :title="__('datasets.create_form_title')" description="{{ __('datasets.create_form_desc') }}">
                 <form
                     method="POST"
                     action="{{ route('datasets.store') }}"
@@ -29,7 +29,7 @@
                     @csrf
 
                     <x-field
-                        label="{{ __('datasets.create_file_label') }}"
+                        :label="__('datasets.create_file_label')"
                         for="file"
                         name="file"
                         required
@@ -47,7 +47,7 @@
                     </x-field>
 
                     <x-field
-                        label="{{ __('datasets.create_name_label') }}"
+                        :label="__('datasets.create_name_label')"
                         for="name"
                         name="name"
                         hint="{{ __('datasets.create_name_hint') }}"
@@ -64,7 +64,7 @@
                         >
                     </x-field>
 
-                    <x-field label="{{ __('datasets.create_type_label') }}" for="dataset_type" name="dataset_type" required>
+                    <x-field :label="__('datasets.create_type_label')" for="dataset_type" name="dataset_type" required>
                         <select
                             id="dataset_type"
                             name="dataset_type"
@@ -94,7 +94,7 @@
         </div>
 
         <div class="col-lg-4">
-            <x-card title="{{ __('datasets.create_rules_title') }}" description="{{ __('datasets.create_rules_desc') }}">
+            <x-card :title="__('datasets.create_rules_title')" description="{{ __('datasets.create_rules_desc') }}">
                 <ul class="list-group list-group-flush text-secondary">
                     <li class="list-group-item">
                         <span class="fw-bold">1.</span>
