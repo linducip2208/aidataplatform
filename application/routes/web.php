@@ -3,6 +3,7 @@
 use App\Http\Controllers\Admin\AiProviderController;
 use App\Http\Controllers\Admin\AuditLogController;
 use App\Http\Controllers\Admin\OrganizationController;
+use App\Http\Controllers\Admin\SystemHealthController;
 use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\Admin\WebhookController;
 use App\Http\Controllers\AiCostController;
@@ -118,5 +119,6 @@ Route::middleware('auth')->group(function (): void {
         Route::patch('/admin/users/{user}', [UserController::class, 'update'])->name('admin.users.update');
         Route::delete('/admin/users/{user}', [UserController::class, 'destroy'])->name('admin.users.destroy');
         Route::get('/audit', [AuditLogController::class, 'index'])->name('audit.index');
+        Route::get('/admin/system/health', [SystemHealthController::class, 'index'])->name('admin.system.health');
     });
 });

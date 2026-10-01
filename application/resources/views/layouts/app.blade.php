@@ -25,6 +25,8 @@
         ['route' => 'admin.organization.edit', 'pattern' => 'admin.organization.*', 'key' => 'organization', 'icon' => 'building'],
         ['route' => 'admin.providers.index', 'pattern' => 'admin.providers.*', 'key' => 'providers', 'icon' => 'plug'],
         ['route' => 'admin.webhooks.index', 'pattern' => 'admin.webhooks.*', 'key' => 'webhooks', 'icon' => 'webhook'],
+        ['heading' => 'system'],
+        ['route' => 'admin.system.health', 'pattern' => 'admin.system.*', 'key' => 'system_health', 'icon' => 'activity'],
     ];
 
     $user = auth()->user();

@@ -11,6 +11,7 @@ return [
         'data' => 'Data',
         'ai_analytics' => 'AI & Analytics',
         'admin' => 'Administration',
+        'system' => 'System',
     ],
 
     'items' => [
@@ -32,6 +33,7 @@ return [
         'organization' => 'Organization',
         'providers' => 'AI Providers',
         'webhooks' => 'Webhooks',
+        'system_health' => 'System Health',
     ],
 
     'change_password' => 'Change password',

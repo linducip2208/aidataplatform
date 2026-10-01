@@ -41,7 +41,7 @@ class MenuCompletenessTest extends TestCase
             ->assertOk()
             ->getContent();
 
-        foreach ([...$this->primaryMenu(), 'admin.users.index' => 'Pengguna', 'audit.index' => 'Log audit'] as $route => $label) {
+        foreach ([...$this->primaryMenu(), 'admin.users.index' => 'Pengguna', 'audit.index' => 'Log audit', 'admin.system.health' => 'System Health'] as $route => $label) {
             $this->assertStringContainsString($label, $html, "menu label [{$label}] missing");
             $this->assertStringContainsString(route($route, [], false), $html, "menu link [{$route}] missing");
         }

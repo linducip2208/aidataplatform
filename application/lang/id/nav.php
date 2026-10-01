@@ -11,6 +11,7 @@ return [
         'data' => 'Data',
         'ai_analytics' => 'AI & Analitik',
         'admin' => 'Administrasi',
+        'system' => 'Sistem',
     ],
 
     'items' => [
@@ -32,6 +33,7 @@ return [
         'organization' => 'Organisasi',
         'providers' => 'Provider AI',
         'webhooks' => 'Webhooks',
+        'system_health' => 'System Health',
     ],
 
     'change_password' => 'Ubah password',
