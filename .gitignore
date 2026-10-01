@@ -65,6 +65,14 @@ application/storage/app/datasets/
 *.sql.gz
 *.dump
 
+# --- Native Windows service manager (dev-only runtime state) ---
+dev/runtime/
+dev/logs/
+ai-engine/logs/
+ai-engine/celerybeat-schedule
+ai-engine/celerybeat-schedule-shm
+ai-engine/celerybeat-schedule-wal
+
 # --- OS / IDE ---
 .DS_Store
 Thumbs.db
