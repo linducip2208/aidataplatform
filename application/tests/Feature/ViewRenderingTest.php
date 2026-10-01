@@ -252,7 +252,7 @@ class ViewRenderingTest extends TestCase
     // one test per named route, with the engine answering in full
     // ------------------------------------------------------------------
 
-    public function test_the_dashboard_renders_the_engine_health_and_the_kpi_block(): void
+    public function test_the_dashboard_renders_the_platform_overview(): void
     {
         Dataset::factory()->committed()->create(['name' => 'Penjualan Retail 2026']);
         ChatThread::factory()->forUser($this->admin)->titled('Analisis penjualan', 4)->create();
@@ -264,7 +264,8 @@ class ViewRenderingTest extends TestCase
             ->assertSee('Sehat')
             ->assertSee('1.4.2')
             ->assertSee('aidata-engine')
-            ->assertSee('Pendapatan')
+            ->assertSee('Dataset terbaru')
+            ->assertSee('Aksi cepat')
             ->assertSee('Penjualan Retail 2026')
             ->assertSee('Analisis penjualan');
     }
@@ -538,7 +539,7 @@ class ViewRenderingTest extends TestCase
     public static function engineBackedPages(): array
     {
         return [
-            'dashboard' => ['dashboard', ['KPI belum tersedia', 'Tidak terjangkau']],
+            'dashboard' => ['dashboard', ['Mesin AI', 'Tidak terjangkau']],
             'datasets.index' => ['datasets.index', ['@dataset']],
             'datasets.show' => ['datasets.show', ['@dataset']],
             'imports.index' => ['imports.index', ['@dataset']],

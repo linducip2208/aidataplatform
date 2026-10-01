@@ -7,9 +7,9 @@ return [
     'main_navigation' => 'Navigasi utama',
 
     'sections' => [
-        'main' => 'Utama',
+        'overview' => 'Ringkasan',
         'data' => 'Data',
-        'analytics_ai' => 'Analitik & AI',
+        'ai_analytics' => 'AI & Analitik',
         'admin' => 'Administrasi',
     ],
 
@@ -36,6 +36,10 @@ return [
 
     'change_password' => 'Ubah password',
     'logout' => 'Keluar',
+    'search_label' => 'Cari dataset',
+    'search_placeholder' => 'Cari dataset…',
+    'notifications' => 'Peringatan',
+    'help' => 'Bantuan',
     'footer' => 'orkestrasi UI di Laravel, komputasi berat dilayani mesin AI.',
 
     'language' => 'Bahasa',

@@ -18,7 +18,7 @@
                     <a
                         href="{{ route('datasets.create') }}"
                         class="btn btn-primary"
-                    >{{ __('datasets.index_upload') }}</a>
+                    ><x-icon name="plus" />{{ __('datasets.index_upload') }}</a>
                 </div>
             @endif
         </div>

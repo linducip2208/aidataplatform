@@ -151,3 +151,35 @@
     padding: 0.75rem 1rem;
     vertical-align: middle;
 }
+
+/*
+ * AI Data Platform identity: indigo primary, Instrument Sans, dark sidebar.
+ * Tabler v1 derives hover/subtle/focus tints from --tblr-primary via
+ * color-mix, so overriding the source recolours buttons, links and active
+ * states consistently. Placed last so it wins over the defaults.
+ */
+:root {
+    --tblr-primary: oklch(54.2% 0.24 276deg);
+    --tblr-primary-darken: oklch(47% 0.22 276deg);
+    --tblr-link-color: oklch(54.2% 0.24 276deg);
+    --tblr-link-hover-color: oklch(47% 0.22 276deg);
+    --tblr-font-sans-serif: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
+        'Segoe UI Symbol', 'Noto Color Emoji';
+}
+
+body {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+}
+
+/* Deep indigo-navy sidebar; foregrounds come from Tabler's dark theme. */
+.page > .navbar-vertical[data-bs-theme='dark'] {
+    background-color: oklch(29% 0.08 277deg);
+    --tblr-navbar-border-color: rgb(255 255 255 / 0.08);
+}
+
+/* Product mark: indigo -> teal tile used by the sidebar and login brand. */
+.brand-mark {
+    background-image: linear-gradient(135deg, oklch(51% 0.26 277deg), oklch(60% 0.12 185deg));
+    color: #fff;
+}

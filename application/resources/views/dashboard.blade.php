@@ -4,142 +4,120 @@
 
 @section('content')
     @php
-        $typeLabels = config('ai_engine.dataset_type_labels', []);
+        $user = auth()->user();
+        $firstName = strtok((string) $user->name, ' ') ?: $user->name;
+        $hour = (int) now()->format('G');
+        $greetingKey = $hour < 11 ? 'morning' : ($hour < 15 ? 'afternoon' : ($hour < 19 ? 'evening' : 'night'));
 
         // GET /api/v1/health answers a bare HealthResponse: {status, app, env, version}.
         // The db/redis probes live on /readiness, which this page never calls, so
         // they must not be rendered here as if they had been measured.
         $engineIsHealthy = ($engineHealth['status'] ?? null) === 'ok';
+
+        $total = (int) $stats['datasets'];
+        $committed = (int) $stats['committed'];
+        $quarantined = (int) $stats['quarantined'];
+        $importing = (int) $stats['importing'];
+        $passRate = $total > 0 ? round(($total - $quarantined) / $total * 100, 1) : null;
     @endphp
 
     <div class="page-header">
         <div class="row align-items-center">
             <div class="col">
-                <h1 class="page-title">Dashboard</h1>
-                <div class="page-subtitle">
-                    {{ __('dashboard.subtitle') }}
-                </div>
+                <div class="page-pretitle">{{ now()->locale(app()->getLocale())->translatedFormat('l, d F Y') }}</div>
+                <h1 class="page-title">{{ __('dashboard.greeting_'.$greetingKey, ['name' => $firstName]) }}</h1>
+                <div class="page-subtitle">{{ __('dashboard.subtitle') }}</div>
             </div>
+            @if ($user->isAnalyst())
+                <div class="col-auto ms-auto d-print-none">
+                    <a
+                        href="{{ route('datasets.create') }}"
+                        class="btn btn-primary"
+                    ><x-icon name="plus" />{{ __('dashboard.upload_dataset') }}</a>
+                </div>
+            @endif
         </div>
     </div>
 
     <div class="row row-cards mb-3">
         <div class="col-sm-6 col-lg-3">
-            <x-stat :label="__('dashboard.total_label')" :value="number_format((int) $stats['datasets'], 0, ',', '.')" hint="{{ __('dashboard.total_hint') }}" />
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center gap-3">
+                        <span class="avatar avatar-md bg-primary-lt text-primary" aria-hidden="true"><x-icon name="database" /></span>
+                        <div>
+                            <div class="text-secondary">{{ __('dashboard.metric_datasets') }}</div>
+                            <div class="h1 mb-0">{{ number_format($total, 0, ',', '.') }}</div>
+                        </div>
+                    </div>
+                    <div class="text-secondary small mt-2">{{ __('dashboard.metric_datasets_sub', ['count' => number_format($committed, 0, ',', '.')]) }}</div>
+                </div>
+            </div>
         </div>
         <div class="col-sm-6 col-lg-3">
-            <x-stat
-                :label="\App\Enums\DatasetStatus::Committed->localizedLabel()"
-                :value="number_format((int) $stats['committed'], 0, ',', '.')"
-                :hint="__('dashboard.committed_hint')"
-            />
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center gap-3">
+                        <span class="avatar avatar-md bg-azure-lt text-azure" aria-hidden="true"><x-icon name="activity" /></span>
+                        <div>
+                            <div class="text-secondary">{{ __('dashboard.metric_processing') }}</div>
+                            <div class="h1 mb-0">{{ number_format($importing, 0, ',', '.') }}</div>
+                        </div>
+                    </div>
+                    <div class="text-secondary small mt-2">{{ __('dashboard.processing_hint') }}</div>
+                </div>
+            </div>
         </div>
         <div class="col-sm-6 col-lg-3">
-            <x-stat
-                :label="\App\Enums\DatasetStatus::Quarantined->localizedLabel()"
-                :value="number_format((int) $stats['quarantined'], 0, ',', '.')"
-                :hint="__('dashboard.quarantined_hint')"
-            />
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center gap-3">
+                        <span class="avatar avatar-md bg-orange-lt text-orange" aria-hidden="true"><x-icon name="shield-check" /></span>
+                        <div>
+                            <div class="text-secondary">{{ __('dashboard.metric_quality') }}</div>
+                            <div class="h1 mb-0">{{ $passRate === null ? '—' : number_format($passRate, 1, ',', '.').'%' }}</div>
+                        </div>
+                    </div>
+                    <div class="text-secondary small mt-2">{{ __('dashboard.metric_quality_sub', ['count' => number_format($quarantined, 0, ',', '.')]) }}</div>
+                </div>
+            </div>
         </div>
-        {{-- Spans uploaded, previewing and importing, so it names the group
-             rather than borrowing the label of any one status. --}}
         <div class="col-sm-6 col-lg-3">
-            <x-stat :label="__('dashboard.processing_label')" :value="number_format((int) $stats['importing'], 0, ',', '.')" hint="{{ __('dashboard.processing_hint') }}" />
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center gap-3">
+                        <span class="avatar avatar-md bg-green-lt text-green" aria-hidden="true"><x-icon name="cpu" /></span>
+                        <div>
+                            <div class="text-secondary">{{ __('dashboard.metric_engine') }}</div>
+                            <div class="mt-1">
+                                @if (is_null($engineHealth))
+                                    <x-badge variant="warning">{{ __('dashboard.engine_unreachable') }}</x-badge>
+                                @elseif ($engineIsHealthy)
+                                    <x-badge variant="success">{{ __('dashboard.healthy') }}</x-badge>
+                                @else
+                                    <x-badge variant="danger">{{ __('dashboard.degraded') }}</x-badge>
+                                @endif
+                            </div>
+                        </div>
+                    </div>
+                    <div class="text-secondary small mt-2">
+                        @if (is_null($engineHealth))
+                            {{ __('dashboard.engine_unreachable_lead') }} <code>fastapi</code>
+                            {{ __('dashboard.engine_unreachable_middle') }} <code>AI_ENGINE_URL</code> {{ __('dashboard.engine_unreachable_trail') }}
+                        @else
+                            {{ $engineHealth['app'] ?? __('dashboard.unreported') }}
+                            @if (! empty($engineHealth['version']))
+                                &middot; {{ __('dashboard.version_badge', ['version' => $engineHealth['version']]) }}
+                            @endif
+                        @endif
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
-    <x-card
-        class="mb-3"
-        :title="__('dashboard.engine_title')"
-        description="{{ __('dashboard.engine_desc') }}"
-    >
-        @if (is_null($engineHealth))
-            <div role="status" class="d-flex flex-wrap align-items-center gap-2">
-                <x-badge variant="warning">{{ __('dashboard.engine_unreachable') }}</x-badge>
-                <p class="text-secondary">
-                    {{ __('dashboard.engine_unreachable_lead') }} <code>fastapi</code>
-                    {{ __('dashboard.engine_unreachable_middle') }} <code>AI_ENGINE_URL</code> {{ __('dashboard.engine_unreachable_trail') }}
-                </p>
-            </div>
-        @else
-            <dl class="datagrid">
-                <div class="datagrid-item">
-                    <dt class="datagrid-title">{{ __('dashboard.status_label') }}</dt>
-                    <dd class="datagrid-content">
-                        @if ($engineIsHealthy)
-                            <x-badge variant="success">{{ __('dashboard.healthy') }}</x-badge>
-                        @else
-                            <x-badge variant="danger">{{ __('dashboard.degraded') }}</x-badge>
-                            <span class="text-secondary">{{ $engineHealth['status'] ?? __('dashboard.unknown_status') }}</span>
-                        @endif
-                    </dd>
-                </div>
-                <div class="datagrid-item">
-                    <dt class="datagrid-title">{{ __('dashboard.app_label') }}</dt>
-                    <dd class="datagrid-content">
-                        {{ $engineHealth['app'] ?? __('dashboard.unreported') }}
-                    </dd>
-                </div>
-                <div class="datagrid-item">
-                    <dt class="datagrid-title">{{ __('dashboard.env_label') }}</dt>
-                    <dd class="datagrid-content">
-                        <span>{{ $engineHealth['env'] ?? __('dashboard.unreported') }}</span>
-                        @if (! empty($engineHealth['version']))
-                            <x-badge variant="neutral">{{ __('dashboard.version_badge', ['version' => $engineHealth['version']]) }}</x-badge>
-                        @endif
-                    </dd>
-                </div>
-            </dl>
-        @endif
-    </x-card>
-
-    <x-card
-        class="mb-3"
-        :title="__('dashboard.kpi_title')"
-        description="{{ __('dashboard.kpi_desc') }}"
-    >
-        @if (is_null($kpi))
-            <x-empty-state
-                :title="__('dashboard.kpi_empty_title')"
-                description="{{ __('dashboard.kpi_empty_desc') }}"
-            />
-        @else
-            <div class="row row-cards">
-                {{-- Rupiah carries no decimals and the engine already sends the
-                     percentage fields in 0-100, so they are passed through
-                     un-scaled. --}}
-                <div class="col-sm-6 col-lg-4">
-                    <x-stat :label="__('dashboard.revenue')" :value="\Illuminate\Support\Number::currency((float) ($kpi['revenue'] ?? 0), in: 'idr', locale: 'id', precision: 0)" />
-                </div>
-                <div class="col-sm-6 col-lg-4">
-                    <x-stat :label="__('dashboard.orders')" :value="number_format((int) ($kpi['orders'] ?? 0), 0, ',', '.')" />
-                </div>
-                <div class="col-sm-6 col-lg-4">
-                    <x-stat :label="__('dashboard.units')" :value="number_format((float) ($kpi['units'] ?? 0), 0, ',', '.')" />
-                </div>
-                <div class="col-sm-6 col-lg-4">
-                    <x-stat :label="__('dashboard.aov')" :value="\Illuminate\Support\Number::currency((float) ($kpi['aov'] ?? 0), in: 'idr', locale: 'id', precision: 0)" />
-                </div>
-                <div class="col-sm-6 col-lg-4">
-                    <x-stat
-                        :label="__('dashboard.growth')"
-                        :value="\Illuminate\Support\Number::percentage((float) ($kpi['growth_pct'] ?? 0), precision: 1, locale: 'id')"
-                        :hint="((float) ($kpi['growth_pct'] ?? 0)) >= 0 ? __('dashboard.growth_up') : __('dashboard.growth_down')"
-                    />
-                </div>
-                <div class="col-sm-6 col-lg-4">
-                    <x-stat
-                        :label="__('dashboard.margin')"
-                        :value="\Illuminate\Support\Number::percentage((float) ($kpi['margin_pct'] ?? 0), precision: 1, locale: 'id')"
-                        hint="{{ __('dashboard.margin_hint') }}"
-                    />
-                </div>
-            </div>
-        @endif
-    </x-card>
-
     <div class="row row-cards">
-        <div class="col-md-6">
+        <div class="col-lg-8">
             <x-card :title="__('dashboard.recent_title')" description="{{ __('dashboard.recent_desc') }}">
                 <x-slot:actions>
                     <a
@@ -152,23 +130,26 @@
                     <x-empty-state
                         :title="__('dashboard.empty_datasets_title')"
                         description="{{ __('dashboard.empty_datasets_desc') }}"
+                        icon="database"
                     >
-                        <x-slot:action>
-                            <a
-                                href="{{ route('datasets.create') }}"
-                                class="btn btn-primary"
-                            >{{ __('dashboard.upload_dataset') }}</a>
-                        </x-slot:action>
+                        @if (auth()->user()->isAnalyst())
+                            <x-slot:action>
+                                <a
+                                    href="{{ route('datasets.create') }}"
+                                    class="btn btn-primary"
+                                >{{ __('dashboard.upload_dataset') }}</a>
+                            </x-slot:action>
+                        @endif
                     </x-empty-state>
                 @else
                     <x-table-wrapper :label="__('dashboard.recent_table_label')">
-                        <table class="table table-vcenter card-table">
+                        <table class="table table-vcenter table-hover card-table">
                             <thead>
                                 <tr>
                                     <th scope="col">{{ __('dashboard.table_dataset') }}</th>
-                                    <th scope="col">{{ __('dashboard.table_type') }}</th>
                                     <th scope="col">{{ __('dashboard.table_status') }}</th>
                                     <th scope="col" class="text-end">{{ __('dashboard.table_rows') }}</th>
+                                    <th scope="col" class="text-end">{{ __('dashboard.table_updated') }}</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -181,9 +162,9 @@
                                             >{{ $dataset->name }}</a>
                                             <span class="d-block text-secondary small">{{ $dataset->source_filename ?: __('dashboard.no_file') }}</span>
                                         </td>
-                                        <td>{{ $typeLabels[$dataset->dataset_type] ?? $dataset->dataset_type }}</td>
                                         <td><x-badge :class="$status->badgeClass()">{{ $status->localizedLabel() }}</x-badge></td>
                                         <td class="text-end tabular-nums">{{ number_format((int) $dataset->row_count, 0, ',', '.') }}</td>
+                                        <td class="text-end text-secondary text-nowrap">{{ $dataset->updated_at?->locale(app()->getLocale())->diffForHumans() }}</td>
                                     </tr>
                                 @endforeach
                             </tbody>
@@ -193,8 +174,12 @@
             </x-card>
         </div>
 
-        <div class="col-md-6">
-            <x-card :title="__('dashboard.threads_title')" description="{{ __('dashboard.threads_desc') }}">
+        <div class="col-lg-4">
+            <x-card
+                class="mb-3"
+                :title="__('dashboard.threads_title')"
+                description="{{ __('dashboard.threads_desc') }}"
+            >
                 <x-slot:actions>
                     <a
                         href="{{ route('assistant.index') }}"
@@ -206,16 +191,24 @@
                     <x-empty-state
                         :title="__('dashboard.empty_threads_title')"
                         description="{{ __('dashboard.empty_threads_desc') }}"
-                    />
+                        icon="message-chatbot"
+                    >
+                        <x-slot:action>
+                            <a
+                                href="{{ route('assistant.index') }}"
+                                class="btn btn-primary"
+                            >{{ __('dashboard.start_thread') }}</a>
+                        </x-slot:action>
+                    </x-empty-state>
                 @else
                     <ul class="list-group list-group-flush">
                         @foreach ($recentThreads as $thread)
-                            <li class="list-group-item">
+                            <li class="list-group-item px-0">
                                 <div>
                                     <a
                                         href="{{ route('assistant.threads.show', $thread) }}"
                                     >{{ $thread->title ?: __('dashboard.no_thread_title') }}</a>
-                                    <p class="text-secondary small">
+                                    <p class="text-secondary small mb-0">
                                         {{ __('dashboard.messages_count', ['count' => number_format((int) $thread->message_count, 0, ',', '.')]) }}
                                         @if ($thread->last_message_at)
                                             &middot; {{ $thread->last_message_at->locale('id')->translatedFormat('d M Y H:i') }}
@@ -226,6 +219,25 @@
                         @endforeach
                     </ul>
                 @endif
+            </x-card>
+
+            <x-card :title="__('dashboard.quick_title')">
+                <div class="d-grid gap-2">
+                    @if (auth()->user()->isAnalyst())
+                        <a
+                            href="{{ route('datasets.create') }}"
+                            class="btn btn-outline-primary justify-content-start"
+                        ><x-icon name="plus" />{{ __('dashboard.upload_dataset') }}</a>
+                    @endif
+                    <a
+                        href="{{ route('assistant.index') }}"
+                        class="btn btn-outline-primary justify-content-start"
+                    ><x-icon name="message-chatbot" />{{ __('dashboard.quick_assistant') }}</a>
+                    <a
+                        href="{{ route('reports.index') }}"
+                        class="btn btn-outline-primary justify-content-start"
+                    ><x-icon name="report" />{{ __('dashboard.quick_reports') }}</a>
+                </div>
             </x-card>
         </div>
     </div>

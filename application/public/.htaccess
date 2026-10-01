@@ -5,6 +5,12 @@
 
     RewriteEngine On
 
+    # Canonical base: this vhost already serves /public as its document root,
+    # so a literal /application/public prefix in the URL is a wrong-base trap:
+    # every asset URL 404s and every redirect keeps the prefix. Strip it.
+    RewriteCond %{REQUEST_URI} ^/application/public(/.*)?$
+    RewriteRule ^application/public(?:/(.*))?$ /$1 [R=301,L]
+
     # Handle Authorization Header
     RewriteCond %{HTTP:Authorization} .
     RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]

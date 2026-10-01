@@ -98,7 +98,7 @@
                     </x-field>
                 </div>
                 <div class="col-md-6 d-flex align-items-end">
-                    <button type="submit" class="btn btn-primary">{{ __('reports.create_now') }}</button>
+                    <button type="submit" class="btn btn-primary"><x-icon name="sparkles" />{{ __('reports.create_now') }}</button>
                 </div>
             </form>
         @endif

@@ -1,6 +1,9 @@
-@props(['title', 'description' => null])
+@props(['title', 'description' => null, 'icon' => null])
 
 <div {{ $attributes->merge(['class' => 'empty']) }}>
+    @if ($icon)
+        <span class="avatar avatar-lg bg-primary-lt text-primary mb-3" aria-hidden="true"><x-icon :name="$icon" /></span>
+    @endif
     <p class="empty-title">{{ $title }}</p>
 
     @if ($description)

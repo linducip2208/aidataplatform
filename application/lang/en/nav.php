@@ -7,9 +7,9 @@ return [
     'main_navigation' => 'Main navigation',
 
     'sections' => [
-        'main' => 'Main',
+        'overview' => 'Overview',
         'data' => 'Data',
-        'analytics_ai' => 'Analytics & AI',
+        'ai_analytics' => 'AI & Analytics',
         'admin' => 'Administration',
     ],
 
@@ -36,6 +36,10 @@ return [
 
     'change_password' => 'Change password',
     'logout' => 'Sign out',
+    'search_label' => 'Search datasets',
+    'search_placeholder' => 'Search datasets…',
+    'notifications' => 'Alerts',
+    'help' => 'Help',
     'footer' => 'UI orchestrated by Laravel, heavy compute served by the AI engine.',
 
     'language' => 'Language',

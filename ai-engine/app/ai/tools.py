@@ -216,7 +216,11 @@ def _load_frame_strict(table: str, db_session, window_days: int = FRAME_WINDOW_D
                 DimProduct, FactSales.product_id == DimProduct.id).outerjoin(
                 DimBranch, FactSales.branch_id == DimBranch.id).filter(
                 FactSales.transaction_date >= cutoff).order_by(
-                FactSales.transaction_date.desc().nullslast()).limit(FRAME_ROW_LIMIT)
+                # Portable "nulls last": NULLS LAST is Postgres/SQLite-only
+                # and MySQL rejects it with a syntax error. IS NOT NULL
+                # sorts 1-first on every dialect, so dated rows lead.
+                FactSales.transaction_date.is_not(None).desc(),
+                FactSales.transaction_date.desc()).limit(FRAME_ROW_LIMIT)
             rows = [{"revenue": r[0] or 0, "quantity": r[1] or 0, "transaction_date": r[2],
                      "customer_name": r[3] or "", "product_name": r[4] or "",
                      "branch_name": r[5] or "", "category": r[6] or ""} for r in q.all()]
@@ -227,7 +231,8 @@ def _load_frame_strict(table: str, db_session, window_days: int = FRAME_WINDOW_D
             q = db_session.query(FactInventory.stock_qty, DimProduct.product_name).outerjoin(
                 DimProduct, FactInventory.product_id == DimProduct.id).filter(
                 FactInventory.snapshot_date >= cutoff).order_by(
-                FactInventory.snapshot_date.desc().nullslast()).limit(FRAME_ROW_LIMIT)
+                FactInventory.snapshot_date.is_not(None).desc(),
+                FactInventory.snapshot_date.desc()).limit(FRAME_ROW_LIMIT)
             return pd.DataFrame([{"product_name": r[1] or "", "stock_qty": r[0] or 0} for r in q.all()])
     except ToolError:
         raise

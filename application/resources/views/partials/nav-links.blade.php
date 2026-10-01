@@ -8,7 +8,7 @@
                     href="{{ route($item['route']) }}"
                     class="nav-link"
                     @if (request()->routeIs($item['pattern'])) aria-current="page" @endif
-                ><span class="nav-link-title">{{ __('nav.items.'.$item['key']) }}</span></a>
+                ><span class="nav-link-icon"><x-icon :name="$item['icon']" /></span><span class="nav-link-title">{{ __('nav.items.'.$item['key']) }}</span></a>
             </li>
         @endif
     @endforeach
@@ -23,7 +23,7 @@
                         href="{{ route($item['route']) }}"
                         class="nav-link"
                         @if (request()->routeIs($item['pattern'])) aria-current="page" @endif
-                    ><span class="nav-link-title">{{ __('nav.items.'.$item['key']) }}</span></a>
+                    ><span class="nav-link-icon"><x-icon :name="$item['icon']" /></span><span class="nav-link-title">{{ __('nav.items.'.$item['key']) }}</span></a>
                 </li>
             @endif
         @endforeach

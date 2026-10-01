@@ -125,7 +125,7 @@
                             <button
                                 type="submit"
                                 class="btn btn-primary"
-                            >{{ __('assistant.submit') }}</button>
+                            ><x-icon name="send" />{{ __('assistant.submit') }}</button>
                             <a
                                 href="{{ route('assistant.index') }}"
                                 @if (! $thread || $thread->getKey() === $threads->first()?->getKey()) aria-current="page" @endif

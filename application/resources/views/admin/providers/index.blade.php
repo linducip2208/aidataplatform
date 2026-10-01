@@ -17,7 +17,7 @@
                 </div>
             </div>
             <div class="col-auto ms-auto">
-                <a href="{{ route('admin.providers.create') }}" class="btn btn-primary">{{ __('admin.providers_add') }}</a>
+                <a href="{{ route('admin.providers.create') }}" class="btn btn-primary"><x-icon name="plus" />{{ __('admin.providers_add') }}</a>
             </div>
         </div>
     </div>
@@ -57,7 +57,11 @@
                                     <div class="small text-secondary text-truncate" style="max-width: 22rem;">{{ $provider->base_url }}</div>
                                 </td>
                                 <td class="small text-secondary">{{ $provider->typeLabel() }}</td>
-                                <td><code>{{ $provider->model }}</code></td>
+                                <td><code>{{ $provider->model }}</code>
+                                    @if ($provider->models_count > 0)
+                                        <span class="d-block small text-secondary mt-1">{{ __('admin.providers_models_count', ['count' => $provider->models_count]) }}</span>
+                                    @endif
+                                </td>
                                 <td class="text-end">{{ $provider->priority }}</td>
                                 <td>
                                     <x-badge variant="{{ $provider->is_active ? 'success' : 'neutral' }}">
@@ -105,6 +109,17 @@
                                             </div>
                                             <button type="submit" class="btn btn-sm btn-primary">{{ __('admin.providers_publish') }}</button>
                                         </form>
+                                        @if ($provider->usesResponsesApi())
+                                            <form method="POST" action="{{ route('admin.providers.discover') }}" class="d-flex flex-wrap gap-2 align-items-end">
+                                                @csrf
+                                                <input type="hidden" name="provider_id" value="{{ $provider->getKey() }}">
+                                                <div>
+                                                    <label for="discover-key-{{ $provider->getKey() }}" class="form-label small">{{ __('admin.providers_discover_key_label') }}</label>
+                                                    <input id="discover-key-{{ $provider->getKey() }}" name="api_key" type="password" autocomplete="off" class="form-control form-control-sm" placeholder="{{ __('admin.providers_test_key_placeholder') }}">
+                                                </div>
+                                                <button type="submit" class="btn btn-sm">{{ __('admin.providers_discover') }}</button>
+                                            </form>
+                                        @endif
                                     </div>
                                 </td>
                             </tr>

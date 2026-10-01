@@ -3,8 +3,8 @@
 use App\Http\Controllers\Admin\AiProviderController;
 use App\Http\Controllers\Admin\AuditLogController;
 use App\Http\Controllers\Admin\OrganizationController;
-use App\Http\Controllers\Admin\WebhookController;
 use App\Http\Controllers\Admin\UserController;
+use App\Http\Controllers\Admin\WebhookController;
 use App\Http\Controllers\AiCostController;
 use App\Http\Controllers\AlertController;
 use App\Http\Controllers\AnalyticsController;
@@ -111,6 +111,9 @@ Route::middleware('auth')->group(function (): void {
         Route::post('/admin/providers/{provider}/toggle', [AiProviderController::class, 'toggle'])->name('admin.providers.toggle');
         Route::post('/admin/providers/{provider}/test', [AiProviderController::class, 'test'])->name('admin.providers.test');
         Route::post('/admin/providers/{provider}/publish', [AiProviderController::class, 'publish'])->name('admin.providers.publish');
+        Route::post('/admin/providers/probe', [AiProviderController::class, 'probe'])->name('admin.providers.probe');
+        Route::post('/admin/providers/discover', [AiProviderController::class, 'discover'])->name('admin.providers.discover');
+        Route::post('/admin/providers/{provider}/test-model', [AiProviderController::class, 'testModel'])->name('admin.providers.test-model');
         Route::post('/admin/users', [UserController::class, 'store'])->name('admin.users.store');
         Route::patch('/admin/users/{user}', [UserController::class, 'update'])->name('admin.users.update');
         Route::delete('/admin/users/{user}', [UserController::class, 'destroy'])->name('admin.users.destroy');

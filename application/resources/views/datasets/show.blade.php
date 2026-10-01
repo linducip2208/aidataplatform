@@ -173,7 +173,7 @@
                             type="submit"
                             @disabled(! $hasJob)
                             class="btn btn-primary"
-                        >{{ $hasProfile ? __('datasets.show_preview_rerun') : __('datasets.show_preview_run') }}</button>
+                        ><x-icon name="eye" />{{ $hasProfile ? __('datasets.show_preview_rerun') : __('datasets.show_preview_run') }}</button>
 
                         @unless ($hasJob)
                             <p class="text-secondary small">{{ __('datasets.show_preview_disabled') }}</p>
