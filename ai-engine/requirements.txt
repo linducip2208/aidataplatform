@@ -48,7 +48,7 @@ xlrd>=2.0
 lxml>=5.2
 filetype>=1.2
 
-scikit-learn>=1.4
+scikit-learn>=1.9.1
 xgboost>=2.0
 lightgbm>=4.3
 joblib>=1.4
