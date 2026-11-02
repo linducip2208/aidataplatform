@@ -19,7 +19,7 @@
         "ext-mbstring": "*",
         "ext-pdo_pgsql": "*",
         "ext-redis": "*",
-        "laravel/framework": "13",
+        "laravel/framework": "13.39.0",
         "laravel/sanctum": "^4.0",
         "laravel/tinker": "3"
     },
